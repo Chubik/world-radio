@@ -1,0 +1,67 @@
+use crate::tui::model::StationRow;
+use radio_core::audio::Status;
+use radio_core::catalog::SearchQuery;
+
+#[derive(Debug, Clone)]
+pub enum Msg {
+    Quit,
+    OpenSettings,
+    OpenHelp,
+    CloseOverlay,
+    SettingsNav(bool),
+    SettingsToggle,
+    SettingsAdjust(bool),
+    KeybindNav(bool),
+    KeybindStartCapture,
+    CaptureKey(crate::tui::keybind::KeyChord),
+    KeybindReset,
+    SelectNext,
+    SelectPrev,
+    SelectPageDown,
+    SelectPageUp,
+    EnterSearch,
+    SearchChar(char),
+    SearchBackspace,
+    SearchClear,
+    SubmitSearch,
+    PlaySelected,
+    Shuffle,
+    CycleSort,
+    ToggleHideUnplayable,
+    Stop,
+    ToggleFavoriteSelected,
+    BlacklistSelected,
+    VolumeUp,
+    VolumeDown,
+    AudioStatus(Status),
+    SearchResults(Vec<StationRow>),
+    SearchFailed(String),
+    SetOffline(bool),
+    AutoplayStation(StationRow),
+    FocusToggle,
+    FilterNavNext,
+    FilterNavPrev,
+    FilterOptionNext,
+    FilterOptionPrev,
+    FilterApply,
+    FilterClear,
+    FilterClearAll,
+    FacetsLoaded(radio_core::catalog::Facets),
+    Tick(std::time::Instant),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum Effect {
+    Search(SearchQuery, crate::tui::model::BrowseFilters),
+    LoadFacets,
+    Play(String),
+    StopAudio,
+    SetVolume(f32),
+    SetCrossfade(bool),
+    ToggleFavorite(String),
+    Blacklist(String),
+    RecordHistory(String),
+    MarkFailed(String),
+    SaveState,
+}
