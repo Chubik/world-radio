@@ -279,7 +279,7 @@ impl BrowseState {
         match self.sort {
             SortOrder::ApiOrder => {}
             SortOrder::Name => {
-                rows.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                rows.sort_by_key(|r| r.name.to_lowercase());
             }
             SortOrder::Country => {
                 rows.sort_by(|a, b| {
