@@ -61,4 +61,3 @@ A Cargo workspace:
 ## License
 
 [MIT](LICENSE) © Valentyn Chub
-
