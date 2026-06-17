@@ -9,6 +9,8 @@ pub enum WorkerReq {
     LoadFacets,
     ToggleFavorite(String),
     Blacklist(String),
+    Recheck(String),
+    RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
     ResolveAndPlay(String),
@@ -56,6 +58,18 @@ pub fn spawn(
                 WorkerReq::LoadFacets => handle_load_facets(&catalog, &msg_tx),
                 WorkerReq::Blacklist(uuid) => {
                     catalog.toggle_blacklist(&uuid);
+                }
+                WorkerReq::Recheck(uuid) => {
+                    catalog.clear_health(&uuid);
+                    if let Err(e) = catalog.save_health(&paths.health) {
+                        crate::log_warn!("worker: failed to save health: {e}");
+                    }
+                }
+                WorkerReq::RecheckAll => {
+                    catalog.clear_all_health();
+                    if let Err(e) = catalog.save_health(&paths.health) {
+                        crate::log_warn!("worker: failed to save health: {e}");
+                    }
                 }
                 WorkerReq::ToggleFavorite(uuid) => {
                     catalog.toggle_favorite(&uuid);
@@ -134,6 +148,10 @@ fn handle_search(
         )),
         StatusFilter::Blocked => Msg::SearchResults(narrow(
             resolve(catalog, catalog.blacklist_ids(), false),
+            filters,
+        )),
+        StatusFilter::Dead => Msg::SearchResults(narrow(
+            resolve_visible(catalog, &catalog.hidden_ids()),
             filters,
         )),
     };
@@ -225,6 +243,19 @@ fn resolve(catalog: &Catalog, ids: &[String], favorite: bool) -> Vec<StationRow>
                 favorite || catalog.is_favorite(uuid),
                 catalog.is_hidden(uuid),
             )),
+            Ok(None) => None,
+            Err(e) => {
+                crate::log_warn!("worker: station_by_uuid({uuid}) failed: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
+fn resolve_visible(catalog: &Catalog, ids: &[String]) -> Vec<StationRow> {
+    ids.iter()
+        .filter_map(|uuid| match catalog.station_by_uuid(uuid) {
+            Ok(Some(s)) => Some(station_to_row(&s, catalog.is_favorite(uuid), false)),
             Ok(None) => None,
             Err(e) => {
                 crate::log_warn!("worker: station_by_uuid({uuid}) failed: {e}");

@@ -92,6 +92,7 @@ fn status_options(model: &Model) -> Vec<(String, bool)> {
         ("favorites".into(), s == StatusFilter::Favorites),
         ("recent".into(), s == StatusFilter::Recent),
         ("blocked".into(), s == StatusFilter::Blocked),
+        ("dead".into(), s == StatusFilter::Dead),
     ]
 }
 
