@@ -18,11 +18,15 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         Block::default().style(Style::default().bg(pal.bg).fg(pal.fg)),
         area,
     );
-    render(model, pal, frame, area);
+    let lines = build_active_group_lines(model, pal);
+    let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
+    frame.render_widget(p, area);
 }
 
-fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
-    let groups = [
+type FilterGroup = (&'static str, Vec<(String, bool)>, bool);
+
+fn groups(model: &Model) -> [FilterGroup; 5] {
+    [
         ("STATUS", status_options(model), false),
         (
             "COUNTRY",
@@ -44,7 +48,53 @@ fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
             bitrate_options(model.browse.filters.bitrate_min),
             false,
         ),
-    ];
+    ]
+}
+
+fn build_active_group_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
+    let groups = groups(model);
+    let (active_group, active_option) = match model.browse.focus {
+        BrowseFocus::Filters { group, option } => (group, Some(option)),
+        BrowseFocus::Stations => (0, None),
+    };
+
+    let mut tabs: Vec<ratatui::text::Span<'static>> = Vec::new();
+    for (gi, (name, _, _)) in groups.iter().enumerate() {
+        let style = match gi == active_group {
+            true => Style::default().fg(pal.accent).bold(),
+            false => Style::default().fg(pal.dim),
+        };
+        if gi > 0 {
+            tabs.push(ratatui::text::Span::styled(
+                " · ",
+                Style::default().fg(pal.dim),
+            ));
+        }
+        tabs.push(ratatui::text::Span::styled(name.to_string(), style));
+    }
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(tabs));
+    lines.push(Line::styled(
+        "← → switch group",
+        Style::default().fg(pal.dim),
+    ));
+    lines.push(Line::from(""));
+
+    let (_, opts, multi) = &groups[active_group];
+    for (oi, (label, selected)) in opts.iter().enumerate() {
+        let marker = marker_for(*multi, oi == 0, *selected);
+        let row_style = match Some(oi) == active_option {
+            true => Style::default().fg(pal.peak).bold(),
+            false => Style::default().fg(pal.fg),
+        };
+        lines.push(Line::styled(format!("{marker} {label}"), row_style));
+    }
+    lines
+}
+
+fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
+    let groups = groups(model);
 
     let (active_group, active_option) = match model.browse.focus {
         BrowseFocus::Filters { group, option } => (Some(group), Some(option)),
