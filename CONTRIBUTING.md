@@ -12,8 +12,8 @@ pull request that passes CI.
 2. Make your change. Keep commits focused and the message in the imperative mood
    ("fix crossfade gap", not "fixed stuff").
 3. Open a pull request against `main` with a short description of what and why.
-4. CI (`fmt` · `clippy` · `test`) must be green, and the PR needs a maintainer
-   approval before it can merge.
+4. CI (`fmt` · `clippy` · `test`) must be green before a PR can merge. The
+   maintainer reviews and merges.
 
 ## Before you push
 
