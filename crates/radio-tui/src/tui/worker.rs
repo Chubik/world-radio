@@ -1,6 +1,6 @@
 use crate::tui::message::Msg;
 use crate::tui::model::{RowState, StationRow};
-use radio_core::catalog::{api, Catalog, RadioBrowser, SearchQuery, Station};
+use radio_core::catalog::{api, Catalog, SearchQuery, Station};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -217,8 +217,7 @@ fn is_query_empty(q: &SearchQuery) -> bool {
 }
 
 fn online_search(catalog: &Catalog, q: &SearchQuery) -> anyhow::Result<Vec<StationRow>> {
-    let base = api::resolve_mirror()?;
-    let rb = RadioBrowser::with_base_url(base);
+    let rb = api::resolve();
     let stations = rb.search(q)?;
     catalog.ingest(&stations)?;
     let filtered = catalog.search_offline_filtered(q)?;
