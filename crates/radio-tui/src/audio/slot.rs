@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const CROSSFADE_MS: f32 = 450.0;
-const RAMP_STEP_MS: u64 = 10;
+const TICK_MS: u64 = 10;
 
 pub struct ControllerCfg {
     pub out_rate: u32,
@@ -39,6 +39,10 @@ impl SlotIo {
     }
 }
 
+/// A running decoder thread. Aborting it NEVER blocks the controller: it only
+/// flips the abort flag and hands the JoinHandle to the cemetery, which is reaped
+/// non-blockingly. The thread winds down on its own once it leaves the network
+/// call it is stuck in.
 struct DecodeHandle {
     abort: Arc<AtomicBool>,
     ready_rx: Receiver<()>,
@@ -47,12 +51,20 @@ struct DecodeHandle {
 }
 
 impl DecodeHandle {
-    fn stop(mut self) {
+    /// Signal the thread to stop and return its JoinHandle for the cemetery.
+    /// Does NOT join — the controller must never block on a stuck network read.
+    fn abort(mut self) -> Option<JoinHandle<()>> {
         self.abort.store(true, Ordering::Relaxed);
-        if let Some(j) = self.join.take() {
-            let _ = j.join();
-        }
+        self.join.take()
     }
+}
+
+/// An active crossfade in progress (non-blocking; stepped each controller tick).
+struct Fade {
+    start: Instant,
+    dur_ms: f32,
+    new_slot: usize,
+    old_slot: Option<usize>,
 }
 
 pub struct Controller {
@@ -61,6 +73,8 @@ pub struct Controller {
     tap_prod: Arc<Mutex<SampleProd>>,
     active: Option<(usize, DecodeHandle)>,
     incoming: Option<(usize, DecodeHandle)>,
+    fade: Option<Fade>,
+    cemetery: Vec<JoinHandle<()>>,
 }
 
 impl Controller {
@@ -71,6 +85,8 @@ impl Controller {
             tap_prod: Arc::new(Mutex::new(tap_prod)),
             active: None,
             incoming: None,
+            fade: None,
+            cemetery: Vec::new(),
         }
     }
 
@@ -91,10 +107,12 @@ impl Controller {
                     Command::SetVolume(_) => {}
                 }
             }
+            self.step_fade();
             self.poll_incoming(status_tx);
-            std::thread::sleep(Duration::from_millis(RAMP_STEP_MS));
+            self.reap();
+            std::thread::sleep(Duration::from_millis(TICK_MS));
         }
-        self.stop_all();
+        self.shutdown();
     }
 
     fn free_slot(&self) -> usize {
@@ -104,10 +122,31 @@ impl Controller {
         }
     }
 
-    fn start_incoming(&mut self, url: &str, status_tx: &Sender<Status>) {
-        if let Some((_, h)) = self.incoming.take() {
-            h.stop();
+    fn bury(&mut self, handle: DecodeHandle) {
+        if let Some(j) = handle.abort() {
+            self.cemetery.push(j);
         }
+    }
+
+    fn reap(&mut self) {
+        let mut i = 0;
+        while i < self.cemetery.len() {
+            if self.cemetery[i].is_finished() {
+                let j = self.cemetery.swap_remove(i);
+                let _ = j.join();
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn start_incoming(&mut self, url: &str, status_tx: &Sender<Status>) {
+        // a newer Play supersedes a still-pending incoming one
+        if let Some((_, h)) = self.incoming.take() {
+            self.bury(h);
+        }
+        // also cancel an in-progress fade — its new slot is no longer the target
+        self.fade = None;
         let slot = self.free_slot();
         self.slots[slot].gain.set(0.0);
         self.slots[slot].drain();
@@ -123,8 +162,8 @@ impl Controller {
         self.incoming = Some((slot, handle));
     }
 
-    fn poll_incoming(&mut self, status_tx: &Sender<Status>) {
-        let Some((slot, handle)) = self.incoming.as_mut() else {
+    fn poll_incoming(&mut self, _status_tx: &Sender<Status>) {
+        let Some((_, handle)) = self.incoming.as_mut() else {
             return;
         };
         if !handle.ready_seen && handle.ready_rx.try_recv().is_ok() {
@@ -134,40 +173,45 @@ impl Controller {
             self.check_active_finished();
             return;
         }
-        let slot = *slot;
-        let crossfade = self.cfg.crossfade_on.load(Ordering::Relaxed);
+        // incoming produced audio — promote it and start the crossfade
         let (incoming_slot, incoming_handle) = self.incoming.take().unwrap();
         let old = self.active.take();
-        self.run_crossfade(slot, crossfade, old.as_ref().map(|(i, _)| *i));
-        let _ = status_tx;
-        self.active = Some((incoming_slot, incoming_handle));
-        if let Some((_, h)) = old {
-            h.stop();
-        }
-        let _ = slot;
-    }
-
-    fn run_crossfade(&mut self, new_slot: usize, crossfade: bool, old_slot: Option<usize>) {
+        let old_slot = old.as_ref().map(|(i, _)| *i);
+        let crossfade = self.cfg.crossfade_on.load(Ordering::Relaxed);
         let dur = match crossfade {
             true => CROSSFADE_MS,
             false => 0.0,
         };
-        let start = Instant::now();
-        loop {
-            let elapsed = start.elapsed().as_secs_f32() * 1000.0;
-            let mix = crossfade_mix(elapsed, dur);
-            self.slots[new_slot].gain.set(mix.gain_new);
-            if let Some(o) = old_slot {
-                self.slots[o].gain.set(mix.gain_old);
-            }
-            if mix.done {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(RAMP_STEP_MS));
+        self.fade = Some(Fade {
+            start: Instant::now(),
+            dur_ms: dur,
+            new_slot: incoming_slot,
+            old_slot,
+        });
+        self.active = Some((incoming_slot, incoming_handle));
+        if let Some((_, h)) = old {
+            self.bury(h);
         }
-        self.slots[new_slot].gain.set(1.0);
-        if let Some(o) = old_slot {
-            self.slots[o].gain.set(0.0);
+        // apply the first fade frame immediately
+        self.step_fade();
+    }
+
+    fn step_fade(&mut self) {
+        let Some(fade) = self.fade.as_ref() else {
+            return;
+        };
+        let elapsed = fade.start.elapsed().as_secs_f32() * 1000.0;
+        let mix = crossfade_mix(elapsed, fade.dur_ms);
+        self.slots[fade.new_slot].gain.set(mix.gain_new);
+        if let Some(o) = fade.old_slot {
+            self.slots[o].gain.set(mix.gain_old);
+        }
+        if mix.done {
+            self.slots[fade.new_slot].gain.set(1.0);
+            if let Some(o) = fade.old_slot {
+                self.slots[o].gain.set(0.0);
+            }
+            self.fade = None;
         }
     }
 
@@ -179,19 +223,29 @@ impl Controller {
         if finished {
             if let Some((slot, h)) = self.active.take() {
                 self.slots[slot].gain.set(0.0);
-                h.stop();
+                self.bury(h);
             }
         }
     }
 
     fn stop_all(&mut self) {
+        self.fade = None;
         if let Some((slot, h)) = self.active.take() {
             self.slots[slot].gain.set(0.0);
-            h.stop();
+            self.bury(h);
         }
         if let Some((slot, h)) = self.incoming.take() {
             self.slots[slot].gain.set(0.0);
-            h.stop();
+            self.bury(h);
+        }
+    }
+
+    /// Final teardown on engine shutdown — here we CAN block, briefly, to let
+    /// threads exit cleanly before the process moves on.
+    fn shutdown(&mut self) {
+        self.stop_all();
+        for j in self.cemetery.drain(..) {
+            let _ = j.join();
         }
     }
 }
@@ -252,7 +306,13 @@ fn decode_slot(
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
 
+    if abort.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let icy = stream::open(url)?;
+    if abort.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let source = stream::IcyMediaSource::new(icy);
     let shared_title = source.shared_title();
     let mss = MediaSourceStream::new(Box::new(source), Default::default());
@@ -264,6 +324,9 @@ fn decode_slot(
             MetadataOptions::default(),
         )
         .map_err(|e| anyhow::anyhow!("probe failed: {e}"))?;
+    if abort.load(Ordering::Relaxed) {
+        return Ok(());
+    }
 
     let track = format
         .default_track(TrackType::Audio)
@@ -358,6 +421,45 @@ fn decode_slot(
             } else {
                 std::thread::sleep(Duration::from_millis(5));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abort_is_non_blocking() {
+        // A handle whose thread sleeps for a long time must abort instantly.
+        let abort = Arc::new(AtomicBool::new(false));
+        let abort_t = Arc::clone(&abort);
+        let (_ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        let join = std::thread::spawn(move || {
+            for _ in 0..200 {
+                if abort_t.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let h = DecodeHandle {
+            abort,
+            ready_rx,
+            join: Some(join),
+            ready_seen: false,
+        };
+        let start = Instant::now();
+        let reaped = h.abort();
+        // abort() must return immediately, not wait for the thread
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "abort() blocked for {:?}",
+            start.elapsed()
+        );
+        // the returned thread eventually finishes once it sees the flag
+        if let Some(j) = reaped {
+            let _ = j.join();
         }
     }
 }
