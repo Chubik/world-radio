@@ -20,6 +20,7 @@ pub enum StatusFilter {
     Favorites,
     Recent,
     Blocked,
+    Dead,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

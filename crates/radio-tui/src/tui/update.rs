@@ -131,6 +131,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::ToggleFavoriteSelected => toggle_favorite_selected(model),
         Msg::BlacklistSelected => blacklist_selected(model),
+        Msg::RecheckSelected => recheck_selected(model),
         Msg::VolumeUp => {
             model.volume = (model.volume + VOLUME_STEP).clamp(0.0, 1.0);
             vec![Effect::SetVolume(model.volume)]
@@ -368,6 +369,19 @@ fn blacklist_selected(model: &mut Model) -> Vec<Effect> {
     vec![Effect::Blacklist(uuid), Effect::SaveState]
 }
 
+fn recheck_selected(model: &mut Model) -> Vec<Effect> {
+    let effect = match model.browse.selected_row().map(|r| r.uuid.clone()) {
+        Some(uuid) => Effect::Recheck(uuid),
+        None => Effect::RecheckAll,
+    };
+    let q = model.browse.filters.to_query(&model.browse.query);
+    vec![
+        effect,
+        Effect::SaveState,
+        Effect::Search(q, model.browse.filters.clone()),
+    ]
+}
+
 const DEBOUNCE_MS: u64 = 500;
 
 fn focus_toggle(model: &mut Model) -> Vec<Effect> {
@@ -437,6 +451,7 @@ fn apply_option(model: &mut Model, group: usize, option: usize) {
             1 => StatusFilter::Favorites,
             2 => StatusFilter::Recent,
             3 => StatusFilter::Blocked,
+            4 => StatusFilter::Dead,
             _ => StatusFilter::All,
         };
         return;
@@ -1010,6 +1025,29 @@ mod tests {
     }
 
     #[test]
+    fn recheck_selected_rechecks_one_and_researches() {
+        let mut m = model();
+        m.browse.rows = vec![dead_row("d1"), dead_row("d2")];
+        m.browse.selected = 1;
+        let fx = update(&mut m, Msg::RecheckSelected);
+        let kinds: Vec<_> = fx.iter().map(eff_kind).collect();
+        assert!(kinds.contains(&"recheck"));
+        assert!(!kinds.contains(&"recheckall"));
+        assert!(kinds.contains(&"search"));
+    }
+
+    #[test]
+    fn recheck_with_empty_list_rechecks_all() {
+        let mut m = model();
+        m.browse.rows = vec![];
+        let fx = update(&mut m, Msg::RecheckSelected);
+        let kinds: Vec<_> = fx.iter().map(eff_kind).collect();
+        assert!(kinds.contains(&"recheckall"));
+        assert!(!kinds.contains(&"recheck"));
+        assert!(kinds.contains(&"search"));
+    }
+
+    #[test]
     fn toggle_hide_unplayable_flips_flag_and_searches() {
         let mut m = model();
         assert!(!m.browse.filters.hide_unplayable);
@@ -1130,6 +1168,8 @@ mod tests {
             Effect::SetCrossfade(_) => "setcrossfade",
             Effect::ToggleFavorite(_) => "toggle",
             Effect::Blacklist(_) => "blacklist",
+            Effect::Recheck(_) => "recheck",
+            Effect::RecheckAll => "recheckall",
             Effect::RecordHistory(_) => "history",
             Effect::MarkFailed(_) => "markfailed",
             Effect::SaveState => "savestate",
