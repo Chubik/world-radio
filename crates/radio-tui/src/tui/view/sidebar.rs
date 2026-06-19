@@ -19,8 +19,20 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         area,
     );
     let lines = build_active_group_lines(model, pal);
+    let box_area = centered_box(area, lines.len() as u16 + 2);
     let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
-    frame.render_widget(p, area);
+    frame.render_widget(p, box_area);
+}
+
+fn centered_box(area: Rect, content_height: u16) -> Rect {
+    let h = content_height.min(area.height);
+    let y = area.y + (area.height.saturating_sub(h)) / 3;
+    Rect {
+        x: area.x,
+        y,
+        width: area.width,
+        height: h,
+    }
 }
 
 type FilterGroup = (&'static str, Vec<(String, bool)>, bool);
