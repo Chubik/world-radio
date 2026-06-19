@@ -36,7 +36,16 @@ cargo run --release -p radio-tui
 Press `?` in the app for the full keybinding reference. State (cache, favorites,
 history, config) lives in a `data/` directory next to the binary.
 
-Prebuilt Linux binaries are on [radio.vchub.net](https://radio.vchub.net).
+## Install (Linux)
+
+Grab the latest prebuilt binary into `~/.local/bin`:
+
+```sh
+curl -fsSL https://radio.vchub.net/install | sh
+```
+
+Or download a release tarball directly from
+[radio.vchub.net](https://radio.vchub.net) and verify it against `SHA256SUMS`.
 
 ## Layout
 
