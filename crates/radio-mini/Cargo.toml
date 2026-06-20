@@ -1,0 +1,22 @@
+[package]
+name = "radio-mini"
+version = "1.2.0"
+edition = "2021"
+license = "MIT"
+description = "World Radio Mini: a tray companion that shuffles and plays stations."
+repository = "https://github.com/Chubik/world-radio"
+
+[[bin]]
+name = "world-radio-mini"
+path = "src/main.rs"
+
+[dependencies]
+radio-core = { path = "../radio-core" }
+radio-audio = { path = "../radio-audio" }
+anyhow = "1"
+fastrand = "2"
+eframe = "0.28"
+egui = "0.28"
+tray-icon = "0.19"
+
+[dev-dependencies]
