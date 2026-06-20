@@ -1,6 +1,23 @@
 use crate::catalog::filter::SearchQuery;
 use crate::catalog::station::Station;
 use rusqlite::Connection;
+use std::collections::HashSet;
+
+fn dedup_stations(stations: Vec<Station>) -> Vec<Station> {
+    let mut seen = HashSet::new();
+    stations
+        .into_iter()
+        .filter(|s| {
+            let key = (
+                s.name.to_lowercase(),
+                s.countrycode.to_lowercase(),
+                s.codec.to_lowercase(),
+                s.bitrate,
+            );
+            seen.insert(key)
+        })
+        .collect()
+}
 
 pub struct Cache {
     conn: Connection,
@@ -89,7 +106,7 @@ impl Cache {
         for r in rows {
             out.push(r?);
         }
-        Ok(out)
+        Ok(dedup_stations(out))
     }
 
     pub fn list_all(&self) -> anyhow::Result<Vec<Station>> {
@@ -104,7 +121,7 @@ impl Cache {
         for r in rows {
             out.push(r?);
         }
-        Ok(out)
+        Ok(dedup_stations(out))
     }
 
     pub fn search(&self, q: &SearchQuery) -> anyhow::Result<Vec<Station>> {
@@ -162,7 +179,7 @@ impl Cache {
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
         let stations: Result<Vec<_>, _> = rows.collect();
-        Ok(stations?)
+        Ok(dedup_stations(stations?))
     }
 
     pub fn facets(&self, limit: usize) -> anyhow::Result<crate::catalog::Facets> {
@@ -351,6 +368,31 @@ mod tests {
             geo_lat: None,
             geo_long: None,
         }
+    }
+
+    #[test]
+    fn dedup_collapses_same_name_country_codec_bitrate() {
+        let input = vec![
+            rich_station("u1", "CYBERStacja", "PL", "", "MP3", 192),
+            rich_station("u2", "CYBERStacja", "PL", "", "MP3", 192),
+            rich_station("u3", "CRnet Hits (128)", "US", "", "MP3", 128),
+            rich_station("u4", "CRnet Hits (32)", "US", "", "MP3", 32),
+        ];
+        let out = dedup_stations(input);
+        let names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["CYBERStacja", "CRnet Hits (128)", "CRnet Hits (32)"]
+        );
+    }
+
+    #[test]
+    fn dedup_keeps_same_name_different_bitrate() {
+        let input = vec![
+            rich_station("u1", "Cafe", "GR", "", "MP3", 96),
+            rich_station("u2", "Cafe", "GR", "", "MP3", 320),
+        ];
+        assert_eq!(dedup_stations(input).len(), 2);
     }
 
     #[test]

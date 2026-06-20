@@ -114,6 +114,7 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::Stop => Msg::Stop,
         Action::ToggleFavorite => Msg::ToggleFavoriteSelected,
         Action::Blacklist => Msg::BlacklistSelected,
+        Action::Recheck => Msg::RecheckSelected,
         Action::Shuffle => Msg::Shuffle,
         Action::ToggleHideUnplayable => Msg::ToggleHideUnplayable,
         Action::EnterSearch => Msg::EnterSearch,

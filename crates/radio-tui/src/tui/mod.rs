@@ -250,6 +250,12 @@ fn run_effects(
             Effect::Blacklist(uuid) => {
                 let _ = req_tx.send(WorkerReq::Blacklist(uuid));
             }
+            Effect::Recheck(uuid) => {
+                let _ = req_tx.send(WorkerReq::Recheck(uuid));
+            }
+            Effect::RecheckAll => {
+                let _ = req_tx.send(WorkerReq::RecheckAll);
+            }
             Effect::RecordHistory(uuid) => {
                 let _ = req_tx.send(WorkerReq::RecordHistory(uuid));
             }

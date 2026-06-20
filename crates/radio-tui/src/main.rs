@@ -3,7 +3,7 @@ mod tui;
 
 use audio::AudioEngine;
 use clap::{Parser, Subcommand};
-use radio_core::catalog::{api, Cache, Catalog, Health, RadioBrowser, SearchQuery};
+use radio_core::catalog::{api, Cache, Catalog, Health, SearchQuery};
 use radio_core::paths;
 
 #[derive(Parser)]
@@ -82,8 +82,7 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let base = api::resolve_mirror()?;
-    let rb = RadioBrowser::with_base_url(base);
+    let rb = api::resolve();
     let stations = rb.search(&query)?;
     catalog.ingest(&stations)?;
     for s in &stations {
