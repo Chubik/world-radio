@@ -17,6 +17,14 @@ Design briefs and delivered mockups for World Radio products.
 All states, themes, and per-platform treatments match the brief. This is design only —
 World Radio Mini is not implemented yet (see `BACKLOG.md`).
 
+## r4dio — logo
+
+- `logo/` — the `r4dio` wordmark (the `4` replaces the `a`, amber-hi accent), with a
+  cursor lockup (`▌ r4dio` + "WORLD RADIO"), a domain lockup, and a square app
+  icon / mark that works down to 16px (favicon / dock / package badge). Open
+  `logo/index.html` in a browser.
+- `screenshots/logo-canvas.png` — the logo exploration.
+
 ## World Radio TUI — engineer reference
 
 - `tui-engineer-reference-v6.html` — the latest (v6) engineer reference for the
