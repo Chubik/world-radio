@@ -1,8 +1,7 @@
-mod audio;
 mod tui;
 
-use audio::AudioEngine;
 use clap::{Parser, Subcommand};
+use radio_audio::AudioEngine;
 use radio_core::catalog::{api, Cache, Catalog, Health, SearchQuery};
 use radio_core::paths;
 
