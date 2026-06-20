@@ -15,3 +15,4 @@ cpal = "0.17"
 ringbuf = "0.5"
 
 [dev-dependencies]
+mockito = "1"

@@ -1,4 +1,4 @@
-use crate::audio::ring::SampleCons;
+use crate::ring::SampleCons;
 use ringbuf::traits::Consumer;
 
 pub fn mix_output(
@@ -25,7 +25,7 @@ pub fn mix_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audio::ring::make_ring;
+    use crate::ring::make_ring;
     use ringbuf::traits::Producer;
 
     #[test]
