@@ -4,7 +4,7 @@ A terminal radio player for the whole planet — browse and play 30,000+ live
 internet stations without leaving your shell. Fast, keyboard-driven, no browser,
 no mouse.
 
-**Website:** [radio.vchub.net](https://radio.vchub.net)
+**Website:** [r4dio.net](https://r4dio.net)
 
 ## Features
 
@@ -41,11 +41,11 @@ history, config) lives in a `data/` directory next to the binary.
 Grab the latest prebuilt binary into `~/.local/bin`:
 
 ```sh
-curl -fsSL https://radio.vchub.net/install | sh
+curl -fsSL https://r4dio.net/install | sh
 ```
 
 Or download a release tarball directly from
-[radio.vchub.net](https://radio.vchub.net) and verify it against `SHA256SUMS`.
+[r4dio.net](https://r4dio.net) and verify it against `SHA256SUMS`.
 
 ## Layout
 
