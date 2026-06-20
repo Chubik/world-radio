@@ -16,3 +16,12 @@ Design briefs and delivered mockups for World Radio products.
 
 All states, themes, and per-platform treatments match the brief. This is design only —
 World Radio Mini is not implemented yet (see `BACKLOG.md`).
+
+## World Radio TUI — engineer reference
+
+- `tui-engineer-reference-v6.html` — the latest (v6) engineer reference for the
+  single-page TUI: palettes (RGB / xterm-256 / 16-color), glyph reference, Ratatui
+  widget mapping, layout + minimum size, list-row state styling, ready-to-paste Rust
+  `Palette` constants, and open questions. (v1–v5 were earlier drafts of the same
+  document — only v6 is kept.)
+- `screenshots/full.png`, `body.png`, `modals.png` — the single-page layout.
