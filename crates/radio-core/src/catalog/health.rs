@@ -23,6 +23,22 @@ impl Health {
     pub fn is_hidden(&self, uuid: &str) -> bool {
         self.fails.get(uuid).copied().unwrap_or(0) >= HIDE_THRESHOLD
     }
+
+    pub fn hidden_ids(&self) -> Vec<String> {
+        self.fails
+            .iter()
+            .filter(|(_, &n)| n >= HIDE_THRESHOLD)
+            .map(|(uuid, _)| uuid.clone())
+            .collect()
+    }
+
+    pub fn clear(&mut self, uuid: &str) {
+        self.fails.remove(uuid);
+    }
+
+    pub fn clear_all(&mut self) {
+        self.fails.clear();
+    }
 }
 
 impl Health {
@@ -73,6 +89,39 @@ mod tests {
         assert!(!h.is_hidden("u1"));
         h.record_failure("u1");
         assert!(!h.is_hidden("u1"));
+    }
+
+    #[test]
+    fn hidden_ids_lists_only_hidden() {
+        let mut h = Health::new();
+        for _ in 0..HIDE_THRESHOLD {
+            h.record_failure("dead");
+        }
+        h.record_failure("weak");
+        let ids = h.hidden_ids();
+        assert_eq!(ids, vec!["dead".to_string()]);
+    }
+
+    #[test]
+    fn clear_unhides_station() {
+        let mut h = Health::new();
+        for _ in 0..HIDE_THRESHOLD {
+            h.record_failure("u1");
+        }
+        assert!(h.is_hidden("u1"));
+        h.clear("u1");
+        assert!(!h.is_hidden("u1"));
+    }
+
+    #[test]
+    fn clear_all_unhides_everything() {
+        let mut h = Health::new();
+        for _ in 0..HIDE_THRESHOLD {
+            h.record_failure("u1");
+            h.record_failure("u2");
+        }
+        h.clear_all();
+        assert!(h.hidden_ids().is_empty());
     }
 
     #[test]

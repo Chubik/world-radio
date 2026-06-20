@@ -4,7 +4,7 @@ A terminal radio player for the whole planet — browse and play 30,000+ live
 internet stations without leaving your shell. Fast, keyboard-driven, no browser,
 no mouse.
 
-**Website:** [radio.vchub.net](https://radio.vchub.net)
+**Website:** [r4dio.net](https://r4dio.net)
 
 ## Features
 
@@ -36,7 +36,16 @@ cargo run --release -p radio-tui
 Press `?` in the app for the full keybinding reference. State (cache, favorites,
 history, config) lives in a `data/` directory next to the binary.
 
-Prebuilt Linux binaries are on [radio.vchub.net](https://radio.vchub.net).
+## Install (Linux)
+
+Grab the latest prebuilt binary into `~/.local/bin`:
+
+```sh
+curl -fsSL https://r4dio.net/install | sh
+```
+
+Or download a release tarball directly from
+[r4dio.net](https://r4dio.net) and verify it against `SHA256SUMS`.
 
 ## Layout
 

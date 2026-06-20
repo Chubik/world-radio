@@ -8,7 +8,7 @@ pub mod filter;
 pub mod health;
 pub mod station;
 
-pub use api::{resolve_mirror, RadioBrowser};
+pub use api::{resolve, RadioBrowser};
 pub use cache::Cache;
 pub use catalog::Catalog;
 pub use facets::Facets;

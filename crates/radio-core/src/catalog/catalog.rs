@@ -72,6 +72,18 @@ impl Catalog {
         self.health.record_success(uuid);
     }
 
+    pub fn hidden_ids(&self) -> Vec<String> {
+        self.health.hidden_ids()
+    }
+
+    pub fn clear_health(&mut self, uuid: &str) {
+        self.health.clear(uuid);
+    }
+
+    pub fn clear_all_health(&mut self) {
+        self.health.clear_all();
+    }
+
     pub fn save_health(&self, path: &std::path::Path) -> anyhow::Result<()> {
         self.health.save(path)
     }

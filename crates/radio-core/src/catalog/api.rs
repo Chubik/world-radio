@@ -1,4 +1,4 @@
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 use crate::catalog::{filter::SearchQuery, station::Station};
 
@@ -7,14 +7,30 @@ pub struct RadioBrowser {
     client: reqwest::blocking::Client,
 }
 
+const MIRROR_HOST: &str = "all.api.radio-browser.info";
+const FALLBACK_BASE: &str = "https://all.api.radio-browser.info";
+const HEALTH_PATH: &str = "/json/stats";
+
 impl RadioBrowser {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         let client = reqwest::blocking::Client::builder()
-            .user_agent("world-radio/0.1")
+            .user_agent("world-radio/1.1")
             .build()
             .expect("client build");
         Self {
             base_url: base_url.into(),
+            client,
+        }
+    }
+
+    pub fn with_mirror_ip(ip: IpAddr) -> Self {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("world-radio/1.1")
+            .resolve(MIRROR_HOST, SocketAddr::new(ip, 443))
+            .build()
+            .expect("client build");
+        Self {
+            base_url: FALLBACK_BASE.to_string(),
             client,
         }
     }
@@ -33,14 +49,41 @@ impl RadioBrowser {
     }
 }
 
-pub fn resolve_mirror() -> anyhow::Result<String> {
-    let mut addrs = ("all.api.radio-browser.info", 443)
-        .to_socket_addrs()
-        .map_err(|e| anyhow::anyhow!("dns lookup failed: {e}"))?;
+pub fn resolve() -> RadioBrowser {
+    let timeout = std::time::Duration::from_secs(3);
+    let ips = mirror_ips();
+    match pick_alive_ip(&ips, |ip| is_mirror_alive(*ip, timeout)) {
+        Some(ip) => RadioBrowser::with_mirror_ip(ip),
+        None => RadioBrowser::with_base_url(FALLBACK_BASE),
+    }
+}
+
+fn mirror_ips() -> Vec<IpAddr> {
+    let Ok(addrs) = (MIRROR_HOST, 443).to_socket_addrs() else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
     addrs
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("no radio-browser mirror found"))?;
-    Ok("https://all.api.radio-browser.info".to_string())
+        .map(|a| a.ip())
+        .filter(|ip| seen.insert(*ip))
+        .collect()
+}
+
+fn is_mirror_alive(ip: IpAddr, timeout: std::time::Duration) -> bool {
+    let Ok(client) = reqwest::blocking::Client::builder()
+        .user_agent("world-radio/1.1")
+        .timeout(timeout)
+        .resolve(MIRROR_HOST, SocketAddr::new(ip, 443))
+        .build()
+    else {
+        return false;
+    };
+    let url = format!("{FALLBACK_BASE}{HEALTH_PATH}");
+    matches!(client.get(&url).send(), Ok(r) if r.status().is_success())
+}
+
+fn pick_alive_ip(ips: &[IpAddr], mut check: impl FnMut(&IpAddr) -> bool) -> Option<IpAddr> {
+    ips.iter().find(|ip| check(ip)).copied()
 }
 
 #[cfg(test)]
@@ -70,5 +113,31 @@ mod tests {
         assert_eq!(stations.len(), 1);
         assert_eq!(stations[0].name, "Jazz FM");
         assert_eq!(stations[0].url_resolved, "http://stream.test/jazz");
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn pick_alive_ip_returns_first_healthy() {
+        let ips = vec![ip("1.1.1.1"), ip("2.2.2.2"), ip("3.3.3.3")];
+        let picked = pick_alive_ip(&ips, |a| *a != ip("1.1.1.1"));
+        assert_eq!(picked, Some(ip("2.2.2.2")));
+    }
+
+    #[test]
+    fn pick_alive_ip_returns_none_when_all_dead() {
+        let ips = vec![ip("1.1.1.1"), ip("2.2.2.2")];
+        let picked = pick_alive_ip(&ips, |_| false);
+        assert_eq!(picked, None);
+    }
+
+    #[test]
+    fn mirror_ips_are_deduplicated() {
+        let mut seen = std::collections::HashSet::new();
+        let raw = [ip("1.1.1.1"), ip("1.1.1.1"), ip("2.2.2.2")];
+        let deduped: Vec<IpAddr> = raw.into_iter().filter(|x| seen.insert(*x)).collect();
+        assert_eq!(deduped, vec![ip("1.1.1.1"), ip("2.2.2.2")]);
     }
 }
