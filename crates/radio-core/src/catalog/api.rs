@@ -63,7 +63,10 @@ fn mirror_ips() -> Vec<IpAddr> {
         return Vec::new();
     };
     let mut seen = std::collections::HashSet::new();
-    addrs.map(|a| a.ip()).filter(|ip| seen.insert(*ip)).collect()
+    addrs
+        .map(|a| a.ip())
+        .filter(|ip| seen.insert(*ip))
+        .collect()
 }
 
 fn is_mirror_alive(ip: IpAddr, timeout: std::time::Duration) -> bool {
