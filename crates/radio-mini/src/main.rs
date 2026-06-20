@@ -1,3 +1,4 @@
+mod catalog_src;
 mod state;
 
 fn main() {
