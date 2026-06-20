@@ -63,6 +63,16 @@ impl MiniState {
     pub fn set_scope(&mut self, scope: Scope) {
         self.scope = scope;
     }
+
+    pub fn apply_status(&mut self, status: radio_audio::Status) {
+        use radio_audio::Status;
+        self.phase = match status {
+            Status::Playing { .. } => Phase::Playing,
+            Status::Buffering | Status::Retrying(_) => Phase::Buffering,
+            Status::Error(_) => Phase::Error,
+            Status::Idle => Phase::Idle,
+        };
+    }
 }
 
 impl Default for MiniState {
@@ -138,5 +148,25 @@ mod tests {
         assert_eq!(m.scope, Scope::All);
         m.set_scope(Scope::Favorites);
         assert_eq!(m.scope, Scope::Favorites);
+    }
+
+    #[test]
+    fn status_playing_maps_to_playing() {
+        let mut m = MiniState::new();
+        m.begin_play(st("a", "http://a"));
+        m.apply_status(radio_audio::Status::Playing {
+            sample_rate: 44100,
+            channels: 2,
+            title: None,
+        });
+        assert_eq!(m.phase, Phase::Playing);
+    }
+
+    #[test]
+    fn status_error_maps_to_error() {
+        let mut m = MiniState::new();
+        m.begin_play(st("a", "http://a"));
+        m.apply_status(radio_audio::Status::Error("x".into()));
+        assert_eq!(m.phase, Phase::Error);
     }
 }
