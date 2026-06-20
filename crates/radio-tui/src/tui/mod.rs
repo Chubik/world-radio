@@ -10,7 +10,6 @@ pub mod update;
 pub mod view;
 pub mod worker;
 
-use crate::audio::AudioEngine;
 use crate::tui::config::Config;
 use crate::tui::keymap::key_to_msg;
 use crate::tui::message::{Effect, Msg};
@@ -24,6 +23,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
+use radio_audio::AudioEngine;
 use radio_core::catalog::{Cache, Catalog, Health};
 use radio_core::paths;
 use ratatui::backend::CrosstermBackend;

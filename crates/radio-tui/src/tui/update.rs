@@ -1,8 +1,8 @@
-use crate::audio::Status;
 use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
     BrowseFocus, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
+use radio_audio::Status;
 use std::time::{Duration, Instant};
 
 const VOLUME_STEP: f32 = 0.05;
