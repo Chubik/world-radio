@@ -15,8 +15,8 @@ radio-core = { path = "../radio-core" }
 radio-audio = { path = "../radio-audio" }
 anyhow = "1"
 fastrand = "2"
-eframe = "0.28"
-egui = "0.28"
-tray-icon = "0.19"
+eframe = "0.35"
+egui = "0.35"
+tray-icon = "0.24"
 
 [dev-dependencies]
