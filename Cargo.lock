@@ -4221,6 +4221,7 @@ dependencies = [
  "radio-audio",
  "radio-core",
  "tray-icon",
+ "winit",
 ]
 
 [[package]]
