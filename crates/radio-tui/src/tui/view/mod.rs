@@ -25,7 +25,10 @@ pub fn view(model: &Model, frame: &mut Frame) {
         true => 2,
         false => 1,
     };
-    let header_h = info_h.max(header::SPECTRUM_H);
+    let header_h = match model.spectrum_style.is_off() {
+        true => info_h,
+        false => info_h.max(header::SPECTRUM_H),
+    };
     let rows = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Min(0),
