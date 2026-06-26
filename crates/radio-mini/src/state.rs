@@ -92,7 +92,6 @@ impl MiniState {
     }
 
     pub fn stop(&mut self) {
-        self.now = None;
         self.phase = Phase::Idle;
     }
 
@@ -169,12 +168,12 @@ mod tests {
     }
 
     #[test]
-    fn stop_clears_to_idle() {
+    fn stop_goes_idle_but_keeps_station() {
         let mut m = MiniState::new();
         m.begin_play(st("a", "http://a"));
         m.stop();
         assert_eq!(m.phase, Phase::Idle);
-        assert!(m.now.is_none());
+        assert_eq!(m.now.as_ref().unwrap().uuid, "a");
     }
 
     #[test]

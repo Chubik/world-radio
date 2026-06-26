@@ -97,11 +97,18 @@ impl MiniApp {
         }
     }
 
+    fn resume(&mut self) {
+        match self.state.now.clone() {
+            Some(pick) => self.play_pick(pick),
+            None => self.shuffle(),
+        }
+    }
+
     fn toggle(&mut self) {
         let playing = self.state.phase == Phase::Playing || self.state.phase == Phase::Buffering;
         match playing {
             true => self.stop(),
-            false => self.shuffle(),
+            false => self.resume(),
         }
     }
 
@@ -338,7 +345,7 @@ impl eframe::App for MiniApp {
             if ui.button(egui::RichText::new(glyph).color(t.fg)).clicked() {
                 match playing {
                     true => self.stop(),
-                    false => self.shuffle(),
+                    false => self.resume(),
                 }
             }
         });
