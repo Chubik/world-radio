@@ -104,14 +104,6 @@ impl MiniApp {
         }
     }
 
-    fn toggle(&mut self) {
-        let playing = self.state.phase == Phase::Playing || self.state.phase == Phase::Buffering;
-        match playing {
-            true => self.stop(),
-            false => self.resume(),
-        }
-    }
-
     fn ensure_tray(&mut self) {
         if self.tray_ready {
             return;
@@ -120,34 +112,6 @@ impl MiniApp {
         self.tray = crate::tray::build()
             .map_err(|e| eprintln!("tray init failed: {e}"))
             .ok();
-    }
-
-    fn handle_tray_events(&mut self) {
-        self.ensure_tray();
-        let Some(tray) = &self.tray else {
-            return;
-        };
-        let (shuffle_all, shuffle_fav, toggle, quit) = (
-            tray.shuffle_all.clone(),
-            tray.shuffle_fav.clone(),
-            tray.toggle.clone(),
-            tray.quit.clone(),
-        );
-        while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
-            match event.id {
-                id if id == shuffle_all => {
-                    self.state.set_scope(Scope::All);
-                    self.shuffle();
-                }
-                id if id == shuffle_fav => {
-                    self.state.set_scope(Scope::Favorites);
-                    self.shuffle();
-                }
-                id if id == toggle => self.toggle(),
-                id if id == quit => std::process::exit(0),
-                _ => {}
-            }
-        }
     }
 
     fn handle_tray_clicks(&mut self, ctx: &egui::Context) {
@@ -209,7 +173,7 @@ impl eframe::App for MiniApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
 
-        self.handle_tray_events();
+        self.ensure_tray();
         self.handle_tray_clicks(ctx);
         let focused = ctx.input(|i| i.focused);
         if self.visible && !focused {
@@ -359,7 +323,12 @@ impl eframe::App for MiniApp {
                 self.state.set_scope(Scope::Favorites);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("shuffle scope").color(t.dim).small());
+                if ui
+                    .button(egui::RichText::new("✕ quit").color(t.dim).small())
+                    .clicked()
+                {
+                    std::process::exit(0);
+                }
             });
         });
     }
