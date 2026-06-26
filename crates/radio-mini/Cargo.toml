@@ -19,4 +19,7 @@ eframe = "0.35"
 egui = "0.35"
 tray-icon = "0.24"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+winit = "0.30"
+
 [dev-dependencies]
