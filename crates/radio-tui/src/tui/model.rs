@@ -387,6 +387,13 @@ impl Model {
             Status::Playing { .. } | Status::Buffering | Status::Retrying(_)
         )
     }
+
+    pub fn is_animating(&self) -> bool {
+        self.is_playing()
+            || self.browse.loading
+            || self.browse.facets_loading
+            || self.browse.pending_online_search.is_some()
+    }
 }
 
 #[cfg(test)]
