@@ -15,6 +15,10 @@ Planned work and ideas, roughly by area. Not a roadmap — priorities shift.
 - **cargo install / crates.io** — publish so `cargo install world-radio` works.
 - **apt / .deb / AUR** — later, on demand (signing, repo, GPG).
 - **Per-platform builds** — Linux / macOS / Windows release artifacts.
+- **Release integrity (gap)** — the README already tells users to verify downloads
+  against `SHA256SUMS`, but no such file exists and CI builds no release artifacts.
+  Need a release workflow that builds the binaries, emits `SHA256SUMS`, and publishes
+  both (ideally signed). Until then the README's verify instruction is unbacked.
 
 ## Sync (new)
 
