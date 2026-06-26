@@ -212,7 +212,7 @@ fn event_loop(
             needs_redraw = true;
         }
 
-        if model.is_playing() {
+        if model.is_playing() && !model.spectrum_style.is_off() {
             let n = engine.read_tap(tap_buf);
             let width = terminal.size().map(|s| s.width).unwrap_or(80);
             let bars_width = (width.max(8) as usize).min(256);
