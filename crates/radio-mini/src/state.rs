@@ -34,6 +34,8 @@ pub struct MiniState {
     pub now: Option<StationPick>,
     pub volume: f32,
     pub scope: Scope,
+    all: Vec<StationPick>,
+    favorites: Vec<StationPick>,
 }
 
 impl MiniState {
@@ -43,7 +45,27 @@ impl MiniState {
             now: None,
             volume: 0.8,
             scope: Scope::All,
+            all: Vec::new(),
+            favorites: Vec::new(),
         }
+    }
+
+    pub fn load_stations(&mut self, all: Vec<StationPick>, favorites: Vec<StationPick>) {
+        self.all = all;
+        self.favorites = favorites;
+    }
+
+    pub fn active_stations(&self) -> &[StationPick] {
+        match self.scope {
+            Scope::All => &self.all,
+            Scope::Favorites => &self.favorites,
+        }
+    }
+
+    pub fn shuffle(&mut self) -> Option<StationPick> {
+        let pick = pick_random(self.active_stations())?;
+        self.begin_play(pick.clone());
+        Some(pick)
     }
 
     pub fn begin_play(&mut self, pick: StationPick) {
@@ -86,7 +108,11 @@ mod tests {
     use super::*;
 
     fn st(uuid: &str, url: &str) -> StationPick {
-        StationPick { uuid: uuid.into(), name: uuid.into(), url: url.into() }
+        StationPick {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            url: url.into(),
+        }
     }
 
     #[test]
@@ -148,6 +174,38 @@ mod tests {
         assert_eq!(m.scope, Scope::All);
         m.set_scope(Scope::Favorites);
         assert_eq!(m.scope, Scope::Favorites);
+    }
+
+    #[test]
+    fn shuffle_picks_from_active_scope() {
+        let mut m = MiniState::new();
+        m.load_stations(vec![st("a", "http://a")], vec![st("f", "http://f")]);
+        let pick = m.shuffle().unwrap();
+        assert_eq!(pick.uuid, "a");
+        assert_eq!(m.phase, Phase::Buffering);
+
+        m.set_scope(Scope::Favorites);
+        let pick = m.shuffle().unwrap();
+        assert_eq!(pick.uuid, "f");
+    }
+
+    #[test]
+    fn shuffle_returns_none_when_active_scope_empty() {
+        let mut m = MiniState::new();
+        m.load_stations(vec![st("a", "http://a")], vec![]);
+        m.set_scope(Scope::Favorites);
+        assert!(m.shuffle().is_none());
+        assert_eq!(m.phase, Phase::Idle);
+    }
+
+    #[test]
+    fn active_stations_follows_scope() {
+        let mut m = MiniState::new();
+        m.load_stations(vec![st("a", "http://a")], vec![st("f", "http://f")]);
+        assert_eq!(m.active_stations().len(), 1);
+        assert_eq!(m.active_stations()[0].uuid, "a");
+        m.set_scope(Scope::Favorites);
+        assert_eq!(m.active_stations()[0].uuid, "f");
     }
 
     #[test]

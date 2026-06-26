@@ -13,6 +13,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "World Radio Mini",
         options,
-        Box::new(|_cc| Ok(Box::new(app::MiniApp::new()))),
+        Box::new(|_cc| {
+            let app = app::MiniApp::new()
+                .map_err(|e| Box::<dyn std::error::Error + Send + Sync>::from(e.to_string()))?;
+            Ok(Box::new(app))
+        }),
     )
 }
