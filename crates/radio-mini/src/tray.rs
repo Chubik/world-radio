@@ -22,6 +22,7 @@ pub fn build() -> anyhow::Result<Tray> {
 
     let icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false)
         .with_tooltip("World Radio Mini")
         .with_title("WR")
         .build()?;
