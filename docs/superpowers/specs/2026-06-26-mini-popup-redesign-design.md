@@ -3,8 +3,9 @@
 **Date:** 2026-06-26
 **Status:** approved for planning
 **Scope:** this spec covers the **visual redesign of the mini popup** (layout + amber-CRT
-theme tokens). Tray-popover behaviour (hide Dock, borderless window, click-to-toggle) is a
-**follow-up** spec, intentionally out of scope here.
+theme tokens) **plus a working favorite toggle** (FavStar writes to `favorites.json`).
+Tray-popover behaviour (hide Dock, borderless window, click-to-toggle) is a **follow-up**
+spec, intentionally out of scope here.
 
 ## Goal
 
@@ -55,8 +56,8 @@ A single `egui` panel, vertical stack, ~7px gaps. Built in `app.rs` `ui()`:
 2. **Station block:** station name (bright, bold, ellipsized) + now-playing line under it
    (track text when playing; "press Shuffle to start listening" when idle; "connecting to
    stream…" when buffering; "stream offline — couldn't connect" when error). A `FavStar`
-   (☆/★) sits to the right when something is loaded — **visual only this iteration** (no
-   favorites write yet; that is a separate feature).
+   (☆/★) sits to the right when a station is loaded — **functional this iteration**: clicking
+   toggles the now-playing station's favorite (see "Favorite toggle" below).
 3. **Spectrum + volume row:** static spectrum bars (16 bars, dim when idle/error, hi when
    playing) on the left; segmented `VOL` meter (6 segments) on the right.
 4. **Controls row:** primary `⇄ SHUFFLE` button (wide, hi background) + secondary play/stop
@@ -90,18 +91,42 @@ Each `*.jsx` component maps to a small egui helper in `app.rs` (or a new `widget
 - `VolBar` → 6 segment rects, filled up to `volume * 6`.
 - `ShuffleScope` → two `selectable_label`s styled as a segmented box.
 - `CtrlBtn` → styled `Button` (primary = hi bg + bg-colored text).
-- `FavStar` → ☆/☆ toggle button, **non-functional placeholder** this iteration.
+- `FavStar` → ☆/★ toggle button reflecting `catalog.is_favorite(now.uuid)`; click toggles.
+
+## Favorite toggle (functional)
+
+Mirror the TUI's persistence path. Today `MiniApp::new()` builds a `Catalog`, reads the
+station lists, and drops it. To write favorites the app must **keep the `Catalog`** plus the
+data-dir paths.
+
+`MiniApp` gains:
+- `catalog: Catalog` (owned, mutable)
+- `fav_path` / `hist_path` / `blacklist_path: PathBuf` (for `save_state`)
+
+`fn toggle_favorite(&mut self)`:
+1. take `now.uuid` (do nothing if nothing is loaded)
+2. `self.catalog.toggle_favorite(&uuid)`
+3. `self.catalog.save_state(&fav_path, &hist_path, &blacklist_path)` — persist; log on error
+4. reload the favorites list into `MiniState` (`catalog_src::favorite_stations`) so the
+   `★ FAVS` scope stays current
+
+`FavStar` shows ★ when `catalog.is_favorite(now.uuid)`, ☆ otherwise. This writes the same
+`favorites.json` the TUI reads, so favorites made in mini show up in the TUI and vice-versa —
+and it is the local-write half that a future sync feature pushes to the server.
 
 ## Architecture & data flow
 
-No new state machine — the existing `MiniState` (`phase`, `now`, `volume`, `scope`,
-`all`/`favorites`) already holds everything the layout needs. This is a **view-only change**
-plus the theme token extension. The `logic()`/`ui()` split from eframe 0.35 stays:
-`logic()` polls status + sets visuals; `ui()` renders the panel.
+The existing `MiniState` (`phase`, `now`, `volume`, `scope`, `all`/`favorites`) holds the view
+state. The redesign is mostly a view change + theme tokens, with one structural addition:
+`MiniApp` now **owns the `Catalog`** and the data-dir paths so the favorite toggle can persist
+(previously the catalog was dropped after `new()`). The `logic()`/`ui()` split from eframe
+0.35 stays: `logic()` polls status + sets visuals; `ui()` renders the panel and handles the
+FavStar click.
 
 ```
-MiniState (unchanged) ──► ui(): build panel from phase + now + volume + scope
-Theme (extended tokens) ─┘
+MiniState ─────────► ui(): build panel from phase + now + volume + scope
+Theme (extended) ──┘        FavStar click ─► toggle_favorite():
+Catalog (owned) ───────────► toggle + save_state + reload favorites scope
 ```
 
 ## Testing
@@ -113,6 +138,10 @@ The panel is egui-rendered (not unit-testable directly), so tests cover the pure
 - **State→label mapping:** a pure `fn state_labels(phase) -> (dot_label, primary_label)`
   helper, tested for all four phases (e.g. Error → ("OFFLINE", "RETRY")).
 - **Spectrum bar count:** static `spectrum_bars(n)` returns `n` values in range.
+- **Favorite toggle (pure-ish):** against an in-memory `Catalog` (as `catalog_src` tests
+  already do), toggling a uuid then reloading `favorite_stations` reflects the change; a
+  second toggle removes it. Persistence round-trip (`save_state` → `Favorites::load`) is
+  already covered in `radio-core`, so the mini test focuses on the toggle+reload wiring.
 - Existing 17 mini tests stay green.
 
 Manual smoke test (macOS): `cargo run -p radio-mini` — window shows the amber-CRT panel in all
@@ -124,5 +153,6 @@ meter and ALL/FAVS toggle reflect state.
 - Tray-popover behaviour (hide Dock, borderless, click-to-toggle) — **next spec**.
 - Live FFT spectrum animation, scanline overlay, glow, marquee — later polish.
 - The other 4 themes (blue/neon/green/paper) and a theme switcher.
-- `FavStar` actually writing favorites + sync — separate feature track.
+- **Sync** (pushing favorites to a server) — separate feature track; this iteration only does
+  the local `favorites.json` write.
 - Android / Windows / Linux tray variants.
