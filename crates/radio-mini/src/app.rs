@@ -13,13 +13,9 @@ pub struct MiniApp {
     engine: Option<AudioEngine>,
     tray: Option<Tray>,
     tray_ready: bool,
-    #[allow(dead_code)]
     catalog: Catalog,
-    #[allow(dead_code)]
     fav_path: PathBuf,
-    #[allow(dead_code)]
     hist_path: PathBuf,
-    #[allow(dead_code)]
     blacklist_path: PathBuf,
 }
 
@@ -122,6 +118,31 @@ impl MiniApp {
         self.state.set_volume(v);
         if let Some(engine) = &self.engine {
             engine.set_volume(self.state.volume);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn now_is_favorite(&self) -> bool {
+        match &self.state.now {
+            Some(pick) => self.catalog.is_favorite(&pick.uuid),
+            None => false,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn toggle_favorite(&mut self) {
+        let Some(pick) = self.state.now.clone() else {
+            return;
+        };
+        match catalog_src::toggle_and_reload(&mut self.catalog, &pick.uuid) {
+            Ok(favorites) => self.state.set_favorites(favorites),
+            Err(e) => eprintln!("toggle favorite failed: {e}"),
+        }
+        if let Err(e) =
+            self.catalog
+                .save_state(&self.fav_path, &self.hist_path, &self.blacklist_path)
+        {
+            eprintln!("save favorites failed: {e}");
         }
     }
 }
