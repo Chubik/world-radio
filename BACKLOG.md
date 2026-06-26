@@ -2,11 +2,25 @@
 
 Planned work and ideas, roughly by area. Not a roadmap — priorities shift.
 
-## UI / UX
+## Usage stats (privacy-first)
 
-- **Narrow-filter empty space** — the compact single-group filter modal works on
-  narrow screens, but on tall vertical terminals it leaves most of the screen empty.
-  Size the modal to its content or center it vertically instead of filling the pane.
+Goal: know if people actually use this — **without the app phoning home**. The app
+sends nothing; everything is measured passively server-side. Decided model: passive
+downloads only (no in-app telemetry, no active-user ping, no opt-in heartbeat — all
+rejected on privacy grounds).
+
+What already exists (server dashboard): downloads **by country** and **by version**
+are tracked and graphed. The gaps are about presentation, not collection:
+
+- **Own dashboard, not the shared one** — the World Radio panels currently live on the
+  general dashboard alongside every other server. Move them to a dedicated World Radio
+  view so the data is findable and not mixed with unrelated infra.
+- **Consolidate to one graph, drop the text** — fold the by-version table into a chart
+  and present downloads (over time, by country, by version) as a single consolidated
+  graph. No text tables.
+- **Explicitly NOT doing:** in-app analytics, unique-install IDs, active-user
+  heartbeats, "who is using it right now". If we ever reconsider, it must be opt-in
+  and anonymous, and documented plainly in the README.
 
 ## Distribution
 
@@ -52,4 +66,5 @@ with no email and no password — Mullvad-account style.
   with a health check (TLS pinned to the canonical host) and falls back cleanly.
 - **Duplicate collapse** — catalog reads dedup by name + country + codec + bitrate.
 - **Recheck dead stations** — `dead` status filter + `R` to clear failure counters.
-- **Compact narrow filter** — single focused group with a tab row under 100 cols.
+- **Compact narrow filter** — single focused group with a tab row under 100 cols;
+  on narrow screens it now sits as a content-sized panel below the station list.
