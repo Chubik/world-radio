@@ -22,7 +22,6 @@ pub enum Phase {
     Error,
 }
 
-#[allow(dead_code)]
 pub fn state_labels(phase: Phase) -> (&'static str, &'static str) {
     match phase {
         Phase::Idle => ("IDLE", "SHUFFLE"),
@@ -32,7 +31,6 @@ pub fn state_labels(phase: Phase) -> (&'static str, &'static str) {
     }
 }
 
-#[allow(dead_code)]
 pub fn spectrum_bars(n: usize) -> Vec<f32> {
     const SEED: [f32; 14] = [
         5.0, 7.0, 4.0, 8.0, 6.0, 3.0, 7.0, 5.0, 8.0, 4.0, 6.0, 7.0, 3.0, 5.0,
