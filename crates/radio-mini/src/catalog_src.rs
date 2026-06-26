@@ -14,6 +14,14 @@ pub fn all_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
     Ok(stations.iter().map(to_pick).collect())
 }
 
+pub fn last_played(catalog: &Catalog) -> anyhow::Result<Option<StationPick>> {
+    let Some(uuid) = catalog.history_ids().first() else {
+        return Ok(None);
+    };
+    let station = catalog.station_by_uuid(uuid)?;
+    Ok(station.as_ref().map(to_pick))
+}
+
 pub fn toggle_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Vec<StationPick>> {
     catalog.toggle_favorite(uuid);
     favorite_stations(catalog)

@@ -41,7 +41,7 @@ impl MiniApp {
             engine.set_volume(state.volume);
         }
 
-        Ok(Self {
+        let mut app = Self {
             state,
             theme: Theme::amber(),
             engine,
@@ -52,13 +52,38 @@ impl MiniApp {
             fav_path,
             hist_path,
             blacklist_path,
-        })
+        };
+        app.play_last();
+        Ok(app)
+    }
+
+    fn play_pick(&mut self, pick: crate::state::StationPick) {
+        if let Some(engine) = &self.engine {
+            engine.play(&pick.url);
+        }
+        self.catalog.record_history(&pick.uuid);
+        if let Err(e) =
+            self.catalog
+                .save_state(&self.fav_path, &self.hist_path, &self.blacklist_path)
+        {
+            eprintln!("save history failed: {e}");
+        }
+        self.state.begin_play(pick);
     }
 
     fn shuffle(&mut self) {
-        if let Some(pick) = self.state.shuffle() {
-            if let Some(engine) = &self.engine {
-                engine.play(&pick.url);
+        if let Some(pick) = self.state.pick_shuffle() {
+            self.play_pick(pick);
+        }
+    }
+
+    fn play_last(&mut self) {
+        match catalog_src::last_played(&self.catalog) {
+            Ok(Some(pick)) => self.play_pick(pick),
+            Ok(None) => self.shuffle(),
+            Err(e) => {
+                eprintln!("load last station failed: {e}");
+                self.shuffle();
             }
         }
     }
