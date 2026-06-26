@@ -82,10 +82,8 @@ impl MiniState {
         }
     }
 
-    pub fn shuffle(&mut self) -> Option<StationPick> {
-        let pick = pick_random(self.active_stations())?;
-        self.begin_play(pick.clone());
-        Some(pick)
+    pub fn pick_shuffle(&self) -> Option<StationPick> {
+        pick_random(self.active_stations())
     }
 
     pub fn begin_play(&mut self, pick: StationPick) {
@@ -197,25 +195,21 @@ mod tests {
     }
 
     #[test]
-    fn shuffle_picks_from_active_scope() {
+    fn pick_shuffle_picks_from_active_scope() {
         let mut m = MiniState::new();
         m.load_stations(vec![st("a", "http://a")], vec![st("f", "http://f")]);
-        let pick = m.shuffle().unwrap();
-        assert_eq!(pick.uuid, "a");
-        assert_eq!(m.phase, Phase::Buffering);
+        assert_eq!(m.pick_shuffle().unwrap().uuid, "a");
 
         m.set_scope(Scope::Favorites);
-        let pick = m.shuffle().unwrap();
-        assert_eq!(pick.uuid, "f");
+        assert_eq!(m.pick_shuffle().unwrap().uuid, "f");
     }
 
     #[test]
-    fn shuffle_returns_none_when_active_scope_empty() {
+    fn pick_shuffle_returns_none_when_active_scope_empty() {
         let mut m = MiniState::new();
         m.load_stations(vec![st("a", "http://a")], vec![]);
         m.set_scope(Scope::Favorites);
-        assert!(m.shuffle().is_none());
-        assert_eq!(m.phase, Phase::Idle);
+        assert!(m.pick_shuffle().is_none());
     }
 
     #[test]
