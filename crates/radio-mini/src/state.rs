@@ -73,6 +73,10 @@ impl MiniState {
         self.favorites = favorites;
     }
 
+    pub fn set_favorites(&mut self, favorites: Vec<StationPick>) {
+        self.favorites = favorites;
+    }
+
     pub fn active_stations(&self) -> &[StationPick] {
         match self.scope {
             Scope::All => &self.all,

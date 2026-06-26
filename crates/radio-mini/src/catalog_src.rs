@@ -14,6 +14,11 @@ pub fn all_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
     Ok(stations.iter().map(to_pick).collect())
 }
 
+pub fn toggle_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Vec<StationPick>> {
+    catalog.toggle_favorite(uuid);
+    favorite_stations(catalog)
+}
+
 pub fn favorite_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
     let mut out = Vec::new();
     for uuid in catalog.favorite_ids() {
@@ -67,5 +72,15 @@ mod tests {
         let picks = favorite_stations(&cat).unwrap();
         assert_eq!(picks.len(), 1);
         assert_eq!(picks[0].uuid, "u2");
+    }
+
+    #[test]
+    fn toggle_and_reload_reflects_change() {
+        let mut cat = catalog();
+        let favs = toggle_and_reload(&mut cat, "u1").unwrap();
+        assert_eq!(favs.len(), 1);
+        assert_eq!(favs[0].uuid, "u1");
+        let favs = toggle_and_reload(&mut cat, "u1").unwrap();
+        assert!(favs.is_empty());
     }
 }
