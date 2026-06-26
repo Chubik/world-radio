@@ -53,6 +53,7 @@ fn main() -> anyhow::Result<()> {
         return search_cli(&cli);
     }
 
+    radio_core::single_instance::take_over();
     tui::run(cli.no_emoji)
 }
 
