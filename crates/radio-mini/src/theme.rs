@@ -1,6 +1,7 @@
 use egui::Color32;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct Theme {
     pub name: &'static str,
     pub bg: Color32,
@@ -28,6 +29,7 @@ impl Theme {
         }
     }
 
+    #[allow(dead_code)]
     pub fn nord() -> Self {
         Self {
             name: "nord",
