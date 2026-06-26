@@ -14,6 +14,7 @@ pub struct MiniApp {
     tray: Option<Tray>,
     tray_ready: bool,
     visible: bool,
+    hidden_once: bool,
     catalog: Catalog,
     fav_path: PathBuf,
     hist_path: PathBuf,
@@ -48,6 +49,7 @@ impl MiniApp {
             tray: None,
             tray_ready: false,
             visible: false,
+            hidden_once: false,
             catalog,
             fav_path,
             hist_path,
@@ -195,6 +197,11 @@ impl MiniApp {
 
 impl eframe::App for MiniApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.hidden_once {
+            self.hidden_once = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+
         self.handle_tray_events();
         self.handle_tray_clicks(ctx);
         let focused = ctx.input(|i| i.focused);
