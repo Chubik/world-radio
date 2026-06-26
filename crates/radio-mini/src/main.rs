@@ -2,6 +2,7 @@ mod app;
 mod catalog_src;
 mod state;
 mod theme;
+mod tray;
 
 use eframe::egui;
 
