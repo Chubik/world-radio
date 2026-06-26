@@ -15,6 +15,8 @@ pub struct MiniApp {
     tray_ready: bool,
     visible: bool,
     hidden_once: bool,
+    click_tx: std::sync::mpsc::Sender<tray_icon::TrayIconEvent>,
+    click_rx: std::sync::mpsc::Receiver<tray_icon::TrayIconEvent>,
     catalog: Catalog,
     fav_path: PathBuf,
     hist_path: PathBuf,
@@ -42,6 +44,7 @@ impl MiniApp {
             engine.set_volume(state.volume);
         }
 
+        let (click_tx, click_rx) = std::sync::mpsc::channel();
         let mut app = Self {
             state,
             theme: Theme::amber(),
@@ -50,6 +53,8 @@ impl MiniApp {
             tray_ready: false,
             visible: false,
             hidden_once: false,
+            click_tx,
+            click_rx,
             catalog,
             fav_path,
             hist_path,
@@ -104,11 +109,17 @@ impl MiniApp {
         }
     }
 
-    fn ensure_tray(&mut self) {
+    fn ensure_tray(&mut self, ctx: &egui::Context) {
         if self.tray_ready {
             return;
         }
         self.tray_ready = true;
+        let wake = ctx.clone();
+        let tx = self.click_tx.clone();
+        tray_icon::TrayIconEvent::set_event_handler(Some(move |event| {
+            let _ = tx.send(event);
+            wake.request_repaint();
+        }));
         self.tray = crate::tray::build()
             .map_err(|e| eprintln!("tray init failed: {e}"))
             .ok();
@@ -116,7 +127,7 @@ impl MiniApp {
 
     fn handle_tray_clicks(&mut self, ctx: &egui::Context) {
         use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
-        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+        while let Ok(event) = self.click_rx.try_recv() {
             let toggle = matches!(
                 event,
                 TrayIconEvent::Click {
@@ -173,7 +184,7 @@ impl eframe::App for MiniApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
 
-        self.ensure_tray();
+        self.ensure_tray(ctx);
         self.handle_tray_clicks(ctx);
         let focused = ctx.input(|i| i.focused);
         if self.visible && !focused {
