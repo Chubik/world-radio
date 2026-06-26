@@ -6,7 +6,30 @@ mod tray;
 
 use eframe::egui;
 
+const DETACH_MARKER: &str = "WR_MINI_DETACHED";
+
+fn detach_to_background() {
+    if std::env::var_os(DETACH_MARKER).is_some() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let spawned = std::process::Command::new(exe)
+        .env(DETACH_MARKER, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    match spawned {
+        Ok(_) => std::process::exit(0),
+        Err(e) => eprintln!("detach failed, running in foreground: {e}"),
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    detach_to_background();
+
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([300.0, 200.0])
