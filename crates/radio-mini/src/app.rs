@@ -5,6 +5,7 @@ use crate::tray::Tray;
 use eframe::egui;
 use radio_audio::AudioEngine;
 use radio_core::catalog::{Cache, Catalog, Health};
+use std::path::PathBuf;
 
 pub struct MiniApp {
     state: MiniState,
@@ -12,6 +13,14 @@ pub struct MiniApp {
     engine: Option<AudioEngine>,
     tray: Option<Tray>,
     tray_ready: bool,
+    #[allow(dead_code)]
+    catalog: Catalog,
+    #[allow(dead_code)]
+    fav_path: PathBuf,
+    #[allow(dead_code)]
+    hist_path: PathBuf,
+    #[allow(dead_code)]
+    blacklist_path: PathBuf,
 }
 
 impl MiniApp {
@@ -19,13 +28,10 @@ impl MiniApp {
         let data = radio_core::paths::ensure_data_dir()?;
         let cache = Cache::open(&data.join("stations.db"))?;
         let health = Health::load(&data.join("station_health.json"));
-        let catalog = Catalog::load(
-            cache,
-            health,
-            &data.join("favorites.json"),
-            &data.join("history.json"),
-            &data.join("blacklist.json"),
-        );
+        let fav_path = data.join("favorites.json");
+        let hist_path = data.join("history.json");
+        let blacklist_path = data.join("blacklist.json");
+        let catalog = Catalog::load(cache, health, &fav_path, &hist_path, &blacklist_path);
 
         let all = catalog_src::all_stations(&catalog)?;
         let favorites = catalog_src::favorite_stations(&catalog)?;
@@ -44,6 +50,10 @@ impl MiniApp {
             engine,
             tray: None,
             tray_ready: false,
+            catalog,
+            fav_path,
+            hist_path,
+            blacklist_path,
         })
     }
 
