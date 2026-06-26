@@ -13,6 +13,7 @@ pub struct MiniApp {
     engine: Option<AudioEngine>,
     tray: Option<Tray>,
     tray_ready: bool,
+    visible: bool,
     catalog: Catalog,
     fav_path: PathBuf,
     hist_path: PathBuf,
@@ -46,6 +47,7 @@ impl MiniApp {
             engine,
             tray: None,
             tray_ready: false,
+            visible: false,
             catalog,
             fav_path,
             hist_path,
@@ -114,6 +116,27 @@ impl MiniApp {
         }
     }
 
+    fn handle_tray_clicks(&mut self, ctx: &egui::Context) {
+        use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+        while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+            let toggle = matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Down,
+                    ..
+                }
+            );
+            if toggle {
+                self.visible = !self.visible;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.visible));
+                if self.visible {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+            }
+        }
+    }
+
     fn set_volume(&mut self, v: f32) {
         self.state.set_volume(v);
         if let Some(engine) = &self.engine {
@@ -148,6 +171,12 @@ impl MiniApp {
 impl eframe::App for MiniApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_tray_events();
+        self.handle_tray_clicks(ctx);
+        let focused = ctx.input(|i| i.focused);
+        if self.visible && !focused {
+            self.visible = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
 
         if let Some(engine) = &self.engine {
             while let Some(status) = engine.poll_status() {
