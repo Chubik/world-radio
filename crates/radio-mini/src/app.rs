@@ -121,7 +121,6 @@ impl MiniApp {
         }
     }
 
-    #[allow(dead_code)]
     fn now_is_favorite(&self) -> bool {
         match &self.state.now {
             Some(pick) => self.catalog.is_favorite(&pick.uuid),
@@ -129,7 +128,6 @@ impl MiniApp {
         }
     }
 
-    #[allow(dead_code)]
     fn toggle_favorite(&mut self) {
         let Some(pick) = self.state.now.clone() else {
             return;
@@ -167,32 +165,116 @@ impl eframe::App for MiniApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let t = self.theme;
-        let title = self
+        let phase = self.state.phase;
+        let (dot_label, primary_label) = crate::state::state_labels(phase);
+
+        let dot_color = match phase {
+            Phase::Idle => t.dim,
+            Phase::Buffering => t.warn,
+            Phase::Playing => t.ok,
+            Phase::Error => t.err,
+        };
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("▌r4dio").color(t.hi).strong());
+            ui.label(egui::RichText::new(dot_label).color(dot_color).small());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let meta = self.state.now.as_ref().map(|_| "live").unwrap_or("—");
+                ui.label(egui::RichText::new(meta).color(t.dim).small());
+            });
+        });
+
+        let station = self
             .state
             .now
             .as_ref()
             .map(|n| n.name.clone())
             .unwrap_or_else(|| "Nothing playing".into());
-        ui.colored_label(t.hi, title);
-
-        let status = match self.state.phase {
-            Phase::Idle => "idle",
-            Phase::Buffering => "connecting…",
-            Phase::Playing => "live",
-            Phase::Error => "offline",
+        let now_text = match phase {
+            Phase::Idle => "press Shuffle to start listening",
+            Phase::Buffering => "connecting to stream…",
+            Phase::Playing => "now playing",
+            Phase::Error => "stream offline — couldn't connect",
         };
-        ui.colored_label(t.dim, status);
+        let now_color = match phase {
+            Phase::Error => t.err,
+            Phase::Buffering => t.warn,
+            Phase::Idle => t.dim,
+            Phase::Playing => t.accent,
+        };
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                let name_color = match phase {
+                    Phase::Idle => t.dim,
+                    _ => t.bright,
+                };
+                ui.label(egui::RichText::new(station).color(name_color).strong());
+                ui.label(egui::RichText::new(now_text).color(now_color).small());
+            });
+            if self.state.now.is_some() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    let star = match self.now_is_favorite() {
+                        true => "★",
+                        false => "☆",
+                    };
+                    if ui.button(egui::RichText::new(star).color(t.hi)).clicked() {
+                        self.toggle_favorite();
+                    }
+                });
+            }
+        });
 
         ui.horizontal(|ui| {
-            if ui.button("⤮ Shuffle").clicked() {
-                self.shuffle();
+            let bars = crate::state::spectrum_bars(16);
+            let active = phase == Phase::Playing;
+            let bar_color = match active {
+                true => t.hi,
+                false => t.dim,
+            };
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 16.0), egui::Sense::hover());
+            let painter = ui.painter_at(rect);
+            let bw = rect.width() / bars.len() as f32;
+            for (i, &h) in bars.iter().enumerate() {
+                let x = rect.left() + i as f32 * bw;
+                let bar_h = (h * rect.height()).max(2.0);
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(x + 1.0, rect.bottom() - bar_h),
+                        egui::pos2(x + bw - 1.0, rect.bottom()),
+                    ),
+                    0.0,
+                    bar_color,
+                );
             }
-            let playing =
-                self.state.phase == Phase::Playing || self.state.phase == Phase::Buffering;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new("VOL").color(t.dim).small());
+                let mut v = self.state.volume;
+                if ui
+                    .add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
+                    .changed()
+                {
+                    self.set_volume(v);
+                }
+            });
+        });
+
+        ui.horizontal(|ui| {
             if ui
-                .button(if playing { "⏸ Stop" } else { "▶ Play" })
+                .button(
+                    egui::RichText::new(format!("⇄ {primary_label}"))
+                        .color(t.bg)
+                        .strong(),
+                )
                 .clicked()
             {
+                self.shuffle();
+            }
+            let playing = phase == Phase::Playing || phase == Phase::Buffering;
+            let glyph = match playing {
+                true => "⏸",
+                false => "▶",
+            };
+            if ui.button(egui::RichText::new(glyph).color(t.fg)).clicked() {
                 match playing {
                     true => self.stop(),
                     false => self.shuffle(),
@@ -201,24 +283,16 @@ impl eframe::App for MiniApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label("vol");
-            let mut v = self.state.volume;
-            if ui
-                .add(egui::Slider::new(&mut v, 0.0..=1.0).show_value(false))
-                .changed()
-            {
-                self.set_volume(v);
-            }
-        });
-
-        let scope_all = self.state.scope == Scope::All;
-        ui.horizontal(|ui| {
-            if ui.selectable_label(scope_all, "all").clicked() {
+            let scope_all = self.state.scope == Scope::All;
+            if ui.selectable_label(scope_all, "ALL").clicked() {
                 self.state.set_scope(Scope::All);
             }
-            if ui.selectable_label(!scope_all, "favorites").clicked() {
+            if ui.selectable_label(!scope_all, "★ FAVS").clicked() {
                 self.state.set_scope(Scope::Favorites);
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new("shuffle scope").color(t.dim).small());
+            });
         });
     }
 }
