@@ -9,12 +9,17 @@ use ratatui::Frame;
 pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     let dim_focus = matches!(model.browse.focus, BrowseFocus::Filters { .. });
     let playing_uuid = model.now.uuid.as_deref();
-    let items: Vec<ListItem> = model
-        .browse
-        .rows
+
+    let viewport = area.height.saturating_sub(2) as usize;
+    let total = model.browse.rows.len();
+    let offset = centered_offset(model.browse.selected, total, viewport);
+    let end = (offset + viewport).min(total);
+
+    let items: Vec<ListItem> = model.browse.rows[offset..end]
         .iter()
         .enumerate()
-        .map(|(i, r)| {
+        .map(|(vi, r)| {
+            let i = offset + vi;
             row_line(
                 model,
                 pal,
@@ -49,11 +54,8 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
         render_placeholder(model, pal, frame, area, &header);
         return;
     }
-    let viewport = area.height.saturating_sub(2) as usize;
-    let offset = centered_offset(model.browse.selected, model.browse.rows.len(), viewport);
     let mut list_state = ListState::default();
-    list_state.select(Some(model.browse.selected));
-    *list_state.offset_mut() = offset;
+    list_state.select(Some(model.browse.selected - offset));
     let list = List::new(items)
         .block(Block::bordered().title(header))
         .highlight_style(Style::default().bg(pal.accent).fg(pal.bg).bold());
@@ -268,5 +270,21 @@ mod tests {
     #[test]
     fn clamps_to_bottom_near_end() {
         assert_eq!(centered_offset(99, 100, 10), 90);
+    }
+
+    #[test]
+    fn visible_slice_invariant_keeps_selection_in_window() {
+        // for a huge list, only `viewport` rows are ever built, and the
+        // selection stays within [0, viewport) after subtracting the offset
+        let total = 12_150;
+        let viewport = 30;
+        for selected in [0usize, 1, 15, 6000, 12_119, 12_149] {
+            let offset = centered_offset(selected, total, viewport);
+            let end = (offset + viewport).min(total);
+            assert!(selected >= offset, "selected below window");
+            assert!(selected < end, "selected above window");
+            assert!(selected - offset < viewport, "local index out of viewport");
+            assert!(end - offset <= viewport, "slice wider than viewport");
+        }
     }
 }
