@@ -2,6 +2,8 @@
 mod catalog_src;
 #[allow(dead_code)]
 mod state;
+#[allow(dead_code)]
+mod backend;
 
 fn main() {
     tauri::Builder::default()
