@@ -14,8 +14,7 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([300.0, 200.0])
             .with_decorations(false)
             .with_taskbar(false)
-            .with_always_on_top()
-            .with_visible(false),
+            .with_always_on_top(),
         ..Default::default()
     };
 

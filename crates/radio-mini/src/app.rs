@@ -125,7 +125,7 @@ impl MiniApp {
             .ok();
     }
 
-    fn handle_tray_clicks(&mut self, ctx: &egui::Context) {
+    fn handle_tray_clicks(&mut self, frame: &eframe::Frame) {
         use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
         while let Ok(event) = self.click_rx.try_recv() {
             let toggle = matches!(
@@ -138,11 +138,18 @@ impl MiniApp {
             );
             if toggle {
                 self.visible = !self.visible;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(self.visible));
-                if self.visible {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                }
+                self.apply_visibility(frame);
             }
+        }
+    }
+
+    fn apply_visibility(&self, frame: &eframe::Frame) {
+        let Some(window) = frame.winit_window() else {
+            return;
+        };
+        window.set_visible(self.visible);
+        if self.visible {
+            window.focus_window();
         }
     }
 
@@ -178,18 +185,19 @@ impl MiniApp {
 }
 
 impl eframe::App for MiniApp {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if !self.hidden_once {
             self.hidden_once = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.visible = false;
+            self.apply_visibility(frame);
         }
 
         self.ensure_tray(ctx);
-        self.handle_tray_clicks(ctx);
+        self.handle_tray_clicks(frame);
         let focused = ctx.input(|i| i.focused);
         if self.visible && !focused {
             self.visible = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.apply_visibility(frame);
         }
 
         if let Some(engine) = &self.engine {
@@ -197,7 +205,10 @@ impl eframe::App for MiniApp {
                 self.state.apply_status(status);
             }
         }
-        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        match self.visible {
+            true => ctx.request_repaint(),
+            false => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+        }
 
         let t = self.theme;
         let mut visuals = egui::Visuals::dark();
