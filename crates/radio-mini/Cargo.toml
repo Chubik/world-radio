@@ -10,16 +10,17 @@ repository = "https://github.com/Chubik/world-radio"
 name = "world-radio-mini"
 path = "src/main.rs"
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
 radio-core = { path = "../radio-core" }
 radio-audio = { path = "../radio-audio" }
 anyhow = "1"
 fastrand = "2"
-eframe = "0.35"
-egui = "0.35"
-tray-icon = "0.24"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-winit = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 
 [dev-dependencies]
