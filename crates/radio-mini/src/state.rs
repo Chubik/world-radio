@@ -22,6 +22,7 @@ pub enum Phase {
     Error,
 }
 
+#[allow(dead_code)]
 pub fn state_labels(phase: Phase) -> (&'static str, &'static str) {
     match phase {
         Phase::Idle => ("IDLE", "SHUFFLE"),
