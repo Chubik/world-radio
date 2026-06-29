@@ -21,14 +21,12 @@ the user's phone via Firebase App Distribution (not Google Play yet).
 
 ## Decisions (from brainstorm)
 
-1. **Stack:** **Flutter (Dart)** + `just_audio` + `audio_service`. Originally we leaned to
-   Kotlin for battery, but the team already has a working Flutter mobile setup in the
-   `preferans` project (emulator targets, Firebase App Distribution, `make mobile-flutter-*`)
-   — reusing that proven infrastructure is the fastest path to a tested build "tomorrow."
-   `audio_service` runs a background audio service and wires the SAME Android MediaSession under
-   the hood, so lock-screen / Bluetooth / steering-wheel controls still work. Battery is
-   acceptable because playback is the only long-running work and the UI is destroyed when
-   backgrounded; no visualizer.
+1. **Stack:** native **Kotlin** + **Media3 (ExoPlayer + MediaSession)**. Chosen for battery —
+   the user's #1 priority for an all-day in-car player: background audio runs as a
+   `MediaSessionService` with no UI engine resident while the screen is off. MediaSession gives
+   wheel / lock-screen / headset controls for free (standard Android media transport).
+   (`preferans` is only the reference for *how Firebase App Distribution is wired*, not the
+   language — preferans is Flutter; this app is Kotlin.)
 2. **Catalog:** **radio-browser API** directly from Kotlin (same source as desktop). Shuffle =
    random station from an API query. Favorites sync with desktop is **deferred** (no sync
    server yet) — "redo later if time."
