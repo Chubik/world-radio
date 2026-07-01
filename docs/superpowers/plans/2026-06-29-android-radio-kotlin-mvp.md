@@ -14,7 +14,7 @@
 - **Language: Kotlin** (battery is the #1 priority — native MediaSessionService, no UI engine in background). `preferans` is the reference only for *how Firebase App Distribution is wired*, not the language.
 - Package id / applicationId: `net.vchub.r4dio` (everything ships under vchub.net, like `net.vchub.preferans`). App display name: `World Radio`.
 - **Use the already-installed Android SDK at `~/android` — do not download SDK packages.** Available: `compileSdk=34` (platforms `android-34`, build-tools `34.0.0`), cmdline-tools/latest, emulator with system-images android-34-ext12/35/36. No NDK (Media3 doesn't need it).
-- **Java/JDK: pin toolchain to 17** — the proven value from preferans's working Android Gradle (`JavaVersion.VERSION_17`, `jvmTarget = 17`). Do not experiment with other versions.
+- **Do NOT install a JDK and do NOT bootstrap Gradle.** Use the team pattern from preferans/subtick: JDK comes from Android Studio's bundled runtime (`JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home`, confirmed present), and the Gradle wrapper (`gradlew` + `gradle/wrapper/gradle-wrapper.jar` + properties) is **copied from `~/dev/projects/preferans/mobile_flutter/android/`** (gradle 8.14), never generated. Java compat is pinned to 17 in the gradle files (`JavaVersion.VERSION_17`, `jvmTarget = 17`) — the proven value; do not experiment.
 - minSdk 26 (Android Auto + media session). targetSdk 34.
 - Steering-wheel/lock-screen controls via MediaSession standard commands: play/pause → player; next → shuffle a new station; previous → previous station (or shuffle if none).
 - Catalog source: `https://all.api.radio-browser.info/json/stations/search` (same as desktop).
@@ -35,8 +35,7 @@
 - Create: `android/app/src/main/kotlin/net/vchub/r4dio/MainActivity.kt`
 - Create: `android/app/src/main/res/values/strings.xml`
 - Create: `android/.gitignore`
-- Create: `android/gradle/wrapper/gradle-wrapper.properties`
-- Create the Gradle wrapper (`gradlew`, `gradle-wrapper.jar`)
+- Copy (from preferans): `android/gradlew` + `android/gradle/wrapper/{gradle-wrapper.jar,gradle-wrapper.properties}`
 - Modify: `Makefile` (repo root — add android targets)
 
 **Interfaces:**
@@ -205,24 +204,29 @@ class MainActivity : ComponentActivity() {
 }
 ```
 
-- [ ] **Step 10: Create `android/gradle/wrapper/gradle-wrapper.properties`**
+- [ ] **Step 10: Copy the Gradle wrapper from preferans (do NOT generate it)**
 
-```properties
-distributionBase=GRADLE_USER_HOME
-distributionPath=wrapper/dists
-distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip
-zipStorePath=wrapper/dists
-zipStoreBase=GRADLE_USER_HOME
+The team already has a working wrapper. Copy it verbatim into `android/`:
+```bash
+mkdir -p android/gradle/wrapper
+cp ~/dev/projects/preferans/mobile_flutter/android/gradlew android/gradlew
+cp ~/dev/projects/preferans/mobile_flutter/android/gradlew.bat android/gradlew.bat 2>/dev/null || true
+cp ~/dev/projects/preferans/mobile_flutter/android/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar
+cp ~/dev/projects/preferans/mobile_flutter/android/gradle/wrapper/gradle-wrapper.properties android/gradle/wrapper/gradle-wrapper.properties
+chmod +x android/gradlew
 ```
+This brings gradle 8.14 (the version preferans builds with). Do not download or bootstrap Gradle.
 
-- [ ] **Step 11: Generate the Gradle wrapper jar + scripts**
+- [ ] **Step 11: (removed — wrapper is copied in Step 10, not generated)**
 
-The wrapper jar/scripts aren't hand-written. Use the cmdline-tools-provided Gradle is not present, so bootstrap once: download `https://services.gradle.org/distributions/gradle-8.9-bin.zip` to a temp dir, unzip, and run `<tmp>/gradle-8.9/bin/gradle wrapper --gradle-version 8.9` inside `android/`. Commit the generated `gradlew`, `gradlew.bat`, and `gradle/wrapper/gradle-wrapper.jar`. If the download is blocked in the environment, report BLOCKED with the exact obstacle — the wrapper gates all later builds.
+Nothing to do here; proceed to Step 12.
 
 - [ ] **Step 12: Add Makefile android targets** — create/append `Makefile` at the repo root:
 
 ```makefile
 ANDROID_HOME ?= $(HOME)/android
+JAVA_HOME    ?= /Applications/Android Studio.app/Contents/jbr/Contents/Home
+export JAVA_HOME
 EMULATOR_ID ?= $(shell $(ANDROID_HOME)/emulator/emulator -list-avds 2>/dev/null | head -1)
 ADB := $(ANDROID_HOME)/platform-tools/adb
 
@@ -249,10 +253,15 @@ android-run: android-install
 	$(ADB) shell monkey -p net.vchub.r4dio -c android.intent.category.LAUNCHER 1
 ```
 
-- [ ] **Step 13: Build the empty app**
+- [ ] **Step 13: Build the empty app** (using Android Studio's JDK, not a system one)
 
-Run: `cd android && ANDROID_HOME=$HOME/android ./gradlew assembleDebug`
-Expected: `BUILD SUCCESSFUL`; APK at `android/app/build/outputs/apk/debug/app-debug.apk`. First run downloads AGP/Kotlin/Compose Gradle deps (not SDK) — may take minutes. JDK toolchain is pinned to 17; if the host JDK differs, Gradle uses the `compileOptions`/`kotlinOptions` 17 settings — report any toolchain error with exact text.
+Run:
+```bash
+cd android && \
+  JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
+  ANDROID_HOME=$HOME/android ./gradlew assembleDebug
+```
+Expected: `BUILD SUCCESSFUL`; APK at `android/app/build/outputs/apk/debug/app-debug.apk`. First run downloads AGP/Kotlin/Compose Gradle plugins (NOT the SDK, NOT Gradle itself — the wrapper was copied) — may take minutes. If a Gradle/AGP-vs-JDK error appears, confirm `JAVA_HOME` points at the Android Studio jbr (present) — do not install another JDK; report the exact error.
 
 - [ ] **Step 14: Commit**
 
