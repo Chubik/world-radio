@@ -25,3 +25,16 @@ android-install: android-build android-emu
 
 android-run: android-install
 	$(ADB) shell monkey -p net.vchub.r4dio -c android.intent.category.LAUNCHER 1
+
+RADIO_APP_ID ?= 1:106521889249:android:aa2fa06ebc14c4cd532aa0
+RADIO_TESTERS ?= valentin.chub@gmail.com
+
+.PHONY: android-distribute
+android-distribute: android-build
+	printf "World Radio test build\n\nRecent changes:\n%s\n" "$$(git log -5 --pretty=format:'- %s')" > android/release-notes.txt
+	firebase appdistribution:distribute \
+	  android/app/build/outputs/apk/debug/app-debug.apk \
+	  --app $(RADIO_APP_ID) \
+	  --testers "$(RADIO_TESTERS)" \
+	  --release-notes-file android/release-notes.txt \
+	  --project r4dio-vchub
