@@ -35,6 +35,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        val player = exo
+        when (player != null && player.playWhenReady && player.mediaItemCount > 0) {
+            true -> {}
+            false -> pauseAllPlayersAndStopSelf()
+        }
+    }
+
     override fun onDestroy() {
         session?.release()
         exo?.release()
@@ -48,6 +56,8 @@ class PlaybackService : MediaSessionService() {
             val fetched = catalog.fetchStations()
             stations = fetched
             Log.i("r4dio", "loaded ${fetched.size} stations")
+            val pick = pickRandom(fetched) ?: return@thread
+            main.post { playPick(pick) }
         }
     }
 
