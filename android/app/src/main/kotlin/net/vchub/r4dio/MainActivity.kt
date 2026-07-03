@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
 
@@ -63,7 +64,13 @@ class MainActivity : ComponentActivity() {
                 Text(text = title, color = Color(0xFFFFF0C0))
                 Spacer(Modifier.height(24.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { controller?.seekToNext() }) { Text("⇄ SHUFFLE") }
+                    Button(onClick = {
+                        val c = controller ?: return@Button
+                        c.sendCustomCommand(
+                            SessionCommand(CMD_SHUFFLE, Bundle.EMPTY),
+                            Bundle.EMPTY,
+                        )
+                    }) { Text("⇄ SHUFFLE") }
                     Button(onClick = {
                         val c = controller ?: return@Button
                         if (c.isPlaying) c.pause() else c.play()
