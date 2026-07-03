@@ -1,5 +1,6 @@
 package net.vchub.r4dio
 
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -46,6 +47,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_WIDGET_SHUFFLE -> shuffle()
+            ACTION_WIDGET_TOGGLE -> exo?.let { if (it.isPlaying) it.pause() else it.play() }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
         val player = exo
@@ -101,6 +110,7 @@ class PlaybackService : MediaSessionService() {
     private fun playPick(pick: Station) {
         val player = exo ?: return
         current = pick
+        RadioWidgetProvider.refresh(this, pick.name)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
