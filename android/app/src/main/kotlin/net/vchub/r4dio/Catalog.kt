@@ -11,6 +11,17 @@ fun pickRandom(stations: List<Station>, rng: Random = Random.Default): Station? 
     return playable[rng.nextInt(playable.size)]
 }
 
+fun pickForScope(
+    scope: Scope,
+    catalog: List<Station>,
+    favs: List<Station>,
+    rng: Random = Random.Default,
+): Station? =
+    when (scope) {
+        Scope.ALL -> pickRandom(catalog, rng)
+        Scope.FAVS -> FavLogic.pickFav(favs, rng)
+    }
+
 class Catalog(private val client: OkHttpClient = OkHttpClient()) {
     private val json = Json { ignoreUnknownKeys = true }
 
