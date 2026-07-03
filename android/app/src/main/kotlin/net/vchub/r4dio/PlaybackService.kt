@@ -36,9 +36,38 @@ class PlaybackService : MediaSessionService() {
     private val favStore by lazy { FavStore(this) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
+    private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
+    private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
+
+    private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
+        .setDisplayName("shuffle")
+        .setCustomIconResId(R.drawable.ic_shuffle)
+        .setSessionCommand(shuffleCommand)
+        .build()
+
+    private fun starButton(isFav: Boolean) = CommandButton.Builder(
+        if (isFav) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED,
+    )
+        .setDisplayName("favs")
+        .setCustomIconResId(R.drawable.ic_star)
+        .setSessionCommand(starCommand)
+        .build()
+
+    private suspend fun refreshCustomLayout() {
+        val favs = favStore.currentFavUuids()
+        val isFav = current?.uuid?.let { favs.contains(it) } ?: false
+        session?.setCustomLayout(listOf(shuffleButton, starButton(isFav)))
+    }
+
     override fun onCreate() {
         super.onCreate()
         val player = ExoPlayer.Builder(this).build()
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                current?.let { RadioWidgetProvider.refresh(this@PlaybackService, it.name, isPlaying) }
+            }
+        })
         exo = player
         session = MediaSession.Builder(this, player)
             .setCallback(Callback())
@@ -110,7 +139,7 @@ class PlaybackService : MediaSessionService() {
     private fun playPick(pick: Station) {
         val player = exo ?: return
         current = pick
-        RadioWidgetProvider.refresh(this, pick.name)
+        RadioWidgetProvider.refresh(this, pick.name, true)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
@@ -131,25 +160,10 @@ class PlaybackService : MediaSessionService() {
         player.setMediaItem(item)
         player.prepare()
         player.play()
+        scope.launch { refreshCustomLayout() }
     }
 
     private inner class Callback : MediaSession.Callback {
-        private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
-        private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
-        private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
-
-        private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
-            .setDisplayName("shuffle")
-            .setCustomIconResId(R.drawable.ic_shuffle)
-            .setSessionCommand(shuffleCommand)
-            .build()
-
-        private val starButton = CommandButton.Builder(CommandButton.ICON_STAR_UNFILLED)
-            .setDisplayName("favs")
-            .setCustomIconResId(R.drawable.ic_star)
-            .setSessionCommand(starCommand)
-            .build()
-
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -162,7 +176,7 @@ class PlaybackService : MediaSessionService() {
                     .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
-                .setCustomLayout(listOf(shuffleButton, starButton))
+                .setCustomLayout(listOf(shuffleButton, starButton(false)))
                 .build()
         }
 
@@ -181,7 +195,10 @@ class PlaybackService : MediaSessionService() {
                     val st = current
                     when (st) {
                         null -> {}
-                        else -> scope.launch { favStore.toggleFav(st) }
+                        else -> scope.launch {
+                            favStore.toggleFav(st)
+                            refreshCustomLayout()
+                        }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
