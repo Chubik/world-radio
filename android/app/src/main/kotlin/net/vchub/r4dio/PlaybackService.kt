@@ -67,6 +67,11 @@ class PlaybackService : MediaSessionService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 current?.let { RadioWidgetProvider.refresh(this@PlaybackService, it.name, isPlaying) }
             }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                Log.w("r4dio", "playback error: ${error.errorCodeName}, skipping station")
+                shuffle()
+            }
         })
         exo = player
         session = MediaSession.Builder(this, player)
@@ -157,10 +162,15 @@ class PlaybackService : MediaSessionService() {
             .setUri(pick.url)
             .setMediaMetadata(metadata)
             .build()
-        player.setMediaItem(item)
-        player.prepare()
-        player.play()
-        scope.launch { refreshCustomLayout() }
+        val started = runCatching {
+            player.setMediaItem(item)
+            player.prepare()
+            player.play()
+        }
+        when (started.isFailure) {
+            true -> Log.w("r4dio", "cannot play ${pick.name}: ${started.exceptionOrNull()?.message}")
+            false -> scope.launch { refreshCustomLayout() }
+        }
     }
 
     private inner class Callback : MediaSession.Callback {
