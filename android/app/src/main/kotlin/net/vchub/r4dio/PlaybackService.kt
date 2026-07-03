@@ -111,6 +111,7 @@ class PlaybackService : MediaSessionService() {
             .setStation(pick.name)
             .setIsBrowsable(false)
             .setIsPlayable(true)
+            .setArtworkData(crtArtworkPng(), MediaMetadata.PICTURE_TYPE_FRONT_COVER)
             .build()
         val item = MediaItem.Builder()
             .setUri(pick.url)
