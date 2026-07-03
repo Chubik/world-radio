@@ -24,3 +24,20 @@ data class Station(
 
 fun ApiStation.toStation(): Station =
     Station(stationuuid, name, urlResolved, countrycode, codec, bitrate)
+
+@Serializable
+data class FavStation(
+    val uuid: String,
+    val name: String,
+    val url: String,
+    val country: String,
+    val codec: String,
+    val bitrate: Int,
+) {
+    fun toStation(): Station = Station(uuid, name, url, country, codec, bitrate)
+
+    companion object {
+        fun of(s: Station): FavStation =
+            FavStation(s.uuid, s.name, s.url, s.country, s.codec, s.bitrate)
+    }
+}
