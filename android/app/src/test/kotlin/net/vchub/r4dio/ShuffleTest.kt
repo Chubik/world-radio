@@ -27,4 +27,24 @@ class ShuffleTest {
         assertTrue(p.uuid == "a" || p.uuid == "b")
         assertTrue(p.url.isNotBlank())
     }
+
+    @Test
+    fun pickForScope_all_usesCatalog() {
+        val cat = listOf(st("a", "http://a"))
+        val p = pickForScope(Scope.ALL, cat, emptyList(), Random(1))
+        assertEquals("a", p?.uuid)
+    }
+
+    @Test
+    fun pickForScope_favs_usesFavs() {
+        val cat = listOf(st("a", "http://a"))
+        val favs = listOf(st("f", "http://f"))
+        val p = pickForScope(Scope.FAVS, cat, favs, Random(1))
+        assertEquals("f", p?.uuid)
+    }
+
+    @Test
+    fun pickForScope_favs_emptyReturnsNull() {
+        assertNull(pickForScope(Scope.FAVS, listOf(st("a", "http://a")), emptyList()))
+    }
 }

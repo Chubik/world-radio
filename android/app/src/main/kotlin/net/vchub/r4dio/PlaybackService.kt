@@ -14,16 +14,26 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
+const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var exo: ExoPlayer? = null
     private val catalog = Catalog()
     @Volatile private var stations: List<Station> = emptyList()
+    @Volatile private var current: Station? = null
     private val main = Handler(Looper.getMainLooper())
+    private val favStore by lazy { FavStore(this) }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate() {
         super.onCreate()
@@ -50,6 +60,7 @@ class PlaybackService : MediaSessionService() {
         exo?.release()
         session = null
         exo = null
+        scope.cancel()
         super.onDestroy()
     }
 
@@ -64,24 +75,32 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun shuffle() {
-        val current = stations
-        when (current.isEmpty()) {
-            true -> thread {
-                val fetched = catalog.fetchStations()
-                stations = fetched
-                Log.i("r4dio", "refetched ${fetched.size} stations for shuffle")
-                val pick = pickRandom(fetched) ?: return@thread
-                main.post { playPick(pick) }
-            }
-            false -> {
-                val pick = pickRandom(current) ?: return
-                playPick(pick)
+        scope.launch {
+            val sc = favStore.currentScope()
+            val favs = favStore.currentCachedFavs()
+            val cat = withReadyCatalog()
+            val pick = pickForScope(sc, cat, favs)
+            when (pick) {
+                null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
+                else -> playPick(pick)
             }
         }
     }
 
+    private suspend fun withReadyCatalog(): List<Station> {
+        val cur = stations
+        if (cur.isNotEmpty()) return cur
+        val fetched = withContext(Dispatchers.IO) {
+            catalog.fetchStations()
+        }
+        stations = fetched
+        Log.i("r4dio", "fetched ${fetched.size} stations for shuffle")
+        return fetched
+    }
+
     private fun playPick(pick: Station) {
         val player = exo ?: return
+        current = pick
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
@@ -105,6 +124,7 @@ class PlaybackService : MediaSessionService() {
     private inner class Callback : MediaSession.Callback {
         private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
         private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
+        private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
 
         private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
             .setDisplayName("shuffle")
@@ -126,6 +146,7 @@ class PlaybackService : MediaSessionService() {
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(shuffleCommand)
                     .add(starCommand)
+                    .add(scopeCommand)
                     .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
@@ -145,7 +166,22 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_STAR -> {
-                    Log.i("r4dio", "star toggled (favs not yet wired)")
+                    val st = current
+                    when (st) {
+                        null -> {}
+                        else -> scope.launch { favStore.toggleFav(st) }
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_SCOPE -> {
+                    scope.launch {
+                        val next = when (favStore.currentScope()) {
+                            Scope.ALL -> Scope.FAVS
+                            Scope.FAVS -> Scope.ALL
+                        }
+                        favStore.setScope(next)
+                        shuffle()
+                    }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
