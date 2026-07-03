@@ -24,7 +24,6 @@ private val HI = Color(0xFFFFC457)
 private val ACCENT = Color(0xFFFF8A3D)
 private val DIM = Color(0xFF6E5430)
 private val BRIGHT = Color(0xFFFFF0C0)
-private val RULE = Color(0xFF3A2C17)
 
 data class NowPlayingState(
     val station: String,

@@ -176,8 +176,9 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_SCOPE -> {
+                    val target = args.getString("scope")?.let { runCatching { Scope.valueOf(it) }.getOrNull() }
                     scope.launch {
-                        val next = when (favStore.currentScope()) {
+                        val next = target ?: when (favStore.currentScope()) {
                             Scope.ALL -> Scope.FAVS
                             Scope.FAVS -> Scope.ALL
                         }
