@@ -2,13 +2,13 @@
    Keeps the CRT identity inside Android's media conventions.
    Exports: AndroidNotif, AndroidWidget, AndroidCompact, AndroidShade. */
 
-function AndroidArt({ t, size = 44 }) {
-  // album-art tile standing in for the station: CRT square with ▌WR + mini spectrum
+function AndroidArt({ t, size = 44, state = "playing" }) {
+  // album-art tile standing in for the station: CRT square with the tray glyph
   return (
     <div style={{ width: size, height: size, borderRadius: 8, position: "relative", overflow: "hidden", background: t.bg, boxShadow: `inset 0 0 0 1px ${t.rule}`, flex: "none" }}>
       <div style={{ position: "absolute", inset: 0, backgroundImage: window.crtOverlay(t), mixBlendMode: "overlay", opacity: 0.7 }} />
       <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <span style={{ fontFamily: window.WR_MONO, fontWeight: 700, fontSize: size * 0.3, color: t.hi, textShadow: t.light ? "none" : `0 0 6px ${t.glow}` }}>▌WR</span>
+        <window.WRTrayGlyph color={t.hi} size={size * 0.52} state={state} />
       </div>
     </div>
   );
@@ -35,12 +35,12 @@ function AndroidNotif({ themeKey = "amber", state = "playing", scope = "all" }) 
     <div style={{ width: 300, boxSizing: "border-box", borderRadius: 18, background: t.panel, padding: 13, boxShadow: `inset 0 0 0 1px ${t.rule}, 0 12px 34px -10px rgba(0,0,0,0.5)`, fontFamily: window.WR_SANS }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9 }}>
         <window.WRTrayGlyph color={t.hi} size={13} state={isPlaying ? "playing" : "idle"} />
-        <span style={{ fontFamily: window.WR_MONO, fontSize: 10, color: t.dim, letterSpacing: "0.04em" }}>World Radio</span>
+        <span style={{ fontFamily: window.WR_MONO, fontSize: 10, color: t.dim, letterSpacing: "0.04em" }}>r4dio</span>
         <window.StateDot t={t} state={state} />
         <span style={{ marginLeft: "auto", fontFamily: window.WR_MONO, fontSize: 9, color: t.dim }}>now</span>
       </div>
       <div style={{ display: "flex", gap: 11 }}>
-        <AndroidArt t={t} size={48} />
+        <AndroidArt t={t} size={48} state={isPlaying ? "playing" : isBuffering ? "buffering" : "idle"} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 13.5, color: isError ? t.err : t.bright, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{station}</div>
           <div style={{ fontFamily: window.WR_MONO, fontSize: 10.5, color: isError ? t.err : isBuffering ? t.warn : t.accent, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>{isPlaying ? "♪ " : ""}{now}</div>
@@ -123,4 +123,64 @@ function AndroidCompact({ themeKey = "amber", state = "playing", scope = "all" }
   );
 }
 
-Object.assign(window, { AndroidNotif, AndroidWidget, AndroidCompact, AndroidArt });
+/* ── Quick Settings tile — Android's truest analog of a menu-bar icon ── */
+function AndroidQSTile({ themeKey = "amber", state = "playing", active = true }) {
+  const t = window.WR_THEMES[themeKey];
+  const playing = state === "playing";
+  const sub = state === "playing" ? "Playing" : state === "buffering" ? "Connecting…" : state === "error" ? "Offline" : "Tap to play";
+  return (
+    <div style={{ width: 168, height: 60, borderRadius: 30, display: "flex", alignItems: "center", gap: 11, padding: "0 8px 0 8px", boxSizing: "border-box",
+      background: active ? t.hi : "rgba(255,255,255,0.07)", color: active ? t.bg : "#e8e8ea",
+      boxShadow: active ? "none" : "inset 0 0 0 1px rgba(255,255,255,0.10)" }}>
+      <span style={{ width: 42, height: 42, borderRadius: "50%", flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: active ? "rgba(0,0,0,0.13)" : "rgba(255,255,255,0.08)" }}>
+        <window.WRTrayGlyph color={active ? t.bg : "#e8e8ea"} size={20} state={active ? state : "idle"} />
+      </span>
+      <div style={{ lineHeight: 1.25, minWidth: 0 }}>
+        <div style={{ fontFamily: window.WR_MONO, fontWeight: 700, fontSize: 13, letterSpacing: "-0.01em" }}>r<span style={{ color: active ? t.bg : t.hi }}>4</span>dio</div>
+        <div style={{ fontFamily: window.WR_MONO, fontSize: 9.5, opacity: 0.82, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+/* neutral system tile, for the shade context around r4dio */
+function QSNeutral({ label, glyph, on = false }) {
+  return (
+    <div style={{ width: 168, height: 60, borderRadius: 30, display: "flex", alignItems: "center", gap: 11, padding: "0 8px", boxSizing: "border-box",
+      background: on ? "#cfe0ff" : "rgba(255,255,255,0.07)", color: on ? "#0a2a5a" : "#cfd2d8", boxShadow: on ? "none" : "inset 0 0 0 1px rgba(255,255,255,0.10)" }}>
+      <span style={{ width: 42, height: 42, borderRadius: "50%", flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 17,
+        background: on ? "rgba(10,42,90,0.12)" : "rgba(255,255,255,0.08)" }}>{glyph}</span>
+      <div style={{ lineHeight: 1.25 }}>
+        <div style={{ fontFamily: window.WR_SANS, fontWeight: 600, fontSize: 12.5 }}>{label}</div>
+        <div style={{ fontFamily: window.WR_MONO, fontSize: 9.5, opacity: 0.7 }}>{on ? "On" : "Off"}</div>
+      </div>
+    </div>
+  );
+}
+
+/* notification shade — the Android "tray": QS tiles + the ongoing r4dio notification */
+function AndroidShade({ themeKey = "amber", state = "playing" }) {
+  return (
+    <div style={{ width: 360, borderRadius: 30, overflow: "hidden", background: "linear-gradient(180deg,#0b0d12,#15171d)", padding: "14px 14px 18px", boxShadow: "0 26px 60px -16px rgba(0,0,0,0.6)", boxSizing: "border-box" }}>
+      {/* status row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 6px 12px", fontFamily: window.WR_MONO, fontSize: 11, color: "#cfd2d8" }}>
+        <span>{window.nowClock()}</span>
+        <span style={{ display: "flex", gap: 8, alignItems: "center" }}><span>􀙇</span><span>􀊝</span><span>84%</span></span>
+      </div>
+      {/* QS grid — r4dio sits among system tiles, highlighted/active */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
+        <AndroidQSTile themeKey={themeKey} state={state} active />
+        <QSNeutral label="Wi-Fi" glyph="􀙇" on />
+        <QSNeutral label="Bluetooth" glyph="􀺨" />
+        <QSNeutral label="Flashlight" glyph="􀛭" />
+      </div>
+      {/* the ongoing media notification */}
+      <div style={{ filter: "none" }}>
+        <AndroidNotif themeKey={themeKey} state={state} scope="all" />
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { AndroidNotif, AndroidWidget, AndroidCompact, AndroidArt, AndroidQSTile, QSNeutral, AndroidShade });
