@@ -26,6 +26,14 @@ class Catalog(private val client: OkHttpClient = OkHttpClient()) {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun fetchStations(limit: Int = 200): List<Station> {
+        repeat(2) { attempt ->
+            val result = runCatching { fetchOnce(limit) }.getOrDefault(emptyList())
+            if (result.isNotEmpty()) return result
+        }
+        return runCatching { fetchOnce(limit) }.getOrDefault(emptyList())
+    }
+
+    private fun fetchOnce(limit: Int): List<Station> {
         val url =
             "https://all.api.radio-browser.info/json/stations/search" +
                 "?limit=$limit&hidebroken=true&order=clickcount&reverse=true"
