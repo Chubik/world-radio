@@ -27,8 +27,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: ALSA dev headers (cpal needs libasound)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: system libs (cpal needs alsa, tauri needs gtk/glib/webkit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libglib2.0-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
 
       - name: fmt
         run: cargo fmt --all --check
