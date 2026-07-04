@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["crates/radio-core", "crates/radio-tui"]
+members = ["crates/radio-core", "crates/radio-audio", "crates/radio-tui", "crates/radio-mini"]

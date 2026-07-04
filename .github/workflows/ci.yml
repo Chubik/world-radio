@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [dev, main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -8,6 +10,9 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   rust:
@@ -22,8 +27,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: ALSA dev headers (cpal needs libasound)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: system libs (cpal needs alsa, tauri needs gtk/glib/webkit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libglib2.0-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
 
       - name: fmt
         run: cargo fmt --all --check
@@ -33,3 +41,57 @@ jobs:
 
       - name: test
         run: cargo test --workspace
+
+  android-release:
+    name: android apk beta release
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: latest
+
+      - name: install sdk packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+
+      - name: build debug apk
+        run: cd android && ./gradlew assembleDebug
+
+      - name: package apk and checksum
+        id: pkg
+        run: |
+          version=$(grep versionName android/app/build.gradle.kts | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          apk="r4dio-${version}-beta.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$apk"
+          sha256sum "$apk" > SHA256SUMS
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+
+      - name: release notes
+        run: |
+          {
+            printf '⚠️ Beta / debug-signed build — not for production. Installs on any Android 8+ device.\n\n'
+            printf '## Install\n\nDownload `%s`, then verify:\n\n' "${{ steps.pkg.outputs.apk }}"
+            printf '```\nsha256sum -c SHA256SUMS\n```\n\n'
+            printf '## Recent changes\n\n'
+            git log -12 --pretty=format:'- %s' | grep -iE 'feat|fix' || true
+          } > release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.pkg.outputs.version }}
+          name: v${{ steps.pkg.outputs.version }} — Android beta
+          body_path: release-notes.md
+          prerelease: true
+          files: |
+            ${{ steps.pkg.outputs.apk }}
+            SHA256SUMS

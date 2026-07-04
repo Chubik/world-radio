@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="amber">#D49A3A</color>
+    <color name="amber_hi">#FFC457</color>
+    <color name="bg">#15100B</color>
+    <color name="panel">#1B1510</color>
+    <color name="accent">#FF8A3D</color>
+    <color name="dim">#6E5430</color>
+    <color name="bright">#FFF0C0</color>
+    <color name="rule">#3A2C17</color>
+</resources>

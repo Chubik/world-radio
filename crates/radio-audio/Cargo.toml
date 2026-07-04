@@ -1,0 +1,18 @@
+[package]
+name = "radio-audio"
+version = "1.2.0"
+edition = "2021"
+license = "MIT"
+description = "Native audio engine for World Radio: streaming, decode, crossfade, output."
+repository = "https://github.com/Chubik/world-radio"
+
+[dependencies]
+radio-core = { path = "../radio-core" }
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+symphonia = { version = "0.6", features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "flac", "pcm"] }
+cpal = "0.17"
+ringbuf = "0.5"
+
+[dev-dependencies]
+mockito = "1"

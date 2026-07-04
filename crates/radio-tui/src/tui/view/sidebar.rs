@@ -12,6 +12,20 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     frame.render_widget(p, area);
 }
 
+pub fn modal_height(model: &Model) -> u16 {
+    let active_group = match model.browse.focus {
+        BrowseFocus::Filters { group, .. } => group,
+        BrowseFocus::Stations => 0,
+    };
+    let options = groups(model)[active_group].1.len() as u16;
+    panel_height(options)
+}
+
+fn panel_height(option_count: u16) -> u16 {
+    // 3 header rows (tabs, hint, spacer) + options + 2 border rows
+    option_count + 5
+}
+
 pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, area);
     frame.render_widget(
@@ -19,20 +33,8 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         area,
     );
     let lines = build_active_group_lines(model, pal);
-    let box_area = centered_box(area, lines.len() as u16 + 2);
     let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
-    frame.render_widget(p, box_area);
-}
-
-fn centered_box(area: Rect, content_height: u16) -> Rect {
-    let h = content_height.min(area.height);
-    let y = area.y + (area.height.saturating_sub(h)) / 3;
-    Rect {
-        x: area.x,
-        y,
-        width: area.width,
-        height: h,
-    }
+    frame.render_widget(p, area);
 }
 
 type FilterGroup = (&'static str, Vec<(String, bool)>, bool);
@@ -180,4 +182,20 @@ fn bitrate_options(current: Option<u32>) -> Vec<(String, bool)> {
         ("≥256 kbps".to_string(), current == Some(256)),
         ("≥320 kbps".to_string(), current == Some(320)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panel_height_fits_options_plus_chrome() {
+        // 5 status options -> 5 options + 3 header rows + 2 borders = 10
+        assert_eq!(panel_height(5), 10);
+    }
+
+    #[test]
+    fn panel_height_grows_with_options() {
+        assert!(panel_height(20) > panel_height(5));
+    }
 }

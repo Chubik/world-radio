@@ -82,6 +82,9 @@ fn volume_label(model: &Model) -> String {
 }
 
 fn render_spectrum(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
+    if model.spectrum_style.is_off() {
+        return;
+    }
     if model.spectrum_bars.is_empty() || area.width == 0 || area.height == 0 {
         return;
     }

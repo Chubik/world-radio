@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "World Radio Mini",
+  "version": "1.2.0",
+  "identifier": "net.r4dio.mini",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "popover",
+        "url": "index.html",
+        "width": 300,
+        "height": 220,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false
+      }
+    ],
+    "macOSPrivateApi": true,
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "app",
+    "macOS": {}
+  }
+}
