@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
+const val CMD_STOP = "net.vchub.r4dio.STOP"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -39,11 +40,17 @@ class PlaybackService : MediaSessionService() {
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
     private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
+    private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
         .setCustomIconResId(R.drawable.ic_shuffle)
         .setSessionCommand(shuffleCommand)
+        .build()
+
+    private val stopButton = CommandButton.Builder(CommandButton.ICON_STOP)
+        .setDisplayName("stop")
+        .setSessionCommand(stopCommand)
         .build()
 
     private fun starButton(isFav: Boolean) = CommandButton.Builder(
@@ -54,10 +61,17 @@ class PlaybackService : MediaSessionService() {
         .setSessionCommand(starCommand)
         .build()
 
+    private fun scopeButton(scope: Scope) = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+        .setDisplayName(if (scope == Scope.FAVS) "favs only" else "all")
+        .setCustomIconResId(if (scope == Scope.FAVS) R.drawable.ic_scope_favs else R.drawable.ic_scope_all)
+        .setSessionCommand(scopeCommand)
+        .build()
+
     private suspend fun refreshCustomLayout() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
-        session?.setCustomLayout(listOf(shuffleButton, starButton(isFav)))
+        val sc = favStore.currentScope()
+        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), stopButton))
     }
 
     override fun onCreate() {
@@ -77,6 +91,9 @@ class PlaybackService : MediaSessionService() {
         session = MediaSession.Builder(this, player)
             .setCallback(Callback())
             .build()
+        val provider = androidx.media3.session.DefaultMediaNotificationProvider.Builder(this).build()
+        provider.setSmallIcon(R.drawable.ic_stat_r4dio)
+        setMediaNotificationProvider(provider)
         loadStations()
     }
 
@@ -184,6 +201,7 @@ class PlaybackService : MediaSessionService() {
                     .add(shuffleCommand)
                     .add(starCommand)
                     .add(scopeCommand)
+                    .add(stopCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -195,7 +213,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, starButton(false)))
+                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), stopButton))
                 .build()
         }
 
@@ -208,6 +226,11 @@ class PlaybackService : MediaSessionService() {
             when (customCommand.customAction) {
                 CMD_SHUFFLE -> {
                     shuffle()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_STOP -> {
+                    exo?.stop()
+                    pauseAllPlayersAndStopSelf()
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_STAR -> {
@@ -229,6 +252,7 @@ class PlaybackService : MediaSessionService() {
                             Scope.FAVS -> Scope.ALL
                         }
                         favStore.setScope(next)
+                        refreshCustomLayout()
                         shuffle()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
