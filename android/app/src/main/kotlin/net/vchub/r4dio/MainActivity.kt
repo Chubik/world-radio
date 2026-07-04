@@ -5,94 +5,81 @@ import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 
 class MainActivity : ComponentActivity() {
+    private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
-    private var controllerFuture: com.google.common.util.concurrent.ListenableFuture<MediaController>? = null
-    private val favStore by lazy { FavStore(this) }
+    private var listener: Player.Listener? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val closeGuard = Runnable { finish() }
 
     private val requestPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { render() }
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            connect()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         when (needsNotificationPermission()) {
             true -> requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            false -> render()
+            false -> connect()
         }
     }
 
-    private fun render() {
+    private fun connect() {
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
         future.addListener({
-            if (isDestroyed || isFinishing) return@addListener
-            val c = future.get()
-            controller = c
-            if (c.mediaItemCount == 0) {
-                c.sendCustomCommand(SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+            val c = runCatching { future.get() }.getOrNull()
+            when (c == null) {
+                true -> finish()
+                false -> onConnected(c)
             }
-            setContent { Ui(c) }
         }, MoreExecutors.directExecutor())
     }
 
-    @Composable
-    private fun Ui(c: MediaController) {
-        var isPlaying by remember { mutableStateOf(c.isPlaying) }
-        var title by remember { mutableStateOf(c.mediaMetadata.title?.toString() ?: "") }
-        var artist by remember { mutableStateOf(c.mediaMetadata.artist?.toString() ?: "") }
-        DisposableEffect(c) {
-            val l = object : Player.Listener {
-                override fun onIsPlayingChanged(playing: Boolean) { isPlaying = playing }
-                override fun onMediaMetadataChanged(m: androidx.media3.common.MediaMetadata) {
-                    title = m.title?.toString() ?: ""
-                    artist = m.artist?.toString() ?: ""
+    private fun onConnected(c: MediaController) {
+        controller = c
+        when (c.isPlaying) {
+            true -> finish()
+            false -> waitForPlayback(c)
+        }
+    }
+
+    private fun waitForPlayback(c: MediaController) {
+        val l = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                when (isPlaying) {
+                    true -> finish()
+                    false -> {}
                 }
             }
-            c.addListener(l)
-            onDispose { c.removeListener(l) }
         }
-        val favs by favStore.favUuids.collectAsState(initial = emptySet())
-        val scope by favStore.scope.collectAsState(initial = Scope.ALL)
-        val meta = artist
-        val currentUuid = c.currentMediaItem?.mediaId ?: ""
-        val hint = when {
-            scope == Scope.FAVS && favs.isEmpty() -> "no favourites yet"
-            else -> null
+        listener = l
+        c.addListener(l)
+        when (c.mediaItemCount == 0) {
+            true -> c.sendCustomCommand(SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY)
+            false -> {}
         }
-        NowPlayingScreen(
-            state = NowPlayingState(
-                station = title.ifBlank { "r4dio" },
-                subtitle = "",
-                meta = meta,
-                isPlaying = isPlaying,
-                isFav = favs.contains(currentUuid),
-                scope = scope,
-                hint = hint,
-            ),
-            onShuffle = { c.sendCustomCommand(SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY) },
-            onPlayPause = { if (c.isPlaying) c.pause() else c.play() },
-            onStar = { c.sendCustomCommand(SessionCommand(CMD_STAR, android.os.Bundle.EMPTY), android.os.Bundle.EMPTY) },
-            onScope = { target ->
-                val b = android.os.Bundle().apply { putString("scope", target.name) }
-                c.sendCustomCommand(SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY), b)
-            },
-        )
+        main.postDelayed(closeGuard, 15000)
     }
 
     override fun onDestroy() {
-        controller?.release()
+        main.removeCallbacks(closeGuard)
+        listener?.let { controller?.removeListener(it) }
+        listener = null
         controller = null
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
@@ -100,7 +87,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun needsNotificationPermission(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return false
+        }
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) != PackageManager.PERMISSION_GRANTED
     }
 }
