@@ -92,7 +92,8 @@ class PlaybackService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
         val player = exo
-        when (player != null && player.playWhenReady && player.mediaItemCount > 0) {
+        val stillLoading = player != null && player.mediaItemCount == 0
+        when (player != null && (player.playWhenReady || stillLoading)) {
             true -> {}
             false -> pauseAllPlayersAndStopSelf()
         }
@@ -184,8 +185,16 @@ class PlaybackService : MediaSessionService() {
                     .add(starCommand)
                     .add(scopeCommand)
                     .build()
+            val playerCommands =
+                MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT)
+                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS)
+                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommands)
                 .setCustomLayout(listOf(shuffleButton, starButton(false)))
                 .build()
         }
