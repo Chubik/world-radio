@@ -1,8 +1,8 @@
 # World Radio
 
-A terminal radio player for the whole planet — browse and play 30,000+ live
-internet stations without leaving your shell. Fast, keyboard-driven, no browser,
-no mouse.
+A radio player for the whole planet — browse and play 30,000+ live internet
+stations from your terminal, with a native Android app for background listening.
+Fast, keyboard-driven, no browser, no mouse.
 
 **Website:** [r4dio.net](https://r4dio.net)
 
@@ -46,6 +46,21 @@ curl -fsSL https://r4dio.net/install | sh
 
 Or download a release tarball directly from
 [r4dio.net](https://r4dio.net) and verify it against `SHA256SUMS`.
+
+## Android (beta)
+
+A native Android app (`net.vchub.r4dio`) plays in the background with a lock-screen /
+media-tray control — shuffle a station, mark favourites, filter shuffle to favourites,
+and stop, all from the notification. There is a home-screen widget too.
+
+Grab the APK from the [latest release](https://github.com/Chubik/world-radio/releases/latest)
+and verify it before installing:
+
+```sh
+sha256sum -c SHA256SUMS
+```
+
+> ⚠️ Beta, debug-signed build — not on Play Store yet. Requires Android 8+.
 
 ## Layout
 
