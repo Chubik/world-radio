@@ -12,12 +12,10 @@ path = "src/main.rs"
 
 [dependencies]
 radio-core = { path = "../radio-core" }
+radio-audio = { path = "../radio-audio" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-symphonia = { version = "0.6", features = ["mp3", "aac", "isomp4", "ogg", "vorbis", "flac", "pcm"] }
-cpal = "0.17"
-ringbuf = "0.5"
 ratatui = "0.30"
 crossterm = "0.29"
 rustfft = "6.4"

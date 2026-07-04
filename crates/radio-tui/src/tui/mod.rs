@@ -10,7 +10,6 @@ pub mod update;
 pub mod view;
 pub mod worker;
 
-use crate::audio::AudioEngine;
 use crate::tui::config::Config;
 use crate::tui::keymap::key_to_msg;
 use crate::tui::message::{Effect, Msg};
@@ -24,6 +23,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::ExecutableCommand;
+use radio_audio::AudioEngine;
 use radio_core::catalog::{Cache, Catalog, Health};
 use radio_core::paths;
 use ratatui::backend::CrosstermBackend;
@@ -166,23 +166,30 @@ fn event_loop(
     req_tx: &Sender<WorkerReq>,
     msg_rx: &Receiver<Msg>,
 ) -> anyhow::Result<()> {
+    terminal.draw(|f| view::view(model, f))?;
     loop {
         if model.should_quit {
             return Ok(());
         }
 
-        let tick = if model.is_playing() {
-            Duration::from_millis(33)
+        let tick = if model.is_animating() {
+            Duration::from_millis(66)
         } else {
             Duration::from_millis(150)
         };
         let start = Instant::now();
+        let mut needs_redraw = false;
 
         if event::poll(tick)? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(msg) = key_to_msg(model, key) {
-                    run_effects(update(model, msg), model, engine, req_tx);
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(msg) = key_to_msg(model, key) {
+                        run_effects(update(model, msg), model, engine, req_tx);
+                        needs_redraw = true;
+                    }
                 }
+                Event::Resize(_, _) => needs_redraw = true,
+                _ => {}
             }
         }
 
@@ -197,18 +204,21 @@ fn event_loop(
                 engine,
                 req_tx,
             );
+            needs_redraw = true;
         }
 
         while let Ok(msg) = msg_rx.try_recv() {
             run_effects(update(model, msg), model, engine, req_tx);
+            needs_redraw = true;
         }
 
-        if model.is_playing() {
+        if model.is_playing() && !model.spectrum_style.is_off() {
             let n = engine.read_tap(tap_buf);
             let width = terminal.size().map(|s| s.width).unwrap_or(80);
             let bars_width = (width.max(8) as usize).min(256);
             spectrum.set_divisor(model.fft_divisor);
             model.spectrum_bars = spectrum.analyze(&tap_buf[..n], bars_width);
+            needs_redraw = true;
         }
 
         run_effects(
@@ -217,7 +227,12 @@ fn event_loop(
             engine,
             req_tx,
         );
-        terminal.draw(|f| view::view(model, f))?;
+        if model.is_animating() {
+            needs_redraw = true;
+        }
+        if needs_redraw {
+            terminal.draw(|f| view::view(model, f))?;
+        }
 
         let elapsed = start.elapsed();
         if elapsed < tick {

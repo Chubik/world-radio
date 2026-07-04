@@ -1,0 +1,26 @@
+[package]
+name = "radio-mini"
+version = "1.2.0"
+edition = "2021"
+license = "MIT"
+description = "World Radio Mini: a tray companion that shuffles and plays stations."
+repository = "https://github.com/Chubik/world-radio"
+
+[[bin]]
+name = "world-radio-mini"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+radio-core = { path = "../radio-core" }
+radio-audio = { path = "../radio-audio" }
+anyhow = "1"
+fastrand = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+
+[dev-dependencies]

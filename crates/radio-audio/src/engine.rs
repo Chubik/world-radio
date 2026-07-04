@@ -1,10 +1,5 @@
-pub mod output;
-pub mod ring;
-pub mod slot;
-pub mod stream;
-
-pub use radio_core::audio::command::{Command, Status};
-
+use crate::{ring, slot};
+use crate::{Command, Status};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -51,7 +46,7 @@ impl SharedGain {
     }
 }
 
-use crate::audio::ring::SampleCons;
+use crate::ring::SampleCons;
 
 pub struct AudioEngine {
     cmd_tx: Sender<Command>,
@@ -67,7 +62,7 @@ const RING_CAP: usize = 48_000 * 2 * 2;
 
 impl AudioEngine {
     pub fn spawn() -> anyhow::Result<Self> {
-        use crate::audio::output::mix_output;
+        use crate::output::mix_output;
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
         use std::sync::mpsc;
         use std::thread;
@@ -116,7 +111,7 @@ impl AudioEngine {
                     cb_gain_b.get(),
                 );
             },
-            move |err| crate::log_warn!("output stream error: {err}"),
+            move |err| eprintln!("output stream error: {err}"),
             None,
         )?;
         out_stream.play()?;

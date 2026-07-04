@@ -1,5 +1,5 @@
-use crate::audio::ring::{SampleCons, SampleProd};
-use crate::audio::{Command, SharedGain, Status};
+use crate::ring::{SampleCons, SampleProd};
+use crate::{Command, SharedGain, Status};
 use radio_core::audio::crossfade::crossfade_mix;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -296,7 +296,7 @@ fn decode_slot(
     abort: &AtomicBool,
     ready_tx: &Sender<()>,
 ) -> anyhow::Result<()> {
-    use crate::audio::stream;
+    use crate::stream;
     use radio_core::audio::resample::Resampler;
     use ringbuf::traits::Producer;
     use symphonia::core::codecs::audio::AudioDecoderOptions;

@@ -30,6 +30,7 @@ pub fn render_grid(
             SpectrumStyle::Mirror => fill_mirror(&mut grid, col, level, height),
             SpectrumStyle::Dots => fill_dots(&mut grid, col, level, height),
             SpectrumStyle::Wave => fill_wave(&mut grid, col, level, height),
+            SpectrumStyle::Off => {}
         }
     }
     grid

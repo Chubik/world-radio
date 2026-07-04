@@ -31,6 +31,7 @@ pub enum SpectrumStyle {
     Mirror,
     Dots,
     Wave,
+    Off,
 }
 
 impl SpectrumStyle {
@@ -39,7 +40,8 @@ impl SpectrumStyle {
             SpectrumStyle::Bars => SpectrumStyle::Mirror,
             SpectrumStyle::Mirror => SpectrumStyle::Dots,
             SpectrumStyle::Dots => SpectrumStyle::Wave,
-            SpectrumStyle::Wave => SpectrumStyle::Bars,
+            SpectrumStyle::Wave => SpectrumStyle::Off,
+            SpectrumStyle::Off => SpectrumStyle::Bars,
         }
     }
 
@@ -49,7 +51,12 @@ impl SpectrumStyle {
             SpectrumStyle::Mirror => "mirror",
             SpectrumStyle::Dots => "dots",
             SpectrumStyle::Wave => "wave",
+            SpectrumStyle::Off => "off",
         }
+    }
+
+    pub fn is_off(self) -> bool {
+        matches!(self, SpectrumStyle::Off)
     }
 }
 
@@ -387,11 +394,27 @@ impl Model {
             Status::Playing { .. } | Status::Buffering | Status::Retrying(_)
         )
     }
+
+    pub fn is_animating(&self) -> bool {
+        self.is_playing()
+            || self.browse.loading
+            || self.browse.facets_loading
+            || self.browse.pending_online_search.is_some()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spectrum_cycle_includes_off_at_end() {
+        assert_eq!(SpectrumStyle::Wave.next(), SpectrumStyle::Off);
+        assert_eq!(SpectrumStyle::Off.next(), SpectrumStyle::Bars);
+        assert_eq!(SpectrumStyle::Off.label(), "off");
+        assert!(SpectrumStyle::Off.is_off());
+        assert!(!SpectrumStyle::Bars.is_off());
+    }
 
     #[test]
     fn select_next_wraps_at_end_and_select_prev_wraps_at_zero() {

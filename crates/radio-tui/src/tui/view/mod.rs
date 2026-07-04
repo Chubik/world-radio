@@ -25,7 +25,10 @@ pub fn view(model: &Model, frame: &mut Frame) {
         true => 2,
         false => 1,
     };
-    let header_h = info_h.max(header::SPECTRUM_H);
+    let header_h = match model.spectrum_style.is_off() {
+        true => info_h,
+        false => info_h.max(header::SPECTRUM_H),
+    };
     let rows = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Min(0),
@@ -68,7 +71,10 @@ fn render_body(model: &Model, pal: &crate::tui::theme::Palette, frame: &mut Fram
         return;
     }
     if area.width < 100 {
-        sidebar::render_modal(model, pal, frame, area);
+        let panel_h = sidebar::modal_height(model).min(area.height.saturating_sub(3));
+        let rows = Layout::vertical([Constraint::Min(3), Constraint::Length(panel_h)]).split(area);
+        station_list::render(model, pal, frame, rows[0]);
+        sidebar::render_modal(model, pal, frame, rows[1]);
         return;
     }
     let cols = Layout::horizontal([Constraint::Length(25), Constraint::Min(0)]).split(area);
