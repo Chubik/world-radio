@@ -25,7 +25,7 @@ fun pickForScope(
 class Catalog(private val client: OkHttpClient = OkHttpClient()) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun fetchStations(limit: Int = 200): List<Station> {
+    fun fetchStations(limit: Int = 1000): List<Station> {
         repeat(2) { attempt ->
             val result = runCatching { fetchOnce(limit) }.getOrDefault(emptyList())
             if (result.isNotEmpty()) return result
