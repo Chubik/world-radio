@@ -50,7 +50,7 @@ class PlaybackService : MediaSessionService() {
         if (isFav) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED,
     )
         .setDisplayName("favs")
-        .setCustomIconResId(R.drawable.ic_star)
+        .setCustomIconResId(if (isFav) R.drawable.ic_star else R.drawable.ic_star_outline)
         .setSessionCommand(starCommand)
         .build()
 
