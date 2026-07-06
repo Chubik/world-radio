@@ -26,6 +26,7 @@ const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
+const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -42,6 +43,7 @@ class PlaybackService : MediaSessionService() {
     private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
+    private val syncUiCommand = SessionCommand(CMD_SYNC_UI, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
@@ -52,6 +54,12 @@ class PlaybackService : MediaSessionService() {
     private val stopButton = CommandButton.Builder(CommandButton.ICON_STOP)
         .setDisplayName("stop")
         .setSessionCommand(stopCommand)
+        .build()
+
+    private val syncButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+        .setDisplayName("sync")
+        .setCustomIconResId(R.drawable.ic_sync)
+        .setSessionCommand(syncUiCommand)
         .build()
 
     private fun starButton(isFav: Boolean) = CommandButton.Builder(
@@ -72,7 +80,7 @@ class PlaybackService : MediaSessionService() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
-        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), stopButton))
+        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), syncButton, stopButton))
     }
 
     override fun onCreate() {
@@ -217,6 +225,7 @@ class PlaybackService : MediaSessionService() {
                     .add(starCommand)
                     .add(scopeCommand)
                     .add(stopCommand)
+                    .add(syncUiCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -228,7 +237,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), stopButton))
+                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), syncButton, stopButton))
                 .build()
         }
 
@@ -271,6 +280,12 @@ class PlaybackService : MediaSessionService() {
                         refreshCustomLayout()
                         shuffle()
                     }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_SYNC_UI -> {
+                    val intent = android.content.Intent(this@PlaybackService, SyncActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
