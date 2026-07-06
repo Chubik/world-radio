@@ -5,8 +5,26 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlin.random.Random
 
+private val EXCLUDED_COUNTRYCODES = setOf("RU", "BY")
+private val EXCLUDED_NAME_SUBSTRINGS = listOf(
+    "russia", "russian", "moscow", "moskva", "kremlin", "putin",
+    "россия", "русск", "москв", "kreml",
+    "беларус", "belarus", "минск", "minsk",
+)
+
+fun isExcluded(station: Station): Boolean {
+    if (station.country.uppercase() in EXCLUDED_COUNTRYCODES) {
+        return true
+    }
+    val haystack = station.name.lowercase()
+    return EXCLUDED_NAME_SUBSTRINGS.any { haystack.contains(it) }
+}
+
+fun allowedStation(station: Station): Boolean =
+    station.url.isNotBlank() && !isExcluded(station)
+
 fun pickRandom(stations: List<Station>, rng: Random = Random.Default): Station? {
-    val playable = stations.filter { it.url.isNotBlank() }
+    val playable = stations.filter { allowedStation(it) }
     if (playable.isEmpty()) return null
     return playable[rng.nextInt(playable.size)]
 }
@@ -45,7 +63,7 @@ class Catalog(private val client: OkHttpClient = OkHttpClient()) {
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful || body.isBlank()) return emptyList()
             val api = json.decodeFromString<List<ApiStation>>(body)
-            return api.map { it.toStation() }.filter { it.url.isNotBlank() }
+            return api.map { it.toStation() }.filter { allowedStation(it) }
         }
     }
 }

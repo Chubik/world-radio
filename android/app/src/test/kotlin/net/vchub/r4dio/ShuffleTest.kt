@@ -8,10 +8,44 @@ import kotlin.random.Random
 
 class ShuffleTest {
     private fun st(uuid: String, url: String) = Station(uuid, uuid, url, "", "", 0)
+    private fun stc(uuid: String, country: String, name: String = uuid) =
+        Station(uuid, name, "http://$uuid", country, "", 0)
 
     @Test
     fun pickRandom_returnsNull_forEmpty() {
         assertNull(pickRandom(emptyList()))
+    }
+
+    @Test
+    fun isExcluded_blocksRussiaByCountry() {
+        assertTrue(isExcluded(stc("a", "RU")))
+        assertTrue(isExcluded(stc("b", "ru")))
+    }
+
+    @Test
+    fun isExcluded_blocksBelarusByCountry() {
+        assertTrue(isExcluded(stc("a", "BY")))
+    }
+
+    @Test
+    fun isExcluded_blocksByNameSubstring() {
+        assertTrue(isExcluded(stc("a", "DE", "Radio Moscow")))
+        assertTrue(isExcluded(stc("b", "US", "Русское Радио")))
+    }
+
+    @Test
+    fun isExcluded_allowsOthers() {
+        assertTrue(!isExcluded(stc("a", "UA", "Radio Ukraine")))
+        assertTrue(!isExcluded(stc("b", "DE", "Antenne Bayern")))
+    }
+
+    @Test
+    fun pickRandom_neverPicksExcluded() {
+        val list = listOf(stc("ru", "RU"), stc("ua", "UA"))
+        repeat(20) {
+            val p = pickRandom(list, Random(it.toLong()))!!
+            assertEquals("ua", p.uuid)
+        }
     }
 
     @Test
