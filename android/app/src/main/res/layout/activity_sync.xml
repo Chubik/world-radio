@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@color/panel" android:padding="20dp">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="r4dio sync" android:textColor="@color/bright" android:textSize="18sp" android:textStyle="bold" />
+    <EditText android:id="@+id/key_input" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:hint="paste key r4-..." android:textColor="@color/bright" android:textColorHint="@color/dim"
+        android:layout_marginTop="12dp" android:inputType="textNoSuggestions" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="8dp">
+        <Button android:id="@+id/use_key" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="use key" />
+        <Button android:id="@+id/create" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="create new" />
+        <Button android:id="@+id/scan" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="scan qr" />
+    </LinearLayout>
+    <TextView android:id="@+id/key_shown" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="@color/amber_hi" android:textIsSelectable="true" android:layout_marginTop="14dp"
+        android:fontFamily="monospace" android:visibility="gone" />
+    <Button android:id="@+id/copy" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="copy" android:visibility="gone" />
+    <ImageView android:id="@+id/qr" android:layout_width="200dp" android:layout_height="200dp"
+        android:layout_gravity="center" android:layout_marginTop="12dp" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="14dp">
+        <Button android:id="@+id/logout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="log out" android:visibility="gone" />
+        <Button android:id="@+id/delete" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="delete account" android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>
