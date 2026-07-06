@@ -30,6 +30,10 @@ object FavLogic {
     }
 }
 
+object SyncMerge {
+    fun mergedFavs(local: Set<String>, remote: List<String>): Set<String> = local + remote
+}
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("r4dio")
 
 class FavStore(context: Context) {
@@ -39,6 +43,8 @@ class FavStore(context: Context) {
     private val keyFavs = stringSetPreferencesKey("fav_uuids")
     private val keyScope = stringPreferencesKey("scope")
     private val keyCached = stringPreferencesKey("cached_favs")
+    private val keySyncKey = stringPreferencesKey("sync_key")
+    private val keyBlocked = stringSetPreferencesKey("blocked_uuids")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
@@ -83,4 +89,24 @@ class FavStore(context: Context) {
     suspend fun currentFavUuids(): Set<String> = favUuids.first()
     suspend fun currentScope(): Scope = scope.first()
     suspend fun currentCachedFavs(): List<Station> = cachedFavs.first()
+
+    suspend fun syncKey(): String? = store.data.first()[keySyncKey]
+
+    suspend fun setSyncKey(key: String?) {
+        store.edit { prefs ->
+            when (key) {
+                null -> prefs.remove(keySyncKey)
+                else -> prefs[keySyncKey] = key
+            }
+        }
+    }
+
+    suspend fun currentBlocked(): Set<String> = store.data.first()[keyBlocked] ?: emptySet()
+
+    suspend fun applyMerged(favs: Set<String>, blocked: Set<String>) {
+        store.edit { prefs ->
+            prefs[keyFavs] = favs
+            prefs[keyBlocked] = blocked
+        }
+    }
 }
