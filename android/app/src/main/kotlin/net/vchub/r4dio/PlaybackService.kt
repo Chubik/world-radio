@@ -285,7 +285,13 @@ class PlaybackService : MediaSessionService() {
                 CMD_SYNC_UI -> {
                     val intent = android.content.Intent(this@PlaybackService, SyncActivity::class.java)
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(intent)
+                    val pending = android.app.PendingIntent.getActivity(
+                        this@PlaybackService,
+                        0,
+                        intent,
+                        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                    runCatching { pending.send() }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
