@@ -35,6 +35,7 @@ class PlaybackService : MediaSessionService() {
     @Volatile private var current: Station? = null
     private val main = Handler(Looper.getMainLooper())
     private val favStore by lazy { FavStore(this) }
+    private val syncClient = SyncClient()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
@@ -95,6 +96,7 @@ class PlaybackService : MediaSessionService() {
         provider.setSmallIcon(R.drawable.ic_stat_r4dio)
         setMediaNotificationProvider(provider)
         loadStations()
+        syncNow()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -132,6 +134,19 @@ class PlaybackService : MediaSessionService() {
             Log.i("r4dio", "loaded ${fetched.size} stations")
             val pick = pickRandom(fetched) ?: return@thread
             main.post { playPick(pick) }
+        }
+    }
+
+    private fun syncNow() {
+        scope.launch {
+            val key = favStore.syncKey() ?: return@launch
+            val local = SyncData(
+                favs = favStore.currentFavUuids().toList(),
+                blocked = favStore.currentBlocked().toList(),
+            )
+            val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet())
+            refreshCustomLayout()
         }
     }
 
@@ -240,6 +255,7 @@ class PlaybackService : MediaSessionService() {
                         else -> scope.launch {
                             favStore.toggleFav(st)
                             refreshCustomLayout()
+                            syncNow()
                         }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
