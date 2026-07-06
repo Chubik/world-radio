@@ -24,7 +24,7 @@ object FavLogic {
         }
 
     fun pickFav(cached: List<Station>, rng: Random = Random.Default): Station? {
-        val playable = cached.filter { it.url.isNotBlank() }
+        val playable = cached.filter { allowedStation(it) }
         if (playable.isEmpty()) return null
         return playable[rng.nextInt(playable.size)]
     }
