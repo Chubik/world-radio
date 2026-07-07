@@ -64,7 +64,8 @@ impl SyncClient {
             .client
             .delete(format!("{}/account", self.base_url))
             .bearer_auth(key)
-            .send()?;
+            .send()?
+            .error_for_status()?;
         Ok(resp.status().is_success())
     }
 }
@@ -125,5 +126,13 @@ mod tests {
         server.mock("DELETE", "/account").with_status(204).create();
         let c = SyncClient::new(server.url());
         assert!(c.delete("r4-k").unwrap());
+    }
+
+    #[test]
+    fn delete_401_is_err() {
+        let mut server = mockito::Server::new();
+        server.mock("DELETE", "/account").with_status(401).create();
+        let c = SyncClient::new(server.url());
+        assert!(c.delete("r4-bad").is_err());
     }
 }
