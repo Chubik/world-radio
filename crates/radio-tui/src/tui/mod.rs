@@ -88,6 +88,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     if let Some(uuid) = config.last_station.clone() {
         let _ = req_tx.send(WorkerReq::ResolveAndPlay(uuid));
     }
+    let _ = req_tx.send(WorkerReq::Sync);
 
     let loop_result = event_loop(
         &mut terminal,
