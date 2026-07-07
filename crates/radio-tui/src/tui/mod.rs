@@ -284,6 +284,15 @@ fn run_effects(
             Effect::Sync => {
                 let _ = req_tx.send(WorkerReq::Sync);
             }
+            Effect::SyncCreate => {
+                let _ = req_tx.send(WorkerReq::SyncCreate);
+            }
+            Effect::SyncLogout => {
+                let _ = req_tx.send(WorkerReq::SyncLogout);
+            }
+            Effect::SyncDelete => {
+                let _ = req_tx.send(WorkerReq::SyncDelete);
+            }
         }
     }
 }
