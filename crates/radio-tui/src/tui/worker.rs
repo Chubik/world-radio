@@ -59,6 +59,7 @@ pub fn spawn(
                 WorkerReq::LoadFacets => handle_load_facets(&catalog, &msg_tx),
                 WorkerReq::Blacklist(uuid) => {
                     catalog.toggle_blacklist(&uuid);
+                    handle_sync(&mut catalog, &paths, &msg_tx, false);
                 }
                 WorkerReq::Recheck(uuid) => {
                     catalog.clear_health(&uuid);
@@ -74,6 +75,7 @@ pub fn spawn(
                 }
                 WorkerReq::ToggleFavorite(uuid) => {
                     catalog.toggle_favorite(&uuid);
+                    handle_sync(&mut catalog, &paths, &msg_tx, false);
                 }
                 WorkerReq::RecordHistory(uuid) => catalog.record_history(&uuid),
                 WorkerReq::MarkFailed(uuid) => {
@@ -87,7 +89,7 @@ pub fn spawn(
                 }
                 WorkerReq::SaveState => save_all(&catalog, &paths),
                 WorkerReq::Sync => {
-                    handle_sync(&mut catalog, &paths, &msg_tx);
+                    handle_sync(&mut catalog, &paths, &msg_tx, true);
                 }
             }
         }
@@ -104,11 +106,13 @@ fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
     }
 }
 
-fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>) {
+fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>, announce: bool) {
     use radio_core::sync::{self, SyncClient, SyncData};
 
     let Some(key) = sync::load_key() else {
-        let _ = msg_tx.send(Msg::Notice("not linked — run: world-radio sync login".into()));
+        if announce {
+            let _ = msg_tx.send(Msg::Notice("not linked — run: world-radio sync login".into()));
+        }
         return;
     };
     let local = SyncData {
@@ -120,7 +124,9 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>)
         Ok(m) => m,
         Err(e) => {
             crate::log_warn!("worker: sync failed: {e}");
-            let _ = msg_tx.send(Msg::Notice("sync failed — check connection".into()));
+            if announce {
+                let _ = msg_tx.send(Msg::Notice("sync failed — check connection".into()));
+            }
             return;
         }
     };
@@ -135,11 +141,13 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>)
         }
     }
     save_all(catalog, paths);
-    let _ = msg_tx.send(Msg::Notice(format!(
-        "synced: {} favourites, {} blocked",
-        merged.favs.len(),
-        merged.blocked.len()
-    )));
+    if announce {
+        let _ = msg_tx.send(Msg::Notice(format!(
+            "synced: {} favourites, {} blocked",
+            merged.favs.len(),
+            merged.blocked.len()
+        )));
+    }
 }
 
 fn matches_filters(row: &StationRow, f: &crate::tui::model::BrowseFilters) -> bool {
