@@ -356,6 +356,7 @@ pub struct Model {
     pub keybind_capturing: bool,
     pub keybind_warning: Option<String>,
     pub spinner: usize,
+    pub notice: Option<String>,
 }
 
 impl Model {
@@ -381,6 +382,7 @@ impl Model {
             keybind_capturing: false,
             keybind_warning: None,
             spinner: 0,
+            notice: None,
         }
     }
 

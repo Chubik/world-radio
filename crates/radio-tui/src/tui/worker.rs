@@ -15,6 +15,7 @@ pub enum WorkerReq {
     MarkFailed(String),
     ResolveAndPlay(String),
     SaveState,
+    Sync,
     Shutdown,
 }
 
@@ -85,6 +86,9 @@ pub fn spawn(
                     handle_resolve_and_play(&catalog, &uuid, &msg_tx)
                 }
                 WorkerReq::SaveState => save_all(&catalog, &paths),
+                WorkerReq::Sync => {
+                    handle_sync(&mut catalog, &paths, &msg_tx);
+                }
             }
         }
         save_all(&catalog, &paths);
@@ -98,6 +102,44 @@ fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
     if let Err(e) = catalog.save_health(&paths.health) {
         crate::log_warn!("worker: failed to save health: {e}");
     }
+}
+
+fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>) {
+    use radio_core::sync::{self, SyncClient, SyncData};
+
+    let Some(key) = sync::load_key() else {
+        let _ = msg_tx.send(Msg::Notice("not linked — run: world-radio sync login".into()));
+        return;
+    };
+    let local = SyncData {
+        favs: catalog.favorite_ids().to_vec(),
+        blocked: catalog.blacklist_ids().to_vec(),
+    };
+    let client = SyncClient::new("https://r4dio.net");
+    let merged = match client.push(&key, &local) {
+        Ok(m) => m,
+        Err(e) => {
+            crate::log_warn!("worker: sync failed: {e}");
+            let _ = msg_tx.send(Msg::Notice("sync failed — check connection".into()));
+            return;
+        }
+    };
+    for uuid in &merged.favs {
+        if !catalog.is_favorite(uuid) {
+            catalog.toggle_favorite(uuid);
+        }
+    }
+    for uuid in &merged.blocked {
+        if !catalog.is_blacklisted(uuid) {
+            catalog.toggle_blacklist(uuid);
+        }
+    }
+    save_all(catalog, paths);
+    let _ = msg_tx.send(Msg::Notice(format!(
+        "synced: {} favourites, {} blocked",
+        merged.favs.len(),
+        merged.blocked.len()
+    )));
 }
 
 fn matches_filters(row: &StationRow, f: &crate::tui::model::BrowseFilters) -> bool {

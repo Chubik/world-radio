@@ -129,6 +129,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Stop => {
             vec![Effect::StopAudio]
         }
+        Msg::SyncNow => {
+            model.notice = Some("syncing…".to_string());
+            vec![Effect::Sync]
+        }
+        Msg::Notice(text) => {
+            model.notice = Some(text);
+            vec![]
+        }
         Msg::ToggleFavoriteSelected => toggle_favorite_selected(model),
         Msg::BlacklistSelected => blacklist_selected(model),
         Msg::RecheckSelected => recheck_selected(model),
@@ -1173,6 +1181,7 @@ mod tests {
             Effect::RecordHistory(_) => "history",
             Effect::MarkFailed(_) => "markfailed",
             Effect::SaveState => "savestate",
+            Effect::Sync => "sync",
         }
     }
 }
