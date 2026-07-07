@@ -137,6 +137,23 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.notice = Some("syncing…".to_string());
             vec![Effect::Sync]
         }
+        Msg::SyncCreate => vec![Effect::SyncCreate],
+        Msg::SyncLogout => vec![Effect::SyncLogout],
+        Msg::SyncDelete => vec![Effect::SyncDelete],
+        Msg::SyncCopy => {
+            match &model.sync_key {
+                None => model.notice = Some("no key to copy".to_string()),
+                Some(key) => {
+                    copy_osc52(key);
+                    model.notice = Some("copied".to_string());
+                }
+            }
+            vec![]
+        }
+        Msg::SyncKeyChanged(opt) => {
+            model.sync_key = opt;
+            vec![]
+        }
         Msg::Notice(text) => {
             model.notice = Some(text);
             vec![]
@@ -520,6 +537,14 @@ fn emit_search(model: &mut Model) -> Vec<Effect> {
     model.browse.loading = true;
     let q = model.browse.filters.to_query(&model.browse.query);
     vec![Effect::Search(q, model.browse.filters.clone())]
+}
+
+fn copy_osc52(text: &str) {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    print!("\x1b]52;c;{b64}\x07");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
 }
 
 fn tick(model: &mut Model, now: Instant) -> Vec<Effect> {
@@ -1186,6 +1211,9 @@ mod tests {
             Effect::MarkFailed(_) => "markfailed",
             Effect::SaveState => "savestate",
             Effect::Sync => "sync",
+            Effect::SyncCreate => "synccreate",
+            Effect::SyncLogout => "synclogout",
+            Effect::SyncDelete => "syncdelete",
         }
     }
 }

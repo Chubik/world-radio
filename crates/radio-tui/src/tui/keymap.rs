@@ -52,6 +52,16 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
             _ => None,
         };
     }
+    if model.overlay == Overlay::Sync {
+        return match ev.code {
+            KeyCode::Char('n') => Some(Msg::SyncCreate),
+            KeyCode::Char('c') => Some(Msg::SyncCopy),
+            KeyCode::Char('r') => Some(Msg::SyncNow),
+            KeyCode::Char('l') => Some(Msg::SyncLogout),
+            KeyCode::Char('d') => Some(Msg::SyncDelete),
+            _ => None,
+        };
+    }
     None
 }
 

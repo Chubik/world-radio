@@ -16,6 +16,9 @@ pub enum WorkerReq {
     ResolveAndPlay(String),
     SaveState,
     Sync,
+    SyncCreate,
+    SyncLogout,
+    SyncDelete,
     Shutdown,
 }
 
@@ -90,6 +93,36 @@ pub fn spawn(
                 WorkerReq::SaveState => save_all(&catalog, &paths),
                 WorkerReq::Sync => {
                     handle_sync(&mut catalog, &paths, &msg_tx, true);
+                }
+                WorkerReq::SyncCreate => {
+                    match radio_core::sync::SyncClient::new("https://r4dio.net").create_account()
+                    {
+                        Ok(key) => {
+                            if let Err(e) = radio_core::sync::store_key(&key) {
+                                crate::log_warn!("worker: store key failed: {e}");
+                            }
+                            let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
+                            let _ = msg_tx.send(Msg::Notice("account created and linked".into()));
+                            handle_sync(&mut catalog, &paths, &msg_tx, false);
+                        }
+                        Err(e) => {
+                            crate::log_warn!("worker: create account failed: {e}");
+                            let _ = msg_tx.send(Msg::Notice("could not create account".into()));
+                        }
+                    }
+                }
+                WorkerReq::SyncLogout => {
+                    let _ = radio_core::sync::clear_key();
+                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+                    let _ = msg_tx.send(Msg::Notice("logged out (favourites kept)".into()));
+                }
+                WorkerReq::SyncDelete => {
+                    if let Some(key) = radio_core::sync::load_key() {
+                        let _ = radio_core::sync::SyncClient::new("https://r4dio.net").delete(&key);
+                    }
+                    let _ = radio_core::sync::clear_key();
+                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+                    let _ = msg_tx.send(Msg::Notice("account deleted".into()));
                 }
             }
         }
