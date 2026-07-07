@@ -39,7 +39,12 @@ fn blacklist_path() -> std::path::PathBuf {
 fn favorites_from(ids: Vec<String>) -> Favorites {
     let mut f = Favorites::new();
     for id in ids {
-        f.toggle(&id);
+        match f.contains(&id) {
+            true => {}
+            false => {
+                f.toggle(&id);
+            }
+        }
     }
     f
 }
@@ -131,5 +136,11 @@ mod tests {
     fn favorites_from_builds_ordered_set() {
         let f = favorites_from(vec!["a".to_string(), "b".into(), "c".into()]);
         assert_eq!(f.ids(), &["a".to_string(), "b".into(), "c".into()]);
+    }
+
+    #[test]
+    fn favorites_from_dedups_without_dropping() {
+        let f = favorites_from(vec!["a".to_string(), "b".into(), "a".into()]);
+        assert_eq!(f.ids(), &["a".to_string(), "b".into()]);
     }
 }
