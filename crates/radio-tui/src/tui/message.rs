@@ -7,6 +7,7 @@ pub enum Msg {
     Quit,
     OpenSettings,
     OpenHelp,
+    OpenSyncOverlay,
     CloseOverlay,
     SettingsNav(bool),
     SettingsToggle,

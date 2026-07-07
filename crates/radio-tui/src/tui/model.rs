@@ -96,6 +96,7 @@ pub enum Overlay {
     Settings,
     Help,
     Keybindings,
+    Sync,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

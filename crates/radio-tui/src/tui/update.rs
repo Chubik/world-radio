@@ -21,6 +21,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.overlay = Overlay::Help;
             vec![]
         }
+        Msg::OpenSyncOverlay => {
+            model.overlay = Overlay::Sync;
+            vec![]
+        }
         Msg::CloseOverlay => {
             model.overlay = Overlay::None;
             vec![]
