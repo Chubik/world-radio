@@ -3,6 +3,7 @@ mod hint;
 mod overlay_help;
 mod overlay_keybind;
 mod overlay_settings;
+mod overlay_sync;
 mod sidebar;
 mod spectrum_render;
 mod station_list;
@@ -45,6 +46,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
         Overlay::Settings => overlay_settings::render(model, &pal, frame, settings_box(area)),
         Overlay::Help => overlay_help::render(&pal, frame, centered(area)),
         Overlay::Keybindings => overlay_keybind::render(model, &pal, frame, centered(area)),
+        Overlay::Sync => overlay_sync::render(model, &pal, frame, centered(area)),
     }
 }
 
