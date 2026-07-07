@@ -116,6 +116,7 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::Blacklist => Msg::BlacklistSelected,
         Action::Recheck => Msg::RecheckSelected,
         Action::Shuffle => Msg::Shuffle,
+        Action::Sync => Msg::SyncNow,
         Action::ToggleHideUnplayable => Msg::ToggleHideUnplayable,
         Action::EnterSearch => Msg::EnterSearch,
         Action::OpenSettings => Msg::OpenSettings,

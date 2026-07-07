@@ -280,6 +280,9 @@ fn run_effects(
             Effect::SaveState => {
                 let _ = req_tx.send(WorkerReq::SaveState);
             }
+            Effect::Sync => {
+                let _ = req_tx.send(WorkerReq::Sync);
+            }
         }
     }
 }
