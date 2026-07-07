@@ -208,10 +208,6 @@ fn row_line(
         true => model.glyphs.fav_on,
         false => " ",
     };
-    let cc = match r.country.trim().is_empty() {
-        true => "  ".to_string(),
-        false => format!("{:<2}", r.country),
-    };
     let meta = format!("{} {}k", r.codec, r.bitrate);
 
     let mut spans = vec![
@@ -219,9 +215,7 @@ fn row_line(
         Span::styled(format!("{fav} "), name_style),
         Span::styled(truncate(&r.name, NAME_W), name_style),
         Span::raw(" "),
-        Span::raw(model.glyphs.country(&r.country)),
-        Span::raw(" "),
-        Span::styled(cc, Style::default().fg(pal.dim)),
+        Span::styled(format!("{:<4}", model.glyphs.country(&r.country)), Style::default().fg(pal.dim)),
         Span::raw("  "),
         Span::styled(format!("{meta:<META_W$}"), Style::default().fg(pal.dim)),
         Span::raw(" "),

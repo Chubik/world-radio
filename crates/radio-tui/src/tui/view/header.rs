@@ -34,9 +34,8 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         .clone()
         .unwrap_or_else(|| "— idle —".to_string());
     let meta = format!(
-        "{} {} · {} {}k",
+        "{} · {} {}k",
         model.glyphs.country(&model.now.country),
-        model.now.country,
         model.now.codec,
         model.now.bitrate
     );
@@ -54,6 +53,12 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         lines.push(Line::from(Span::styled(
             format!("♪ {t}"),
             Style::default().fg(pal.fg),
+        )));
+    }
+    if let Some(n) = &model.notice {
+        lines.push(Line::from(Span::styled(
+            n.clone(),
+            Style::default().fg(pal.peak),
         )));
     }
     lines
