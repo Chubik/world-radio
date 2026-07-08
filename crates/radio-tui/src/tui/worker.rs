@@ -13,6 +13,11 @@ pub enum WorkerReq {
     RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
+    MirrorAnnounce {
+        uuid: String,
+        name: String,
+        url: String,
+    },
     ResolveAndPlay(String),
     SaveState,
     Sync,
@@ -87,6 +92,15 @@ pub fn spawn(
                         crate::log_warn!("worker: failed to save health: {e}");
                     }
                 }
+                WorkerReq::MirrorAnnounce { uuid, name, url } => {
+                    if let Some(key) = radio_core::sync::load_key() {
+                        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+                        let origin = radio_core::mirror::device_id();
+                        if let Err(e) = client.play(&key, &uuid, &name, &url, &origin) {
+                            crate::log_warn!("worker: mirror announce failed: {e}");
+                        }
+                    }
+                }
                 WorkerReq::ResolveAndPlay(uuid) => {
                     handle_resolve_and_play(&catalog, &uuid, &msg_tx)
                 }
@@ -95,8 +109,7 @@ pub fn spawn(
                     handle_sync(&mut catalog, &paths, &msg_tx, true);
                 }
                 WorkerReq::SyncCreate => {
-                    match radio_core::sync::SyncClient::new("https://r4dio.net").create_account()
-                    {
+                    match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {
                         Ok(key) => {
                             if let Err(e) = radio_core::sync::store_key(&key) {
                                 crate::log_warn!("worker: store key failed: {e}");
@@ -144,7 +157,9 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
 
     let Some(key) = sync::load_key() else {
         if announce {
-            let _ = msg_tx.send(Msg::Notice("not linked — run: world-radio sync login".into()));
+            let _ = msg_tx.send(Msg::Notice(
+                "not linked — run: world-radio sync login".into(),
+            ));
         }
         return;
     };

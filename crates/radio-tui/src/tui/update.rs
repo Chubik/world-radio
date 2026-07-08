@@ -296,6 +296,11 @@ fn play_row(model: &mut Model, row: StationRow) -> Vec<Effect> {
     let effects = vec![
         Effect::Play(row.url.clone()),
         Effect::RecordHistory(row.uuid.clone()),
+        Effect::MirrorAnnounce {
+            uuid: row.uuid.clone(),
+            name: row.name.clone(),
+            url: row.url.clone(),
+        },
         Effect::SaveState,
     ];
     model.now = NowPlaying {
@@ -1209,6 +1214,7 @@ mod tests {
             Effect::RecheckAll => "recheckall",
             Effect::RecordHistory(_) => "history",
             Effect::MarkFailed(_) => "markfailed",
+            Effect::MirrorAnnounce { .. } => "mirrorannounce",
             Effect::SaveState => "savestate",
             Effect::Sync => "sync",
             Effect::SyncCreate => "synccreate",
