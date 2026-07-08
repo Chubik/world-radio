@@ -359,6 +359,7 @@ pub struct Model {
     pub spinner: usize,
     pub notice: Option<String>,
     pub sync_key: Option<String>,
+    pub mirror_seq: u64,
 }
 
 impl Model {
@@ -386,6 +387,7 @@ impl Model {
             spinner: 0,
             notice: None,
             sync_key: radio_core::sync::load_key(),
+            mirror_seq: 0,
         }
     }
 
