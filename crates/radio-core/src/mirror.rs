@@ -14,13 +14,13 @@ pub struct MirrorEvent {
 pub fn device_id() -> String {
     static ID: OnceLock<String> = OnceLock::new();
     ID.get_or_init(|| {
-        let n: u32 = rand_u32();
+        let n: u32 = seed_from_time_pid();
         format!("dev-{n:08x}")
     })
     .clone()
 }
 
-fn rand_u32() -> u32 {
+fn seed_from_time_pid() -> u32 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
