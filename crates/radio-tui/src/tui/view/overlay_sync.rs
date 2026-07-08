@@ -44,15 +44,45 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
 }
 
 fn qr_lines(key: &str) -> Vec<String> {
-    match qrcode::QrCode::new(key) {
-        Err(_) => Vec::new(),
-        Ok(code) => code
-            .render::<char>()
-            .quiet_zone(true)
-            .module_dimensions(2, 1)
-            .build()
-            .lines()
-            .map(|l| l.to_string())
-            .collect(),
+    let code = match qrcode::QrCode::with_error_correction_level(key, qrcode::EcLevel::L) {
+        Err(_) => return Vec::new(),
+        Ok(c) => c,
+    };
+    let width = code.width();
+    let quiet = 1;
+    let side = width + quiet * 2;
+    let dark: Vec<Vec<bool>> = code
+        .to_colors()
+        .chunks(width)
+        .map(|row| {
+            let mut padded = vec![false; quiet];
+            padded.extend(row.iter().map(|c| *c == qrcode::Color::Dark));
+            padded.extend(vec![false; quiet]);
+            padded
+        })
+        .collect();
+    let is_dark = |r: i64, c: usize| -> bool {
+        match r < quiet as i64 || r >= (width + quiet) as i64 {
+            true => false,
+            false => dark[(r - quiet as i64) as usize][c],
+        }
+    };
+    let mut lines = Vec::new();
+    let mut r = 0i64;
+    while r < side as i64 {
+        let mut line = String::new();
+        for c in 0..side {
+            let top = is_dark(r, c);
+            let bot = is_dark(r + 1, c);
+            line.push(match (top, bot) {
+                (true, true) => '█',
+                (true, false) => '▀',
+                (false, true) => '▄',
+                (false, false) => ' ',
+            });
+        }
+        lines.push(line);
+        r += 2;
     }
+    lines
 }
