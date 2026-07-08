@@ -37,6 +37,7 @@ class PlaybackService : MediaSessionService() {
     private val main = Handler(Looper.getMainLooper())
     private val favStore by lazy { FavStore(this) }
     private val syncClient = SyncClient()
+    private val mirrorClient = MirrorClient()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
@@ -158,6 +159,16 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    private fun mirrorAnnounce(pick: Station) {
+        scope.launch {
+            val key = favStore.syncKey() ?: return@launch
+            val origin = favStore.deviceId()
+            withContext(Dispatchers.IO) {
+                mirrorClient.play(key, pick.uuid, pick.name, pick.url, origin)
+            }
+        }
+    }
+
     private fun shuffle() {
         scope.launch {
             val sc = favStore.currentScope()
@@ -210,7 +221,10 @@ class PlaybackService : MediaSessionService() {
         }
         when (started.isFailure) {
             true -> Log.w("r4dio", "cannot play ${pick.name}: ${started.exceptionOrNull()?.message}")
-            false -> scope.launch { refreshCustomLayout() }
+            false -> {
+                scope.launch { refreshCustomLayout() }
+                mirrorAnnounce(pick)
+            }
         }
     }
 
