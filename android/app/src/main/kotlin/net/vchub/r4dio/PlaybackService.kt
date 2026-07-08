@@ -17,8 +17,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -34,6 +37,9 @@ class PlaybackService : MediaSessionService() {
     private val catalog = Catalog()
     @Volatile private var stations: List<Station> = emptyList()
     @Volatile private var current: Station? = null
+    @Volatile private var mirrorSeq: Long = 0
+    @Volatile private var applyingMirror: Boolean = false
+    private var mirrorJob: Job? = null
     private val main = Handler(Looper.getMainLooper())
     private val favStore by lazy { FavStore(this) }
     private val syncClient = SyncClient()
@@ -106,6 +112,7 @@ class PlaybackService : MediaSessionService() {
         setMediaNotificationProvider(provider)
         loadStations()
         syncNow()
+        startMirrorListener()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -132,6 +139,7 @@ class PlaybackService : MediaSessionService() {
         exo?.release()
         session = null
         exo = null
+        mirrorJob?.cancel()
         scope.cancel()
         super.onDestroy()
     }
@@ -160,11 +168,53 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun mirrorAnnounce(pick: Station) {
+        if (applyingMirror) {
+            return
+        }
         scope.launch {
             val key = favStore.syncKey() ?: return@launch
             val origin = favStore.deviceId()
             withContext(Dispatchers.IO) {
                 mirrorClient.play(key, pick.uuid, pick.name, pick.url, origin)
+            }
+        }
+    }
+
+    private fun startMirrorListener() {
+        mirrorJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val key = favStore.syncKey()
+                when (key) {
+                    null -> delay(10_000)
+                    else -> {
+                        val myId = favStore.deviceId()
+                        mirrorClient.events(key) { evt ->
+                            scope.launch { onMirrorEvent(evt, myId) }
+                        }
+                        delay(3_000)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onMirrorEvent(evt: MirrorEvent, myId: String) {
+        when {
+            evt.origin == myId -> return
+            evt.seq <= mirrorSeq -> return
+            else -> {}
+        }
+        mirrorSeq = evt.seq
+        val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
+        when (exo?.isPlaying) {
+            true -> {
+                applyingMirror = true
+                playPick(station)
+                applyingMirror = false
+            }
+            else -> {
+                current = station
+                RadioWidgetProvider.refresh(this, evt.name, false)
             }
         }
     }
