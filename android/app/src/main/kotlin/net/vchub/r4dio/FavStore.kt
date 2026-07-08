@@ -45,6 +45,7 @@ class FavStore(context: Context) {
     private val keyCached = stringPreferencesKey("cached_favs")
     private val keySyncKey = stringPreferencesKey("sync_key")
     private val keyBlocked = stringSetPreferencesKey("blocked_uuids")
+    private val keyDeviceId = stringPreferencesKey("device_id")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
@@ -102,6 +103,17 @@ class FavStore(context: Context) {
     }
 
     suspend fun currentBlocked(): Set<String> = store.data.first()[keyBlocked] ?: emptySet()
+
+    suspend fun deviceId(): String {
+        val existing = store.data.first()[keyDeviceId]
+        when (existing) {
+            null -> {}
+            else -> return existing
+        }
+        val id = "dev-%08x".format(kotlin.random.Random.nextInt())
+        store.edit { it[keyDeviceId] = id }
+        return id
+    }
 
     suspend fun applyMerged(favs: Set<String>, blocked: Set<String>) {
         store.edit { prefs ->
