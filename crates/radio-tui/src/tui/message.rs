@@ -78,5 +78,10 @@ pub enum Effect {
     RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
+    MirrorAnnounce {
+        uuid: String,
+        name: String,
+        url: String,
+    },
     SaveState,
 }
