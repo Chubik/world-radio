@@ -46,7 +46,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
         Overlay::Settings => overlay_settings::render(model, &pal, frame, settings_box(area)),
         Overlay::Help => overlay_help::render(&pal, frame, centered(area)),
         Overlay::Keybindings => overlay_keybind::render(model, &pal, frame, centered(area)),
-        Overlay::Sync => overlay_sync::render(model, &pal, frame, centered(area)),
+        Overlay::Sync => overlay_sync::render(model, &pal, frame, sync_box(area)),
     }
 }
 
@@ -55,6 +55,19 @@ fn settings_box(area: Rect) -> Rect {
     let h = 12.min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 3;
+    Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    }
+}
+
+fn sync_box(area: Rect) -> Rect {
+    let w = 40.min(area.width);
+    let h = 26.min(area.height);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 4;
     Rect {
         x,
         y,
