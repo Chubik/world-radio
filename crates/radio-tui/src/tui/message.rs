@@ -57,6 +57,7 @@ pub enum Msg {
     FilterClearAll,
     FacetsLoaded(radio_core::catalog::Facets),
     Tick(std::time::Instant),
+    MirrorPlay(radio_core::mirror::MirrorEvent),
 }
 
 #[allow(dead_code)]

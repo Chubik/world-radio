@@ -184,6 +184,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::Tick(now) => tick(model, now),
+        Msg::MirrorPlay(evt) => mirror_play(model, evt),
     }
 }
 
@@ -313,6 +314,34 @@ fn play_row(model: &mut Model, row: StationRow) -> Vec<Effect> {
         title: None,
     };
     effects
+}
+
+fn mirror_play(model: &mut Model, evt: radio_core::mirror::MirrorEvent) -> Vec<Effect> {
+    if evt.origin == radio_core::mirror::device_id() {
+        return vec![];
+    }
+    if evt.seq <= model.mirror_seq {
+        return vec![];
+    }
+    model.mirror_seq = evt.seq;
+    match model.is_playing() {
+        true => {
+            model.now = NowPlaying {
+                station_name: Some(evt.name),
+                country: String::new(),
+                bitrate: 0,
+                codec: String::new(),
+                url: Some(evt.url.clone()),
+                uuid: Some(evt.uuid),
+                title: None,
+            };
+            vec![Effect::Play(evt.url)]
+        }
+        false => {
+            model.notice = Some(format!("mirror: {}", evt.name));
+            vec![]
+        }
+    }
 }
 
 fn toggle_favorite_selected(model: &mut Model) -> Vec<Effect> {
@@ -1198,6 +1227,48 @@ mod tests {
         );
         update(&mut m, Msg::KeybindReset);
         assert_eq!(m.keymap.chord_for(Action::Stop).key, KeyName::Char('s'));
+    }
+
+    #[test]
+    fn mirror_play_ignores_own_and_stale() {
+        use radio_core::mirror::{device_id, MirrorEvent};
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        let own = MirrorEvent {
+            uuid: "u".into(),
+            name: "n".into(),
+            url: "http://x".into(),
+            origin: device_id(),
+            seq: 5,
+        };
+        assert!(update(&mut m, Msg::MirrorPlay(own)).is_empty());
+        assert_eq!(m.mirror_seq, 0);
+        let stale = MirrorEvent {
+            uuid: "u".into(),
+            name: "n".into(),
+            url: "http://x".into(),
+            origin: "other".into(),
+            seq: 0,
+        };
+        m.mirror_seq = 3;
+        assert!(update(&mut m, Msg::MirrorPlay(stale)).is_empty());
+        assert_eq!(m.mirror_seq, 3);
+    }
+
+    #[test]
+    fn mirror_play_idle_updates_hint_no_audio() {
+        use radio_core::mirror::MirrorEvent;
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        let evt = MirrorEvent {
+            uuid: "u2".into(),
+            name: "Remote".into(),
+            url: "http://x/2".into(),
+            origin: "other".into(),
+            seq: 9,
+        };
+        let fx = update(&mut m, Msg::MirrorPlay(evt));
+        assert!(fx.is_empty());
+        assert_eq!(m.mirror_seq, 9);
+        assert!(m.notice.as_deref().unwrap().contains("Remote"));
     }
 
     fn eff_kind(e: &Effect) -> &'static str {
