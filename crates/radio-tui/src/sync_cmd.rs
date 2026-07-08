@@ -86,7 +86,11 @@ fn status() -> anyhow::Result<()> {
         Some(key) => {
             print_key_qr(&key);
             let data = client().pull(&key)?;
-            println!("server: {} favourites, {} blocked", data.favs.len(), data.blocked.len());
+            println!(
+                "server: {} favourites, {} blocked",
+                data.favs.len(),
+                data.blocked.len()
+            );
         }
     }
     Ok(())
@@ -124,7 +128,11 @@ fn run_sync() -> anyhow::Result<()> {
     let merged = client().push(&key, &local)?;
     favorites_from(merged.favs.clone()).save(&fav_path())?;
     favorites_from(merged.blocked.clone()).save(&blacklist_path())?;
-    println!("synced: {} favourites, {} blocked", merged.favs.len(), merged.blocked.len());
+    println!(
+        "synced: {} favourites, {} blocked",
+        merged.favs.len(),
+        merged.blocked.len()
+    );
     Ok(())
 }
 

@@ -1,5 +1,5 @@
-mod tui;
 mod sync_cmd;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use radio_audio::AudioEngine;
@@ -27,7 +27,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    Play { url: String },
+    Play {
+        url: String,
+    },
     Sync {
         #[command(subcommand)]
         action: sync_cmd::SyncCmd,

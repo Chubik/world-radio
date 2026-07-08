@@ -215,7 +215,10 @@ fn row_line(
         Span::styled(format!("{fav} "), name_style),
         Span::styled(truncate(&r.name, NAME_W), name_style),
         Span::raw(" "),
-        Span::styled(format!("{:<4}", model.glyphs.country(&r.country)), Style::default().fg(pal.dim)),
+        Span::styled(
+            format!("{:<4}", model.glyphs.country(&r.country)),
+            Style::default().fg(pal.dim),
+        ),
         Span::raw("  "),
         Span::styled(format!("{meta:<META_W$}"), Style::default().fg(pal.dim)),
         Span::raw(" "),
