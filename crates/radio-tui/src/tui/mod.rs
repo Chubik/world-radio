@@ -70,7 +70,11 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         };
         let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
         let tx = mirror_tx.clone();
+        let stream_key = key.clone();
         let _ = client.events(&key, |evt| {
+            if radio_core::sync::load_key().as_deref() != Some(stream_key.as_str()) {
+                return;
+            }
             let _ = tx.send(Msg::MirrorPlay(evt));
         });
         std::thread::sleep(std::time::Duration::from_secs(3));
