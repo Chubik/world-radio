@@ -77,8 +77,10 @@ mod tests {
     #[test]
     fn create_account_returns_key() {
         let mut server = mockito::Server::new();
-        let m = server.mock("POST", "/account")
-            .with_body(r#"{"key":"r4-abc"}"#).create();
+        let m = server
+            .mock("POST", "/account")
+            .with_body(r#"{"key":"r4-abc"}"#)
+            .create();
         let c = SyncClient::new(server.url());
         assert_eq!(c.create_account().unwrap(), "r4-abc");
         m.assert();
@@ -95,11 +97,19 @@ mod tests {
     #[test]
     fn pull_parses_data() {
         let mut server = mockito::Server::new();
-        server.mock("GET", "/sync")
-            .with_body(r#"{"favs":["a","b"],"blocked":["x"]}"#).create();
+        server
+            .mock("GET", "/sync")
+            .with_body(r#"{"favs":["a","b"],"blocked":["x"]}"#)
+            .create();
         let c = SyncClient::new(server.url());
         let d = c.pull("r4-k").unwrap();
-        assert_eq!(d, SyncData { favs: vec!["a".into(), "b".into()], blocked: vec!["x".into()] });
+        assert_eq!(
+            d,
+            SyncData {
+                favs: vec!["a".into(), "b".into()],
+                blocked: vec!["x".into()]
+            }
+        );
     }
 
     #[test]
@@ -113,10 +123,20 @@ mod tests {
     #[test]
     fn push_returns_merged() {
         let mut server = mockito::Server::new();
-        server.mock("PUT", "/sync")
-            .with_body(r#"{"favs":["a","b","c"],"blocked":[]}"#).create();
+        server
+            .mock("PUT", "/sync")
+            .with_body(r#"{"favs":["a","b","c"],"blocked":[]}"#)
+            .create();
         let c = SyncClient::new(server.url());
-        let d = c.push("r4-k", &SyncData { favs: vec!["c".into()], blocked: vec![] }).unwrap();
+        let d = c
+            .push(
+                "r4-k",
+                &SyncData {
+                    favs: vec!["c".into()],
+                    blocked: vec![],
+                },
+            )
+            .unwrap();
         assert_eq!(d.favs, vec!["a".to_string(), "b".into(), "c".into()]);
     }
 

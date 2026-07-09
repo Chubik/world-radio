@@ -1,7 +1,12 @@
 pub fn is_valid_format(key: &str) -> bool {
     match key.strip_prefix("r4-") {
         None => false,
-        Some(rest) => !rest.is_empty() && rest.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+        Some(rest) => {
+            !rest.is_empty()
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        }
     }
 }
 
