@@ -60,7 +60,13 @@ class SyncActivity : ComponentActivity() {
             }
         }
         findViewById<Button>(R.id.scan).setOnClickListener {
-            scanner.launch(ScanOptions().setOrientationLocked(false).setPrompt("scan r4dio key"))
+            scanner.launch(
+                ScanOptions()
+                    .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                    .setOrientationLocked(true)
+                    .setBeepEnabled(false)
+                    .setPrompt("point at the r4dio qr"),
+            )
         }
         findViewById<Button>(R.id.copy).setOnClickListener {
             lifecycleScope.launch {
