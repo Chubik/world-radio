@@ -9,7 +9,7 @@ pub mod health;
 pub mod station;
 
 pub use api::{resolve, RadioBrowser};
-pub use cache::Cache;
+pub use cache::{text_is_excluded, Cache};
 pub use catalog::Catalog;
 pub use facets::Facets;
 pub use favorites::{Favorites, History};

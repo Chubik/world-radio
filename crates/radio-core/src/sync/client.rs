@@ -17,6 +17,7 @@ impl SyncClient {
             base_url: base_url.into(),
             client: reqwest::blocking::Client::builder()
                 .user_agent("world-radio-sync/1")
+                .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .expect("http client"),
         }
