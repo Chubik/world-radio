@@ -89,7 +89,7 @@ class PlaybackService : MediaSessionService() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
-        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), syncButton, stopButton))
+        session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
     }
 
     override fun onCreate() {
@@ -154,6 +154,26 @@ class PlaybackService : MediaSessionService() {
             val pick = pickRandom(fetched) ?: return@thread
             main.post { playPick(pick) }
         }
+    }
+
+    private fun launchSyncActivity() {
+        val intent = android.content.Intent(this, SyncActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val pending = android.app.PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val options = when (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            true -> android.app.ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(
+                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                )
+                .toBundle()
+            false -> null
+        }
+        runCatching { pending.send(this, 0, null, null, null, null, options) }
     }
 
     private fun syncNow() {
@@ -309,7 +329,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), syncButton, stopButton))
+                .setCustomLayout(listOf(shuffleButton, starButton(false), syncButton, stopButton))
                 .build()
         }
 
@@ -355,15 +375,7 @@ class PlaybackService : MediaSessionService() {
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_SYNC_UI -> {
-                    val intent = android.content.Intent(this@PlaybackService, SyncActivity::class.java)
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    val pending = android.app.PendingIntent.getActivity(
-                        this@PlaybackService,
-                        0,
-                        intent,
-                        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
-                    )
-                    runCatching { pending.send() }
+                    launchSyncActivity()
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
