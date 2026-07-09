@@ -314,6 +314,13 @@ fn is_excluded(station: &Station) -> bool {
         .any(|needle| haystack.contains(needle))
 }
 
+pub fn text_is_excluded(text: &str) -> bool {
+    let haystack = text.to_lowercase();
+    EXCLUDED_NAME_SUBSTRINGS
+        .iter()
+        .any(|needle| haystack.contains(needle))
+}
+
 fn row_to_station(r: &rusqlite::Row) -> rusqlite::Result<Station> {
     Ok(Station {
         stationuuid: r.get(0)?,

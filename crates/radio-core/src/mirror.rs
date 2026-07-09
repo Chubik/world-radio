@@ -47,6 +47,7 @@ impl MirrorClient {
             base_url: base_url.into(),
             client: reqwest::blocking::Client::builder()
                 .user_agent("world-radio-mirror/1")
+                .connect_timeout(std::time::Duration::from_secs(10))
                 .build()
                 .expect("http client"),
         }
