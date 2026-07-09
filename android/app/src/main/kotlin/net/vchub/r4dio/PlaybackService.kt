@@ -18,6 +18,7 @@ import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -39,6 +40,7 @@ class PlaybackService : MediaSessionService() {
     @Volatile private var current: Station? = null
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
+    private val artwork: ByteArray by lazy { crtArtworkPng() }
     private var mirrorJob: Job? = null
     private val main = Handler(Looper.getMainLooper())
     private val favStore by lazy { FavStore(this) }
@@ -189,7 +191,10 @@ class PlaybackService : MediaSessionService() {
                     else -> {
                         val myId = favStore.deviceId()
                         mirrorClient.events(key) { evt ->
-                            scope.launch { onMirrorEvent(evt, myId) }
+                            when (runBlocking { favStore.syncKey() } == key) {
+                                false -> {}
+                                true -> scope.launch { onMirrorEvent(evt, myId) }
+                            }
                         }
                         delay(3_000)
                     }
@@ -206,6 +211,9 @@ class PlaybackService : MediaSessionService() {
         }
         mirrorSeq = evt.seq
         val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
+        if (isExcluded(station)) {
+            return
+        }
         when (exo?.isPlaying) {
             true -> {
                 applyingMirror = true
@@ -257,7 +265,7 @@ class PlaybackService : MediaSessionService() {
             .setStation(pick.name)
             .setIsBrowsable(false)
             .setIsPlayable(true)
-            .setArtworkData(crtArtworkPng(), MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+            .setArtworkData(artwork, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
             .build()
         val item = MediaItem.Builder()
             .setMediaId(pick.uuid)
