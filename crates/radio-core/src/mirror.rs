@@ -26,7 +26,9 @@ fn seed_from_time_pid() -> u32 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    nanos.wrapping_mul(2654435761).wrapping_add(std::process::id())
+    nanos
+        .wrapping_mul(2654435761)
+        .wrapping_add(std::process::id())
 }
 
 pub fn parse_sse_data(line: &str) -> Option<MirrorEvent> {
@@ -73,7 +75,12 @@ impl MirrorClient {
             .client
             .post(format!("{}/play", self.base_url))
             .bearer_auth(key)
-            .json(&Req { uuid, name, url, origin })
+            .json(&Req {
+                uuid,
+                name,
+                url,
+                origin,
+            })
             .send()?
             .error_for_status()?
             .json()?;
