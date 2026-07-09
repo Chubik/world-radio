@@ -152,6 +152,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::SyncKeyChanged(opt) => {
             model.sync_key = opt;
+            model.mirror_seq = 0;
             vec![]
         }
         Msg::Notice(text) => {
@@ -324,7 +325,11 @@ fn mirror_play(model: &mut Model, evt: radio_core::mirror::MirrorEvent) -> Vec<E
         return vec![];
     }
     model.mirror_seq = evt.seq;
-    match model.is_playing() {
+    if radio_core::catalog::text_is_excluded(&format!("{} {}", evt.name, evt.url)) {
+        return vec![];
+    }
+    let playing = matches!(model.status, Status::Playing { .. });
+    match playing {
         true => {
             model.now = NowPlaying {
                 station_name: Some(evt.name),
@@ -1269,6 +1274,23 @@ mod tests {
         assert!(fx.is_empty());
         assert_eq!(m.mirror_seq, 9);
         assert!(m.notice.as_deref().unwrap().contains("Remote"));
+    }
+
+    #[test]
+    fn mirror_play_drops_excluded_station() {
+        use radio_core::mirror::MirrorEvent;
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        let evt = MirrorEvent {
+            uuid: "u".into(),
+            name: "Radio Moscow".into(),
+            url: "http://x/ru".into(),
+            origin: "other".into(),
+            seq: 7,
+        };
+        let fx = update(&mut m, Msg::MirrorPlay(evt));
+        assert!(fx.is_empty());
+        assert!(m.now.station_name.is_none());
+        assert!(m.notice.is_none());
     }
 
     fn eff_kind(e: &Effect) -> &'static str {
