@@ -17,8 +17,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -26,6 +29,7 @@ const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
+const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -33,14 +37,20 @@ class PlaybackService : MediaSessionService() {
     private val catalog = Catalog()
     @Volatile private var stations: List<Station> = emptyList()
     @Volatile private var current: Station? = null
+    @Volatile private var mirrorSeq: Long = 0
+    @Volatile private var applyingMirror: Boolean = false
+    private var mirrorJob: Job? = null
     private val main = Handler(Looper.getMainLooper())
     private val favStore by lazy { FavStore(this) }
+    private val syncClient = SyncClient()
+    private val mirrorClient = MirrorClient()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
     private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
+    private val syncUiCommand = SessionCommand(CMD_SYNC_UI, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
@@ -51,6 +61,12 @@ class PlaybackService : MediaSessionService() {
     private val stopButton = CommandButton.Builder(CommandButton.ICON_STOP)
         .setDisplayName("stop")
         .setSessionCommand(stopCommand)
+        .build()
+
+    private val syncButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+        .setDisplayName("sync")
+        .setCustomIconResId(R.drawable.ic_sync)
+        .setSessionCommand(syncUiCommand)
         .build()
 
     private fun starButton(isFav: Boolean) = CommandButton.Builder(
@@ -71,7 +87,7 @@ class PlaybackService : MediaSessionService() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
-        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), stopButton))
+        session?.setCustomLayout(listOf(shuffleButton, scopeButton(sc), starButton(isFav), syncButton, stopButton))
     }
 
     override fun onCreate() {
@@ -95,6 +111,8 @@ class PlaybackService : MediaSessionService() {
         provider.setSmallIcon(R.drawable.ic_stat_r4dio)
         setMediaNotificationProvider(provider)
         loadStations()
+        syncNow()
+        startMirrorListener()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -121,6 +139,7 @@ class PlaybackService : MediaSessionService() {
         exo?.release()
         session = null
         exo = null
+        mirrorJob?.cancel()
         scope.cancel()
         super.onDestroy()
     }
@@ -132,6 +151,71 @@ class PlaybackService : MediaSessionService() {
             Log.i("r4dio", "loaded ${fetched.size} stations")
             val pick = pickRandom(fetched) ?: return@thread
             main.post { playPick(pick) }
+        }
+    }
+
+    private fun syncNow() {
+        scope.launch {
+            val key = favStore.syncKey() ?: return@launch
+            val local = SyncData(
+                favs = favStore.currentFavUuids().toList(),
+                blocked = favStore.currentBlocked().toList(),
+            )
+            val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet())
+            refreshCustomLayout()
+        }
+    }
+
+    private fun mirrorAnnounce(pick: Station) {
+        if (applyingMirror) {
+            return
+        }
+        scope.launch {
+            val key = favStore.syncKey() ?: return@launch
+            val origin = favStore.deviceId()
+            withContext(Dispatchers.IO) {
+                mirrorClient.play(key, pick.uuid, pick.name, pick.url, origin)
+            }
+        }
+    }
+
+    private fun startMirrorListener() {
+        mirrorJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val key = favStore.syncKey()
+                when (key) {
+                    null -> delay(10_000)
+                    else -> {
+                        val myId = favStore.deviceId()
+                        mirrorClient.events(key) { evt ->
+                            scope.launch { onMirrorEvent(evt, myId) }
+                        }
+                        delay(3_000)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onMirrorEvent(evt: MirrorEvent, myId: String) {
+        when {
+            evt.origin == myId -> return
+            evt.seq <= mirrorSeq -> return
+            else -> {}
+        }
+        mirrorSeq = evt.seq
+        val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
+        when (exo?.isPlaying) {
+            true -> {
+                applyingMirror = true
+                playPick(station)
+                applyingMirror = false
+            }
+            else -> {
+                current = station
+                RadioWidgetProvider.refresh(this, evt.name, false)
+            }
         }
     }
 
@@ -187,7 +271,10 @@ class PlaybackService : MediaSessionService() {
         }
         when (started.isFailure) {
             true -> Log.w("r4dio", "cannot play ${pick.name}: ${started.exceptionOrNull()?.message}")
-            false -> scope.launch { refreshCustomLayout() }
+            false -> {
+                scope.launch { refreshCustomLayout() }
+                mirrorAnnounce(pick)
+            }
         }
     }
 
@@ -202,6 +289,7 @@ class PlaybackService : MediaSessionService() {
                     .add(starCommand)
                     .add(scopeCommand)
                     .add(stopCommand)
+                    .add(syncUiCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -213,7 +301,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), stopButton))
+                .setCustomLayout(listOf(shuffleButton, scopeButton(Scope.ALL), starButton(false), syncButton, stopButton))
                 .build()
         }
 
@@ -240,6 +328,7 @@ class PlaybackService : MediaSessionService() {
                         else -> scope.launch {
                             favStore.toggleFav(st)
                             refreshCustomLayout()
+                            syncNow()
                         }
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -255,6 +344,18 @@ class PlaybackService : MediaSessionService() {
                         refreshCustomLayout()
                         shuffle()
                     }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_SYNC_UI -> {
+                    val intent = android.content.Intent(this@PlaybackService, SyncActivity::class.java)
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val pending = android.app.PendingIntent.getActivity(
+                        this@PlaybackService,
+                        0,
+                        intent,
+                        android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                    runCatching { pending.send() }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }

@@ -9,6 +9,7 @@ pub enum Action {
     Blacklist,
     Recheck,
     Shuffle,
+    Sync,
     ToggleHideUnplayable,
     EnterSearch,
     OpenSettings,
@@ -20,13 +21,14 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 14] = [
+    pub const ALL: [Action; 15] = [
         Action::Play,
         Action::Stop,
         Action::ToggleFavorite,
         Action::Blacklist,
         Action::Recheck,
         Action::Shuffle,
+        Action::Sync,
         Action::ToggleHideUnplayable,
         Action::EnterSearch,
         Action::OpenSettings,
@@ -45,6 +47,7 @@ impl Action {
             Action::Blacklist => "blacklist / block",
             Action::Recheck => "recheck dead station",
             Action::Shuffle => "shuffle",
+            Action::Sync => "sync favourites",
             Action::ToggleHideUnplayable => "hide dead + unstable",
             Action::EnterSearch => "search",
             Action::OpenSettings => "settings",
@@ -150,6 +153,7 @@ impl Default for Keymap {
         map.insert(Action::Blacklist, ch('B'));
         map.insert(Action::Recheck, ch('R'));
         map.insert(Action::Shuffle, ch('r'));
+        map.insert(Action::Sync, ch('y'));
         map.insert(Action::ToggleHideUnplayable, ch('h'));
         map.insert(Action::EnterSearch, ch('/'));
         map.insert(Action::OpenSettings, ch(','));

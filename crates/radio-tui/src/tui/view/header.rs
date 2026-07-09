@@ -34,12 +34,15 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         .clone()
         .unwrap_or_else(|| "— idle —".to_string());
     let meta = format!(
-        "{} {} · {} {}k",
+        "{} · {} {}k",
         model.glyphs.country(&model.now.country),
-        model.now.country,
         model.now.codec,
         model.now.bitrate
     );
+    let sync_span = match model.synced() {
+        true => Span::styled(" ⊙ synced", Style::default().fg(pal.accent)),
+        false => Span::styled(" ○ local", Style::default().fg(pal.dim)),
+    };
     let line1 = vec![
         title,
         Span::raw("  "),
@@ -48,12 +51,19 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         Span::styled(name, Style::default().fg(pal.fg).bold()),
         Span::raw("  "),
         Span::styled(meta, Style::default().fg(pal.dim)),
+        sync_span,
     ];
     let mut lines = vec![Line::from(line1)];
     if let Some(t) = &model.now.title {
         lines.push(Line::from(Span::styled(
             format!("♪ {t}"),
             Style::default().fg(pal.fg),
+        )));
+    }
+    if let Some(n) = &model.notice {
+        lines.push(Line::from(Span::styled(
+            n.clone(),
+            Style::default().fg(pal.peak),
         )));
     }
     lines

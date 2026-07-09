@@ -340,14 +340,10 @@ impl Glyphs {
         }
     }
 
-    pub fn for_config(no_emoji: bool) -> Glyphs {
-        if no_emoji {
-            let mut g = Glyphs::unicode();
-            g.emoji_flags = false;
-            g
-        } else {
-            Glyphs::unicode()
-        }
+    pub fn for_config(_no_emoji: bool) -> Glyphs {
+        let mut g = Glyphs::unicode();
+        g.emoji_flags = false;
+        g
     }
 
     pub fn country(&self, code: &str) -> String {

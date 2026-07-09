@@ -62,6 +62,20 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     };
     let worker_handle = worker::spawn(catalog, worker_paths, req_rx, msg_tx.clone());
 
+    let mirror_tx = msg_tx.clone();
+    std::thread::spawn(move || loop {
+        let Some(key) = radio_core::sync::load_key() else {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            continue;
+        };
+        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+        let tx = mirror_tx.clone();
+        let _ = client.events(&key, |evt| {
+            let _ = tx.send(Msg::MirrorPlay(evt));
+        });
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    });
+
     let engine = AudioEngine::spawn()?;
     engine.set_volume(0.6);
 
@@ -88,6 +102,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     if let Some(uuid) = config.last_station.clone() {
         let _ = req_tx.send(WorkerReq::ResolveAndPlay(uuid));
     }
+    let _ = req_tx.send(WorkerReq::Sync);
 
     let loop_result = event_loop(
         &mut terminal,
@@ -277,8 +292,23 @@ fn run_effects(
             Effect::MarkFailed(uuid) => {
                 let _ = req_tx.send(WorkerReq::MarkFailed(uuid));
             }
+            Effect::MirrorAnnounce { uuid, name, url } => {
+                let _ = req_tx.send(WorkerReq::MirrorAnnounce { uuid, name, url });
+            }
             Effect::SaveState => {
                 let _ = req_tx.send(WorkerReq::SaveState);
+            }
+            Effect::Sync => {
+                let _ = req_tx.send(WorkerReq::Sync);
+            }
+            Effect::SyncCreate => {
+                let _ = req_tx.send(WorkerReq::SyncCreate);
+            }
+            Effect::SyncLogout => {
+                let _ = req_tx.send(WorkerReq::SyncLogout);
+            }
+            Effect::SyncDelete => {
+                let _ = req_tx.send(WorkerReq::SyncDelete);
             }
         }
     }

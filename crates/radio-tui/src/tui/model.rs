@@ -96,6 +96,7 @@ pub enum Overlay {
     Settings,
     Help,
     Keybindings,
+    Sync,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +357,9 @@ pub struct Model {
     pub keybind_capturing: bool,
     pub keybind_warning: Option<String>,
     pub spinner: usize,
+    pub notice: Option<String>,
+    pub sync_key: Option<String>,
+    pub mirror_seq: u64,
 }
 
 impl Model {
@@ -381,6 +385,9 @@ impl Model {
             keybind_capturing: false,
             keybind_warning: None,
             spinner: 0,
+            notice: None,
+            sync_key: radio_core::sync::load_key(),
+            mirror_seq: 0,
         }
     }
 
@@ -401,11 +408,23 @@ impl Model {
             || self.browse.facets_loading
             || self.browse.pending_online_search.is_some()
     }
+
+    pub fn synced(&self) -> bool {
+        self.sync_key.is_some()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn synced_reflects_key_presence() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        assert!(!m.synced());
+        m.sync_key = Some("r4-x".to_string());
+        assert!(m.synced());
+    }
 
     #[test]
     fn spectrum_cycle_includes_off_at_end() {
