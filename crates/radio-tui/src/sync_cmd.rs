@@ -50,16 +50,34 @@ fn favorites_from(ids: Vec<String>) -> Favorites {
 }
 
 fn print_key_qr(key: &str) {
-    match qrcode::QrCode::new(key) {
-        Err(_) => {}
-        Ok(code) => {
-            let s = code
-                .render::<char>()
-                .quiet_zone(true)
-                .module_dimensions(2, 1)
-                .build();
-            println!("{s}");
+    let code = match qrcode::QrCode::with_error_correction_level(key, qrcode::EcLevel::M) {
+        Err(_) => {
+            println!("key: {key}");
+            return;
         }
+        Ok(c) => c,
+    };
+    let width = code.width();
+    let quiet = 4;
+    let colors = code.to_colors();
+    let dark = |x: i64, y: i64| -> bool {
+        if x < 0 || y < 0 || x >= width as i64 || y >= width as i64 {
+            return false;
+        }
+        colors[y as usize * width + x as usize] == qrcode::Color::Dark
+    };
+    let white = "\x1b[107m  \x1b[0m";
+    let black = "\x1b[40m  \x1b[0m";
+    for y in -quiet..width as i64 + quiet {
+        let mut line = String::new();
+        for x in -quiet..width as i64 + quiet {
+            line.push_str(match dark(x, y) {
+                true => black,
+                false => white,
+            });
+        }
+        line.push_str("\x1b[0m");
+        println!("{line}");
     }
     println!("key: {key}");
 }
