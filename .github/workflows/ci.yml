@@ -82,10 +82,12 @@ jobs:
         run: |
           {
             printf '⚠️ Beta / debug-signed build — not for production. Installs on any Android 8+ device.\n\n'
+            printf "## What's new\n\n"
+            printf -- '- Sync favourites and blocklist across your devices — link them with a key or QR code.\n'
+            printf -- '- Mirror playback: switch station on one device and the rest follow.\n'
+            printf -- '- Manage sync from the media tray: create or scan a key, copy it, log out.\n\n'
             printf '## Install\n\nDownload `%s`, then verify:\n\n' "${{ steps.pkg.outputs.apk }}"
-            printf '```\nsha256sum -c SHA256SUMS\n```\n\n'
-            printf '## Recent changes\n\n'
-            git log -12 --pretty=format:'- %s' | grep -iE 'feat|fix' || true
+            printf '```\nsha256sum -c SHA256SUMS\n```\n'
           } > release-notes.md
 
       - uses: softprops/action-gh-release@v2

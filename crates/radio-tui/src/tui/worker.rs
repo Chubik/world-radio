@@ -13,8 +13,17 @@ pub enum WorkerReq {
     RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
+    MirrorAnnounce {
+        uuid: String,
+        name: String,
+        url: String,
+    },
     ResolveAndPlay(String),
     SaveState,
+    Sync,
+    SyncCreate,
+    SyncLogout,
+    SyncDelete,
     Shutdown,
 }
 
@@ -58,6 +67,7 @@ pub fn spawn(
                 WorkerReq::LoadFacets => handle_load_facets(&catalog, &msg_tx),
                 WorkerReq::Blacklist(uuid) => {
                     catalog.toggle_blacklist(&uuid);
+                    handle_sync(&mut catalog, &paths, &msg_tx, false);
                 }
                 WorkerReq::Recheck(uuid) => {
                     catalog.clear_health(&uuid);
@@ -73,6 +83,7 @@ pub fn spawn(
                 }
                 WorkerReq::ToggleFavorite(uuid) => {
                     catalog.toggle_favorite(&uuid);
+                    handle_sync(&mut catalog, &paths, &msg_tx, false);
                 }
                 WorkerReq::RecordHistory(uuid) => catalog.record_history(&uuid),
                 WorkerReq::MarkFailed(uuid) => {
@@ -81,10 +92,51 @@ pub fn spawn(
                         crate::log_warn!("worker: failed to save health: {e}");
                     }
                 }
+                WorkerReq::MirrorAnnounce { uuid, name, url } => {
+                    if let Some(key) = radio_core::sync::load_key() {
+                        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+                        let origin = radio_core::mirror::device_id();
+                        if let Err(e) = client.play(&key, &uuid, &name, &url, &origin) {
+                            crate::log_warn!("worker: mirror announce failed: {e}");
+                        }
+                    }
+                }
                 WorkerReq::ResolveAndPlay(uuid) => {
                     handle_resolve_and_play(&catalog, &uuid, &msg_tx)
                 }
                 WorkerReq::SaveState => save_all(&catalog, &paths),
+                WorkerReq::Sync => {
+                    handle_sync(&mut catalog, &paths, &msg_tx, true);
+                }
+                WorkerReq::SyncCreate => {
+                    match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {
+                        Ok(key) => {
+                            if let Err(e) = radio_core::sync::store_key(&key) {
+                                crate::log_warn!("worker: store key failed: {e}");
+                            }
+                            let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
+                            let _ = msg_tx.send(Msg::Notice("account created and linked".into()));
+                            handle_sync(&mut catalog, &paths, &msg_tx, false);
+                        }
+                        Err(e) => {
+                            crate::log_warn!("worker: create account failed: {e}");
+                            let _ = msg_tx.send(Msg::Notice("could not create account".into()));
+                        }
+                    }
+                }
+                WorkerReq::SyncLogout => {
+                    let _ = radio_core::sync::clear_key();
+                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+                    let _ = msg_tx.send(Msg::Notice("logged out (favourites kept)".into()));
+                }
+                WorkerReq::SyncDelete => {
+                    if let Some(key) = radio_core::sync::load_key() {
+                        let _ = radio_core::sync::SyncClient::new("https://r4dio.net").delete(&key);
+                    }
+                    let _ = radio_core::sync::clear_key();
+                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+                    let _ = msg_tx.send(Msg::Notice("account deleted".into()));
+                }
             }
         }
         save_all(&catalog, &paths);
@@ -97,6 +149,52 @@ fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
     }
     if let Err(e) = catalog.save_health(&paths.health) {
         crate::log_warn!("worker: failed to save health: {e}");
+    }
+}
+
+fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>, announce: bool) {
+    use radio_core::sync::{self, SyncClient, SyncData};
+
+    let Some(key) = sync::load_key() else {
+        if announce {
+            let _ = msg_tx.send(Msg::Notice(
+                "not linked — run: world-radio sync login".into(),
+            ));
+        }
+        return;
+    };
+    let local = SyncData {
+        favs: catalog.favorite_ids().to_vec(),
+        blocked: catalog.blacklist_ids().to_vec(),
+    };
+    let client = SyncClient::new("https://r4dio.net");
+    let merged = match client.push(&key, &local) {
+        Ok(m) => m,
+        Err(e) => {
+            crate::log_warn!("worker: sync failed: {e}");
+            if announce {
+                let _ = msg_tx.send(Msg::Notice("sync failed — check connection".into()));
+            }
+            return;
+        }
+    };
+    for uuid in &merged.favs {
+        if !catalog.is_favorite(uuid) {
+            catalog.toggle_favorite(uuid);
+        }
+    }
+    for uuid in &merged.blocked {
+        if !catalog.is_blacklisted(uuid) {
+            catalog.toggle_blacklist(uuid);
+        }
+    }
+    save_all(catalog, paths);
+    if announce {
+        let _ = msg_tx.send(Msg::Notice(format!(
+            "synced: {} favourites, {} blocked",
+            merged.favs.len(),
+            merged.blocked.len()
+        )));
     }
 }
 

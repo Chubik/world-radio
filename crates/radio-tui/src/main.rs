@@ -1,3 +1,4 @@
+mod sync_cmd;
 mod tui;
 
 use clap::{Parser, Subcommand};
@@ -26,11 +27,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    Play { url: String },
+    Play {
+        url: String,
+    },
+    Sync {
+        #[command(subcommand)]
+        action: sync_cmd::SyncCmd,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    if let Some(Cmd::Sync { action }) = &cli.command {
+        return sync_cmd::run(action);
+    }
 
     if let Some(Cmd::Play { url }) = &cli.command {
         let engine = AudioEngine::spawn()?;

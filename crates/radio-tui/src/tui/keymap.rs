@@ -30,6 +30,9 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
     if model.overlay == Overlay::Help && matches!(ev.code, KeyCode::Char('?')) {
         return Some(Msg::CloseOverlay);
     }
+    if model.overlay == Overlay::Sync && matches!(ev.code, KeyCode::Char('y')) {
+        return Some(Msg::CloseOverlay);
+    }
     if model.overlay == Overlay::Settings {
         return match ev.code {
             KeyCode::Char('j') | KeyCode::Down => Some(Msg::SettingsNav(true)),
@@ -46,6 +49,16 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
             KeyCode::Char('k') | KeyCode::Up => Some(Msg::KeybindNav(false)),
             KeyCode::Enter => Some(Msg::KeybindStartCapture),
             KeyCode::Char('r') => Some(Msg::KeybindReset),
+            _ => None,
+        };
+    }
+    if model.overlay == Overlay::Sync {
+        return match ev.code {
+            KeyCode::Char('n') => Some(Msg::SyncCreate),
+            KeyCode::Char('c') => Some(Msg::SyncCopy),
+            KeyCode::Char('r') => Some(Msg::SyncNow),
+            KeyCode::Char('l') => Some(Msg::SyncLogout),
+            KeyCode::Char('d') => Some(Msg::SyncDelete),
             _ => None,
         };
     }
@@ -116,6 +129,7 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::Blacklist => Msg::BlacklistSelected,
         Action::Recheck => Msg::RecheckSelected,
         Action::Shuffle => Msg::Shuffle,
+        Action::Sync => Msg::OpenSyncOverlay,
         Action::ToggleHideUnplayable => Msg::ToggleHideUnplayable,
         Action::EnterSearch => Msg::EnterSearch,
         Action::OpenSettings => Msg::OpenSettings,

@@ -7,6 +7,7 @@ pub enum Msg {
     Quit,
     OpenSettings,
     OpenHelp,
+    OpenSyncOverlay,
     CloseOverlay,
     SettingsNav(bool),
     SettingsToggle,
@@ -29,6 +30,13 @@ pub enum Msg {
     CycleSort,
     ToggleHideUnplayable,
     Stop,
+    SyncNow,
+    SyncCreate,
+    SyncCopy,
+    SyncLogout,
+    SyncDelete,
+    SyncKeyChanged(Option<String>),
+    Notice(String),
     ToggleFavoriteSelected,
     BlacklistSelected,
     RecheckSelected,
@@ -49,6 +57,7 @@ pub enum Msg {
     FilterClearAll,
     FacetsLoaded(radio_core::catalog::Facets),
     Tick(std::time::Instant),
+    MirrorPlay(radio_core::mirror::MirrorEvent),
 }
 
 #[allow(dead_code)]
@@ -62,9 +71,18 @@ pub enum Effect {
     SetCrossfade(bool),
     ToggleFavorite(String),
     Blacklist(String),
+    Sync,
+    SyncCreate,
+    SyncLogout,
+    SyncDelete,
     Recheck(String),
     RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
+    MirrorAnnounce {
+        uuid: String,
+        name: String,
+        url: String,
+    },
     SaveState,
 }

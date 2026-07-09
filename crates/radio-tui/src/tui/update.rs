@@ -21,6 +21,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.overlay = Overlay::Help;
             vec![]
         }
+        Msg::OpenSyncOverlay => {
+            model.overlay = Overlay::Sync;
+            vec![]
+        }
         Msg::CloseOverlay => {
             model.overlay = Overlay::None;
             vec![]
@@ -129,6 +133,31 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Stop => {
             vec![Effect::StopAudio]
         }
+        Msg::SyncNow => {
+            model.notice = Some("syncing…".to_string());
+            vec![Effect::Sync]
+        }
+        Msg::SyncCreate => vec![Effect::SyncCreate],
+        Msg::SyncLogout => vec![Effect::SyncLogout],
+        Msg::SyncDelete => vec![Effect::SyncDelete],
+        Msg::SyncCopy => {
+            match &model.sync_key {
+                None => model.notice = Some("no key to copy".to_string()),
+                Some(key) => {
+                    copy_osc52(key);
+                    model.notice = Some("copied".to_string());
+                }
+            }
+            vec![]
+        }
+        Msg::SyncKeyChanged(opt) => {
+            model.sync_key = opt;
+            vec![]
+        }
+        Msg::Notice(text) => {
+            model.notice = Some(text);
+            vec![]
+        }
         Msg::ToggleFavoriteSelected => toggle_favorite_selected(model),
         Msg::BlacklistSelected => blacklist_selected(model),
         Msg::RecheckSelected => recheck_selected(model),
@@ -155,6 +184,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::Tick(now) => tick(model, now),
+        Msg::MirrorPlay(evt) => mirror_play(model, evt),
     }
 }
 
@@ -267,6 +297,11 @@ fn play_row(model: &mut Model, row: StationRow) -> Vec<Effect> {
     let effects = vec![
         Effect::Play(row.url.clone()),
         Effect::RecordHistory(row.uuid.clone()),
+        Effect::MirrorAnnounce {
+            uuid: row.uuid.clone(),
+            name: row.name.clone(),
+            url: row.url.clone(),
+        },
         Effect::SaveState,
     ];
     model.now = NowPlaying {
@@ -279,6 +314,34 @@ fn play_row(model: &mut Model, row: StationRow) -> Vec<Effect> {
         title: None,
     };
     effects
+}
+
+fn mirror_play(model: &mut Model, evt: radio_core::mirror::MirrorEvent) -> Vec<Effect> {
+    if evt.origin == radio_core::mirror::device_id() {
+        return vec![];
+    }
+    if evt.seq <= model.mirror_seq {
+        return vec![];
+    }
+    model.mirror_seq = evt.seq;
+    match model.is_playing() {
+        true => {
+            model.now = NowPlaying {
+                station_name: Some(evt.name),
+                country: String::new(),
+                bitrate: 0,
+                codec: String::new(),
+                url: Some(evt.url.clone()),
+                uuid: Some(evt.uuid),
+                title: None,
+            };
+            vec![Effect::Play(evt.url)]
+        }
+        false => {
+            model.notice = Some(format!("mirror: {}", evt.name));
+            vec![]
+        }
+    }
 }
 
 fn toggle_favorite_selected(model: &mut Model) -> Vec<Effect> {
@@ -508,6 +571,14 @@ fn emit_search(model: &mut Model) -> Vec<Effect> {
     model.browse.loading = true;
     let q = model.browse.filters.to_query(&model.browse.query);
     vec![Effect::Search(q, model.browse.filters.clone())]
+}
+
+fn copy_osc52(text: &str) {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    print!("\x1b]52;c;{b64}\x07");
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
 }
 
 fn tick(model: &mut Model, now: Instant) -> Vec<Effect> {
@@ -1158,6 +1229,48 @@ mod tests {
         assert_eq!(m.keymap.chord_for(Action::Stop).key, KeyName::Char('s'));
     }
 
+    #[test]
+    fn mirror_play_ignores_own_and_stale() {
+        use radio_core::mirror::{device_id, MirrorEvent};
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        let own = MirrorEvent {
+            uuid: "u".into(),
+            name: "n".into(),
+            url: "http://x".into(),
+            origin: device_id(),
+            seq: 5,
+        };
+        assert!(update(&mut m, Msg::MirrorPlay(own)).is_empty());
+        assert_eq!(m.mirror_seq, 0);
+        let stale = MirrorEvent {
+            uuid: "u".into(),
+            name: "n".into(),
+            url: "http://x".into(),
+            origin: "other".into(),
+            seq: 0,
+        };
+        m.mirror_seq = 3;
+        assert!(update(&mut m, Msg::MirrorPlay(stale)).is_empty());
+        assert_eq!(m.mirror_seq, 3);
+    }
+
+    #[test]
+    fn mirror_play_idle_updates_hint_no_audio() {
+        use radio_core::mirror::MirrorEvent;
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        let evt = MirrorEvent {
+            uuid: "u2".into(),
+            name: "Remote".into(),
+            url: "http://x/2".into(),
+            origin: "other".into(),
+            seq: 9,
+        };
+        let fx = update(&mut m, Msg::MirrorPlay(evt));
+        assert!(fx.is_empty());
+        assert_eq!(m.mirror_seq, 9);
+        assert!(m.notice.as_deref().unwrap().contains("Remote"));
+    }
+
     fn eff_kind(e: &Effect) -> &'static str {
         match e {
             Effect::Search(_, _) => "search",
@@ -1172,7 +1285,12 @@ mod tests {
             Effect::RecheckAll => "recheckall",
             Effect::RecordHistory(_) => "history",
             Effect::MarkFailed(_) => "markfailed",
+            Effect::MirrorAnnounce { .. } => "mirrorannounce",
             Effect::SaveState => "savestate",
+            Effect::Sync => "sync",
+            Effect::SyncCreate => "synccreate",
+            Effect::SyncLogout => "synclogout",
+            Effect::SyncDelete => "syncdelete",
         }
     }
 }
