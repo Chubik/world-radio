@@ -34,6 +34,7 @@ enum Cmd {
         #[command(subcommand)]
         action: sync_cmd::SyncCmd,
     },
+    Update,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -41,6 +42,10 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(Cmd::Sync { action }) = &cli.command {
         return sync_cmd::run(action);
+    }
+
+    if let Some(Cmd::Update) = &cli.command {
+        return run_update();
     }
 
     if let Some(Cmd::Play { url }) = &cli.command {
@@ -107,5 +112,20 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
         stations.len(),
         data.display()
     );
+    Ok(())
+}
+
+fn run_update() -> anyhow::Result<()> {
+    match radio_core::update::fetch_latest()? {
+        None => println!(
+            "already up to date (v{})",
+            radio_core::update::current_version()
+        ),
+        Some(rel) => {
+            println!("updating to v{}…", rel.version);
+            radio_core::update::apply(&rel)?;
+            println!("updated to v{} — restart to apply", rel.version);
+        }
+    }
     Ok(())
 }
