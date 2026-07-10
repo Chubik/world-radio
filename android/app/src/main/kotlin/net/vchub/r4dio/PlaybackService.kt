@@ -159,21 +159,23 @@ class PlaybackService : MediaSessionService() {
     private fun launchSyncActivity() {
         val intent = android.content.Intent(this, SyncActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        val pending = android.app.PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val options = when (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            true -> android.app.ActivityOptions.makeBasic()
-                .setPendingIntentBackgroundActivityStartMode(
-                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
-                )
-                .toBundle()
-            false -> null
+        val flags = android.app.PendingIntent.FLAG_IMMUTABLE or
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        val pending = when (android.os.Build.VERSION.SDK_INT >= 35) {
+            true -> {
+                val opts = android.app.ActivityOptions.makeBasic()
+                    .setPendingIntentCreatorBackgroundActivityStartMode(
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                    )
+                android.app.PendingIntent.getActivity(this, 0, intent, flags, opts.toBundle())
+            }
+            false -> android.app.PendingIntent.getActivity(this, 0, intent, flags)
         }
-        runCatching { pending.send(this, 0, null, null, null, null, options) }
+        val sendOpts = android.app.ActivityOptions.makeBasic()
+            .setPendingIntentBackgroundActivityStartMode(
+                android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+            )
+        runCatching { pending.send(this, 0, null, null, null, null, sendOpts.toBundle()) }
     }
 
     private fun syncNow() {
