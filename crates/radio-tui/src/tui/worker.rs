@@ -24,6 +24,7 @@ pub enum WorkerReq {
     SyncCreate,
     SyncLogout,
     SyncDelete,
+    Update(radio_core::update::Release),
     Shutdown,
 }
 
@@ -137,6 +138,19 @@ pub fn spawn(
                     let _ = msg_tx.send(Msg::SyncKeyChanged(None));
                     let _ = msg_tx.send(Msg::Notice("account deleted".into()));
                 }
+                WorkerReq::Update(rel) => match radio_core::update::apply(&rel) {
+                    Ok(()) => {
+                        let _ = msg_tx.send(Msg::Notice(format!(
+                            "updated to v{} — restart to apply",
+                            rel.version
+                        )));
+                        let _ = msg_tx.send(Msg::UpdateAvailable(rel.clone()));
+                    }
+                    Err(e) => {
+                        crate::log_warn!("worker: update failed: {e}");
+                        let _ = msg_tx.send(Msg::Notice(format!("update failed: {e}")));
+                    }
+                },
             }
         }
         save_all(&catalog, &paths);

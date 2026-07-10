@@ -1,6 +1,6 @@
 [package]
 name = "radio-core"
-version = "1.2.0"
+version = "1.4.4"
 edition = "2021"
 license = "MIT"
 description = "Portable core for World Radio: catalog, cache and pure audio logic."
@@ -8,6 +8,9 @@ repository = "https://github.com/Chubik/world-radio"
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

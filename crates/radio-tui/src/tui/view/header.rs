@@ -43,6 +43,13 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         true => Span::styled(" ⊙ synced", Style::default().fg(pal.accent)),
         false => Span::styled(" ○ local", Style::default().fg(pal.dim)),
     };
+    let update_span = match &model.pending_update {
+        None => Span::raw(""),
+        Some(rel) => Span::styled(
+            format!(" ↑ v{} available", rel.version),
+            Style::default().fg(pal.accent).bold(),
+        ),
+    };
     let line1 = vec![
         title,
         Span::raw("  "),
@@ -52,6 +59,7 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         Span::raw("  "),
         Span::styled(meta, Style::default().fg(pal.dim)),
         sync_span,
+        update_span,
     ];
     let mut lines = vec![Line::from(line1)];
     if let Some(t) = &model.now.title {
