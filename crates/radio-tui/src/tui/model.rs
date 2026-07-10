@@ -360,6 +360,7 @@ pub struct Model {
     pub notice: Option<String>,
     pub sync_key: Option<String>,
     pub mirror_seq: u64,
+    pub pending_update: Option<radio_core::update::Release>,
 }
 
 impl Model {
@@ -388,6 +389,7 @@ impl Model {
             notice: None,
             sync_key: radio_core::sync::load_key(),
             mirror_seq: 0,
+            pending_update: None,
         }
     }
 
@@ -417,6 +419,12 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_update_defaults_none() {
+        let m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        assert!(m.pending_update.is_none());
+    }
 
     #[test]
     fn synced_reflects_key_presence() {

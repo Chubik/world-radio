@@ -58,6 +58,8 @@ pub enum Msg {
     FacetsLoaded(radio_core::catalog::Facets),
     Tick(std::time::Instant),
     MirrorPlay(radio_core::mirror::MirrorEvent),
+    UpdateAvailable(radio_core::update::Release),
+    UpdateNow,
 }
 
 #[allow(dead_code)]
@@ -85,4 +87,5 @@ pub enum Effect {
         url: String,
     },
     SaveState,
+    Update(radio_core::update::Release),
 }
