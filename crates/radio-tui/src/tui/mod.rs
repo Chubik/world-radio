@@ -80,6 +80,13 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         std::thread::sleep(std::time::Duration::from_secs(3));
     });
 
+    let update_tx = msg_tx.clone();
+    std::thread::spawn(move || {
+        if let Ok(Some(rel)) = radio_core::update::fetch_latest() {
+            let _ = update_tx.send(Msg::UpdateAvailable(rel));
+        }
+    });
+
     let engine = AudioEngine::spawn()?;
     engine.set_volume(0.6);
 
@@ -313,6 +320,9 @@ fn run_effects(
             }
             Effect::SyncDelete => {
                 let _ = req_tx.send(WorkerReq::SyncDelete);
+            }
+            Effect::Update(rel) => {
+                let _ = req_tx.send(WorkerReq::Update(rel));
             }
         }
     }

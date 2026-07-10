@@ -18,6 +18,7 @@ pub fn render(pal: &Palette, frame: &mut Frame, area: Rect) {
         Line::from("  f         toggle favorite"),
         Line::from("  B         blacklist / block"),
         Line::from("  y         sync panel (key · qr · log out)"),
+        Line::from("  U         update (when available)"),
         Line::from("  [ ]       volume"),
         Line::from(""),
         Line::from("SYNC (across devices)"),
