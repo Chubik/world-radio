@@ -186,6 +186,17 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::Tick(now) => tick(model, now),
         Msg::MirrorPlay(evt) => mirror_play(model, evt),
+        Msg::UpdateAvailable(rel) => {
+            model.pending_update = Some(rel);
+            vec![]
+        }
+        Msg::UpdateNow => match model.pending_update.clone() {
+            None => vec![],
+            Some(rel) => {
+                model.notice = Some(format!("updating to v{}…", rel.version));
+                vec![Effect::Update(rel)]
+            }
+        },
     }
 }
 
@@ -1313,6 +1324,7 @@ mod tests {
             Effect::SyncCreate => "synccreate",
             Effect::SyncLogout => "synclogout",
             Effect::SyncDelete => "syncdelete",
+            Effect::Update(_) => "update",
         }
     }
 }

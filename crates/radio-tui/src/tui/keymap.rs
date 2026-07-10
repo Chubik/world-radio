@@ -138,6 +138,7 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::VolumeDown => Msg::VolumeDown,
         Action::FocusFilters => Msg::FocusToggle,
         Action::Quit => Msg::Quit,
+        Action::Update => Msg::UpdateNow,
     }
 }
 

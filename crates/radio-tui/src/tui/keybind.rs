@@ -18,10 +18,11 @@ pub enum Action {
     VolumeDown,
     FocusFilters,
     Quit,
+    Update,
 }
 
 impl Action {
-    pub const ALL: [Action; 15] = [
+    pub const ALL: [Action; 16] = [
         Action::Play,
         Action::Stop,
         Action::ToggleFavorite,
@@ -37,6 +38,7 @@ impl Action {
         Action::VolumeDown,
         Action::FocusFilters,
         Action::Quit,
+        Action::Update,
     ];
 
     pub fn label(self) -> &'static str {
@@ -56,6 +58,7 @@ impl Action {
             Action::VolumeDown => "volume down",
             Action::FocusFilters => "filter focus",
             Action::Quit => "quit",
+            Action::Update => "update",
         }
     }
 }
@@ -169,6 +172,7 @@ impl Default for Keymap {
             },
         );
         map.insert(Action::Quit, ch('q'));
+        map.insert(Action::Update, ch('U'));
         Keymap { map }
     }
 }
