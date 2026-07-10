@@ -1,4 +1,6 @@
 use serde::Deserialize;
+use std::io::Read;
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Release {
@@ -81,6 +83,59 @@ pub fn fetch_latest() -> anyhow::Result<Option<Release>> {
     )
 }
 
+pub fn apply(release: &Release) -> anyhow::Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("world-radio-update/1")
+        .build()?;
+    let bytes = client
+        .get(&release.tarball_url)
+        .send()?
+        .error_for_status()?
+        .bytes()?;
+    let exe = std::env::current_exe()?;
+    verify_and_extract(&bytes, &release.sha256, &exe)
+}
+
+pub fn verify_and_extract(
+    tarball: &[u8],
+    expected_sha: &str,
+    dest_exe: &Path,
+) -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(tarball);
+    let got: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    if got != expected_sha {
+        anyhow::bail!("checksum mismatch");
+    }
+    let gz = flate2::read::GzDecoder::new(tarball);
+    let mut archive = tar::Archive::new(gz);
+    let mut binary: Vec<u8> = Vec::new();
+    let mut found = false;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_path_buf();
+        if path.file_name().and_then(|n| n.to_str()) == Some("world-radio") {
+            entry.read_to_end(&mut binary)?;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        anyhow::bail!("world-radio binary not found in archive");
+    }
+    let dir = dest_exe.parent().unwrap_or_else(|| Path::new("."));
+    let tmp = dir.join(".world-radio.update");
+    std::fs::write(&tmp, &binary)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(&tmp, dest_exe)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +184,50 @@ mod tests {
             .create();
         let out = latest_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
         assert!(out.is_none());
+    }
+
+    fn make_tarball(bin_contents: &[u8]) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        {
+            let mut ar = tar::Builder::new(&mut enc);
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bin_contents.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            ar.append_data(&mut header, "world-radio", bin_contents).unwrap();
+            ar.finish().unwrap();
+        }
+        enc.finish().unwrap()
+    }
+
+    fn sha_hex(data: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(data);
+        h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn verify_and_extract_replaces_on_good_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("world-radio");
+        std::fs::write(&dest, b"OLD").unwrap();
+        let tarball = make_tarball(b"NEWBINARY");
+        let sha = sha_hex(&tarball);
+        verify_and_extract(&tarball, &sha, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"NEWBINARY");
+    }
+
+    #[test]
+    fn verify_and_extract_rejects_bad_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("world-radio");
+        std::fs::write(&dest, b"OLD").unwrap();
+        let tarball = make_tarball(b"NEWBINARY");
+        let err = verify_and_extract(&tarball, "deadbeef", &dest);
+        assert!(err.is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"OLD");
     }
 }
