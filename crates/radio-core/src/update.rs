@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn latest_from_returns_release_when_newer() {
         let mut server = mockito::Server::new();
-        let tag = format!("v99.0.0");
+        let tag = "v99.0.0";
         server
             .mock("GET", "/releases/latest")
             .with_body(format!(r#"{{"tag_name":"{tag}"}}"#))
