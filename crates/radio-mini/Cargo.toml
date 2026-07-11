@@ -1,6 +1,6 @@
 [package]
 name = "radio-mini"
-version = "1.4.5"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "World Radio Mini: a tray companion that shuffles and plays stations."
