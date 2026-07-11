@@ -2,6 +2,8 @@ use serde::Deserialize;
 use std::io::Read;
 use std::path::Path;
 
+pub const BIN_NAME: &str = "r4dio";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Release {
     pub version: String,
@@ -67,7 +69,7 @@ pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<
     if !is_newer(&version, current_version()) {
         return Ok(None);
     }
-    let asset = format!("world-radio-{}-{}.tar.gz", version, target_triple());
+    let asset = format!("{}-{}-{}.tar.gz", BIN_NAME, version, target_triple());
     let tarball_url = format!("{releases_base}/{asset}");
     let sums = client
         .get(format!("{releases_base}/SHA256SUMS"))
@@ -132,17 +134,17 @@ pub fn verify_and_extract(
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.to_path_buf();
-        if path.file_name().and_then(|n| n.to_str()) == Some("world-radio") {
+        if path.file_name().and_then(|n| n.to_str()) == Some(BIN_NAME) {
             entry.read_to_end(&mut binary)?;
             found = true;
             break;
         }
     }
     if !found {
-        anyhow::bail!("world-radio binary not found in archive");
+        anyhow::bail!("{} binary not found in archive", BIN_NAME);
     }
     let dir = dest_exe.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = dir.join(".world-radio.update");
+    let tmp = dir.join(format!(".{BIN_NAME}.update"));
     std::fs::write(&tmp, &binary)?;
     #[cfg(unix)]
     {
@@ -179,7 +181,7 @@ mod tests {
             .mock("GET", "/releases/latest")
             .with_body(format!(r#"[{{"tag_name":"{tag}"}}]"#))
             .create();
-        let asset = format!("world-radio-99.0.0-{}.tar.gz", target_triple());
+        let asset = format!("{}-99.0.0-{}.tar.gz", BIN_NAME, target_triple());
         server
             .mock("GET", "/SHA256SUMS")
             .with_body(format!("abc123  {asset}\n"))
@@ -213,8 +215,7 @@ mod tests {
             header.set_size(bin_contents.len() as u64);
             header.set_mode(0o755);
             header.set_cksum();
-            ar.append_data(&mut header, "world-radio", bin_contents)
-                .unwrap();
+            ar.append_data(&mut header, BIN_NAME, bin_contents).unwrap();
             ar.finish().unwrap();
         }
         enc.finish().unwrap()
@@ -230,7 +231,7 @@ mod tests {
     #[test]
     fn verify_and_extract_replaces_on_good_checksum() {
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("world-radio");
+        let dest = dir.path().join(BIN_NAME);
         std::fs::write(&dest, b"OLD").unwrap();
         let tarball = make_tarball(b"NEWBINARY");
         let sha = sha_hex(&tarball);
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn verify_and_extract_rejects_bad_checksum() {
         let dir = tempfile::tempdir().unwrap();
-        let dest = dir.path().join("world-radio");
+        let dest = dir.path().join(BIN_NAME);
         std::fs::write(&dest, b"OLD").unwrap();
         let tarball = make_tarball(b"NEWBINARY");
         let err = verify_and_extract(&tarball, "deadbeef", &dest);
