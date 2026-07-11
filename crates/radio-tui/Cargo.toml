@@ -7,7 +7,7 @@ description = "World Radio: a terminal radio player for 30,000+ stations."
 repository = "https://github.com/Chubik/world-radio"
 
 [[bin]]
-name = "world-radio"
+name = "r4dio"
 path = "src/main.rs"
 
 [dependencies]
