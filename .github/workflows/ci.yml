@@ -147,8 +147,8 @@ jobs:
         id: pkg
         run: |
           version=$(grep '^version' crates/radio-tui/Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          asset="world-radio-${version}-${{ matrix.target }}.tar.gz"
-          tar -C "target/${{ matrix.target }}/release" -czf "$asset" world-radio
+          asset="r4dio-${version}-${{ matrix.target }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "$asset" r4dio
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "$asset" > "$asset.sha"
           else
