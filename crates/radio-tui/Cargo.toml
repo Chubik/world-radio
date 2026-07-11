@@ -1,6 +1,6 @@
 [package]
 name = "radio-tui"
-version = "1.4.4"
+version = "1.4.5"
 edition = "2021"
 license = "MIT"
 description = "World Radio: a terminal radio player for 30,000+ stations."
