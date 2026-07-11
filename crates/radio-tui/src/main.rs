@@ -7,7 +7,7 @@ use radio_core::catalog::{api, Cache, Catalog, Health, SearchQuery};
 use radio_core::paths;
 
 #[derive(Parser)]
-#[command(name = "world-radio")]
+#[command(name = "r4dio")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
