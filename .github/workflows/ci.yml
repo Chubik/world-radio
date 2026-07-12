@@ -76,7 +76,7 @@ jobs:
           echo "version=$next" >> "$GITHUB_OUTPUT"
           echo "last=$last level=$level next=$next"
 
-      - name: stamp files + commit + tag
+      - name: stamp files + tag
         run: |
           ver="${{ steps.bump.outputs.version }}"
           ./scripts/bump-version.sh stamp "$ver"
@@ -86,9 +86,11 @@ jobs:
           # refresh lockfile so the crate version in Cargo.lock matches
           cargo update -p radio-tui --precise "$ver" 2>/dev/null || cargo generate-lockfile
           git add Cargo.lock || true
-          git commit -m "release: v${ver}" || echo "nothing to stamp"
+          # the tag carries the stamped version; main files are left untouched
+          # (branch protection forbids CI pushing to main). the tag is the
+          # source of truth for the release; release jobs check out this tag.
+          git commit -m "release: v${ver}"
           git tag "v${ver}"
-          git push origin HEAD:main
           git push origin "v${ver}"
 
   android-release:
