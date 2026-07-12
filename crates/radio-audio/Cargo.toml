@@ -1,6 +1,6 @@
 [package]
 name = "radio-audio"
-version = "1.4.4"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "Native audio engine for World Radio: streaming, decode, crossfade, output."

@@ -1,6 +1,6 @@
 [package]
 name = "radio-core"
-version = "1.4.4"
+version.workspace = true
 edition = "2021"
 license = "MIT"
 description = "Portable core for World Radio: catalog, cache and pure audio logic."
