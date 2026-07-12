@@ -331,6 +331,7 @@ fn row_to_station(r: &rusqlite::Row) -> rusqlite::Result<Station> {
         tags: r.get(5)?,
         codec: r.get(6)?,
         bitrate: r.get(7)?,
+        votes: 0,
         geo_lat: r.get(8)?,
         geo_long: r.get(9)?,
     })
@@ -357,6 +358,7 @@ mod tests {
             tags: tags.into(),
             codec: codec.into(),
             bitrate,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }
@@ -372,6 +374,7 @@ mod tests {
             tags: String::new(),
             codec: String::new(),
             bitrate: 0,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }

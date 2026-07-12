@@ -17,6 +17,8 @@ pub struct Station {
     #[serde(default)]
     pub bitrate: u32,
     #[serde(default)]
+    pub votes: u64,
+    #[serde(default)]
     pub geo_lat: Option<f64>,
     #[serde(default)]
     pub geo_long: Option<f64>,
@@ -75,5 +77,19 @@ mod tests {
         assert_eq!(s.name, "Bare");
         assert_eq!(s.bitrate, 0);
         assert_eq!(s.geo_lat, None);
+    }
+
+    #[test]
+    fn parses_votes_field() {
+        let json = r#"{"stationuuid":"x","name":"Popular","votes":4210}"#;
+        let s: Station = serde_json::from_str(json).unwrap();
+        assert_eq!(s.votes, 4210);
+    }
+
+    #[test]
+    fn votes_defaults_zero_when_absent() {
+        let json = r#"{"stationuuid":"x","name":"Quiet"}"#;
+        let s: Station = serde_json::from_str(json).unwrap();
+        assert_eq!(s.votes, 0);
     }
 }
