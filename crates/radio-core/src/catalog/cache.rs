@@ -33,9 +33,9 @@ impl Cache {
     }
 
     fn init_schema(&self) -> anyhow::Result<()> {
-        let version: i64 =
-            self.conn
-                .query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < SCHEMA_VERSION {
             self.conn.execute_batch(
                 "DROP TABLE IF EXISTS stations;
@@ -301,7 +301,9 @@ impl Cache {
     pub fn last_sync(&self) -> anyhow::Result<Option<i64>> {
         let v: Option<String> = self
             .conn
-            .query_row("SELECT value FROM meta WHERE key='last_sync'", [], |r| r.get(0))
+            .query_row("SELECT value FROM meta WHERE key='last_sync'", [], |r| {
+                r.get(0)
+            })
             .optional()?;
         Ok(v.and_then(|s| s.parse().ok()))
     }
@@ -476,10 +478,34 @@ mod tests {
     fn replace_all_bans_ru_by_and_counts_allowed() {
         let c = Cache::open_in_memory().unwrap();
         let dump = vec![
-            Station { stationuuid: "1".into(), name: "Jazz FM".into(), countrycode: "FR".into(), votes: 10, ..bare() },
-            Station { stationuuid: "2".into(), name: "Radio Moscow".into(), countrycode: "US".into(), votes: 99, ..bare() },
-            Station { stationuuid: "3".into(), name: "Any".into(), countrycode: "RU".into(), votes: 5, ..bare() },
-            Station { stationuuid: "4".into(), name: "Минск FM".into(), countrycode: "PL".into(), votes: 7, ..bare() },
+            Station {
+                stationuuid: "1".into(),
+                name: "Jazz FM".into(),
+                countrycode: "FR".into(),
+                votes: 10,
+                ..bare()
+            },
+            Station {
+                stationuuid: "2".into(),
+                name: "Radio Moscow".into(),
+                countrycode: "US".into(),
+                votes: 99,
+                ..bare()
+            },
+            Station {
+                stationuuid: "3".into(),
+                name: "Any".into(),
+                countrycode: "RU".into(),
+                votes: 5,
+                ..bare()
+            },
+            Station {
+                stationuuid: "4".into(),
+                name: "Минск FM".into(),
+                countrycode: "PL".into(),
+                votes: 7,
+                ..bare()
+            },
         ];
         let n = c.replace_all(&dump).unwrap();
         assert_eq!(n, 1, "only the FR jazz station survives the ban gate");
@@ -491,9 +517,20 @@ mod tests {
     #[test]
     fn replace_all_refuses_empty_and_keeps_cache() {
         let c = Cache::open_in_memory().unwrap();
-        c.replace_all(&[Station { stationuuid: "1".into(), name: "Keep".into(), countrycode: "FR".into(), votes: 1, ..bare() }]).unwrap();
+        c.replace_all(&[Station {
+            stationuuid: "1".into(),
+            name: "Keep".into(),
+            countrycode: "FR".into(),
+            votes: 1,
+            ..bare()
+        }])
+        .unwrap();
         assert!(c.replace_all(&[]).is_err());
-        assert_eq!(c.list_all().unwrap().len(), 1, "failed empty sync must not wipe cache");
+        assert_eq!(
+            c.list_all().unwrap().len(),
+            1,
+            "failed empty sync must not wipe cache"
+        );
     }
 
     #[test]
@@ -509,12 +546,27 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         let mut dump = Vec::new();
         for i in 0..20 {
-            dump.push(Station { stationuuid: format!("p{i}"), name: format!("Pop{i}"), countrycode: "FR".into(), votes: 1000 - i as u64, ..bare() });
+            dump.push(Station {
+                stationuuid: format!("p{i}"),
+                name: format!("Pop{i}"),
+                countrycode: "FR".into(),
+                votes: 1000 - i as u64,
+                ..bare()
+            });
         }
-        dump.push(Station { stationuuid: "fav".into(), name: "NicheFav".into(), countrycode: "FR".into(), votes: 0, ..bare() });
+        dump.push(Station {
+            stationuuid: "fav".into(),
+            name: "NicheFav".into(),
+            countrycode: "FR".into(),
+            votes: 0,
+            ..bare()
+        });
         c.replace_all(&dump).unwrap();
         let out = c.list_by_popularity(&["fav".to_string()], 5).unwrap();
-        assert_eq!(out[0].stationuuid, "fav", "favourite hoisted even though 0 votes and beyond top-5");
+        assert_eq!(
+            out[0].stationuuid, "fav",
+            "favourite hoisted even though 0 votes and beyond top-5"
+        );
         assert!(out.len() <= 6, "roughly limit + hoisted favs");
     }
 
@@ -524,12 +576,22 @@ mod tests {
         let path = tmp.path().join("old.db");
         {
             let conn = rusqlite::Connection::open(&path).unwrap();
-            conn.execute_batch("CREATE TABLE stations (stationuuid TEXT PRIMARY KEY, name TEXT, bitrate INTEGER);").unwrap();
+            conn.execute_batch(
+                "CREATE TABLE stations (stationuuid TEXT PRIMARY KEY, name TEXT, bitrate INTEGER);",
+            )
+            .unwrap();
             // no votes column, no meta table, user_version stays 0
         }
-        let c = Cache::open(&path).unwrap();          // must not error
-        // replace_all + list must work (proves votes column + meta exist now)
-        c.replace_all(&[Station { stationuuid: "1".into(), name: "X".into(), countrycode: "FR".into(), votes: 5, ..bare() }]).unwrap();
+        let c = Cache::open(&path).unwrap(); // must not error
+                                             // replace_all + list must work (proves votes column + meta exist now)
+        c.replace_all(&[Station {
+            stationuuid: "1".into(),
+            name: "X".into(),
+            countrycode: "FR".into(),
+            votes: 5,
+            ..bare()
+        }])
+        .unwrap();
         assert_eq!(c.count().unwrap(), 1);
         assert!(c.last_sync().unwrap().is_none());
     }
@@ -538,12 +600,34 @@ mod tests {
     fn list_by_popularity_hoists_favourites_then_votes_desc() {
         let c = Cache::open_in_memory().unwrap();
         c.replace_all(&[
-            Station { stationuuid: "hi".into(), name: "HighVotes".into(), countrycode: "FR".into(), votes: 100, ..bare() },
-            Station { stationuuid: "lo".into(), name: "LowVotes".into(), countrycode: "FR".into(), votes: 1, ..bare() },
-            Station { stationuuid: "fav".into(), name: "Favourite".into(), countrycode: "FR".into(), votes: 2, ..bare() },
-        ]).unwrap();
+            Station {
+                stationuuid: "hi".into(),
+                name: "HighVotes".into(),
+                countrycode: "FR".into(),
+                votes: 100,
+                ..bare()
+            },
+            Station {
+                stationuuid: "lo".into(),
+                name: "LowVotes".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+            Station {
+                stationuuid: "fav".into(),
+                name: "Favourite".into(),
+                countrycode: "FR".into(),
+                votes: 2,
+                ..bare()
+            },
+        ])
+        .unwrap();
         let out = c.list_by_popularity(&["fav".to_string()], 10).unwrap();
-        assert_eq!(out[0].stationuuid, "fav", "favourite first regardless of votes");
+        assert_eq!(
+            out[0].stationuuid, "fav",
+            "favourite first regardless of votes"
+        );
         assert_eq!(out[1].stationuuid, "hi", "then highest votes");
         assert_eq!(out[2].stationuuid, "lo");
     }
