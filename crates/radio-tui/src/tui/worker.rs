@@ -413,6 +413,7 @@ mod tests {
             tags: "jazz".into(),
             codec: "MP3".into(),
             bitrate: 128,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }
