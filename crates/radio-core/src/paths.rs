@@ -87,7 +87,10 @@ mod tests {
 
         assert!(dest.join("favorites.json").exists());
         assert!(dest.join("stations.db").exists());
-        assert_eq!(std::fs::read(dest.join("favorites.json")).unwrap(), b"[\"a\"]");
+        assert_eq!(
+            std::fs::read(dest.join("favorites.json")).unwrap(),
+            b"[\"a\"]"
+        );
         assert!(!legacy.exists(), "legacy dir should be removed");
     }
 
@@ -104,6 +107,9 @@ mod tests {
         migrate_into(&legacy, &dest).unwrap();
 
         assert_eq!(std::fs::read(dest.join("stations.db")).unwrap(), b"NEW");
-        assert!(legacy.exists(), "legacy left intact when dest already populated");
+        assert!(
+            legacy.exists(),
+            "legacy left intact when dest already populated"
+        );
     }
 }
