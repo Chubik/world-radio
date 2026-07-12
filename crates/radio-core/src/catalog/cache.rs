@@ -33,6 +33,16 @@ impl Cache {
     }
 
     fn init_schema(&self) -> anyhow::Result<()> {
+        let version: i64 =
+            self.conn
+                .query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < SCHEMA_VERSION {
+            self.conn.execute_batch(
+                "DROP TABLE IF EXISTS stations;
+                 DROP TABLE IF EXISTS stations_fts;
+                 DROP TABLE IF EXISTS meta;",
+            )?;
+        }
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS stations (
                 stationuuid TEXT PRIMARY KEY,
@@ -51,6 +61,8 @@ impl Cache {
             CREATE VIRTUAL TABLE IF NOT EXISTS stations_fts
                 USING fts5(stationuuid UNINDEXED, name, tags);",
         )?;
+        self.conn
+            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         Ok(())
     }
 
@@ -306,21 +318,40 @@ impl Cache {
         favourites: &[String],
         limit: usize,
     ) -> anyhow::Result<Vec<Station>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
-             FROM stations ORDER BY votes DESC, name LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit as i64], row_to_station)?;
-        let mut rest = Vec::new();
-        for r in rows {
-            rest.push(r?);
+        let mut favs = Vec::new();
+        if !favourites.is_empty() {
+            let placeholders = vec!["?"; favourites.len()].join(",");
+            let sql = format!(
+                "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
+                 FROM stations WHERE stationuuid IN ({placeholders})
+                 ORDER BY votes DESC, name"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let params = rusqlite::params_from_iter(favourites.iter());
+            let rows = stmt.query_map(params, row_to_station)?;
+            for r in rows {
+                favs.push(r?);
+            }
         }
-        let favset: std::collections::HashSet<&str> =
-            favourites.iter().map(|s| s.as_str()).collect();
-        let (mut favs, others): (Vec<Station>, Vec<Station>) = rest
-            .into_iter()
-            .partition(|s| favset.contains(s.stationuuid.as_str()));
-        favs.extend(others);
+
+        let rest_limit = limit.saturating_sub(favs.len());
+        let placeholders = vec!["?"; favourites.len()].join(",");
+        let sql = format!(
+            "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
+             FROM stations WHERE stationuuid NOT IN ({placeholders})
+             ORDER BY votes DESC, name LIMIT ?"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = favourites
+            .iter()
+            .map(|f| Box::new(f.clone()) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        params.push(Box::new(rest_limit as i64));
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
+        for r in rows {
+            favs.push(r?);
+        }
         Ok(dedup_stations(favs))
     }
 
@@ -352,6 +383,8 @@ impl Cache {
         Ok(())
     }
 }
+
+const SCHEMA_VERSION: i64 = 1;
 
 const EXCLUDED_COUNTRYCODES: &[&str] = &["RU", "BY"];
 const EXCLUDED_NAME_SUBSTRINGS: &[&str] = &[
@@ -469,6 +502,36 @@ mod tests {
         assert_eq!(c.last_sync().unwrap(), None);
         c.set_last_sync(1_700_000_000).unwrap();
         assert_eq!(c.last_sync().unwrap(), Some(1_700_000_000));
+    }
+
+    #[test]
+    fn list_by_popularity_keeps_low_vote_favourite_beyond_limit() {
+        let c = Cache::open_in_memory().unwrap();
+        let mut dump = Vec::new();
+        for i in 0..20 {
+            dump.push(Station { stationuuid: format!("p{i}"), name: format!("Pop{i}"), countrycode: "FR".into(), votes: 1000 - i as u64, ..bare() });
+        }
+        dump.push(Station { stationuuid: "fav".into(), name: "NicheFav".into(), countrycode: "FR".into(), votes: 0, ..bare() });
+        c.replace_all(&dump).unwrap();
+        let out = c.list_by_popularity(&["fav".to_string()], 5).unwrap();
+        assert_eq!(out[0].stationuuid, "fav", "favourite hoisted even though 0 votes and beyond top-5");
+        assert!(out.len() <= 6, "roughly limit + hoisted favs");
+    }
+
+    #[test]
+    fn opening_old_schema_db_recreates_cleanly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("old.db");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE stations (stationuuid TEXT PRIMARY KEY, name TEXT, bitrate INTEGER);").unwrap();
+            // no votes column, no meta table, user_version stays 0
+        }
+        let c = Cache::open(&path).unwrap();          // must not error
+        // replace_all + list must work (proves votes column + meta exist now)
+        c.replace_all(&[Station { stationuuid: "1".into(), name: "X".into(), countrycode: "FR".into(), votes: 5, ..bare() }]).unwrap();
+        assert_eq!(c.count().unwrap(), 1);
+        assert!(c.last_sync().unwrap().is_none());
     }
 
     #[test]
