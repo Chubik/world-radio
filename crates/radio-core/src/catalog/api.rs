@@ -47,6 +47,13 @@ impl RadioBrowser {
         let stations: Vec<Station> = resp.json()?;
         Ok(stations)
     }
+
+    pub fn fetch_all(&self) -> anyhow::Result<Vec<Station>> {
+        let url = format!("{}/json/stations", self.base_url);
+        let resp = self.client.get(&url).send()?.error_for_status()?;
+        let stations: Vec<Station> = resp.json()?;
+        Ok(stations)
+    }
 }
 
 pub fn resolve() -> RadioBrowser {
@@ -139,5 +146,20 @@ mod tests {
         let raw = [ip("1.1.1.1"), ip("1.1.1.1"), ip("2.2.2.2")];
         let deduped: Vec<IpAddr> = raw.into_iter().filter(|x| seen.insert(*x)).collect();
         assert_eq!(deduped, vec![ip("1.1.1.1"), ip("2.2.2.2")]);
+    }
+
+    #[test]
+    fn fetch_all_parses_full_dump() {
+        let mut server = mockito::Server::new();
+        let body = r#"[{"stationuuid":"1","name":"A","votes":9},{"stationuuid":"2","name":"B","votes":3}]"#;
+        let m = server
+            .mock("GET", "/json/stations")
+            .with_body(body)
+            .create();
+        let rb = RadioBrowser::with_base_url(server.url());
+        let all = rb.fetch_all().unwrap();
+        m.assert();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].votes, 9);
     }
 }
