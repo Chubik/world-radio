@@ -15,6 +15,8 @@ impl RadioBrowser {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("world-radio/1.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
             .build()
             .expect("client build");
         Self {
@@ -26,6 +28,8 @@ impl RadioBrowser {
     pub fn with_mirror_ip(ip: IpAddr) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("world-radio/1.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
             .resolve(MIRROR_HOST, SocketAddr::new(ip, 443))
             .build()
             .expect("client build");
