@@ -16,3 +16,28 @@ pub use favorites::{Favorites, History};
 pub use filter::SearchQuery;
 pub use health::Health;
 pub use station::{codec_is_unstable, Station};
+
+pub fn should_sync(last: Option<i64>, now: i64, ttl_secs: i64) -> bool {
+    match last {
+        None => true,
+        Some(t) => now - t >= ttl_secs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_sync;
+    const DAY: i64 = 86_400;
+    #[test]
+    fn syncs_when_empty() {
+        assert!(should_sync(None, 1_000_000, DAY));
+    }
+    #[test]
+    fn skips_when_fresh() {
+        assert!(!should_sync(Some(1_000_000 - 3600), 1_000_000, DAY));
+    }
+    #[test]
+    fn syncs_when_stale() {
+        assert!(should_sync(Some(1_000_000 - 25 * 3600), 1_000_000, DAY));
+    }
+}

@@ -71,7 +71,16 @@ fn render_placeholder(model: &Model, pal: &Palette, frame: &mut Frame, area: Rec
             (format!("{frame_glyph}  connecting…"), pal.info)
         }
         (false, true) => ("offline — nothing cached".to_string(), pal.dim),
-        (false, false) => ("no stations found".to_string(), pal.dim),
+        (false, false) => {
+            let empty_text = if model.catalog_loading {
+                "downloading catalog…"
+            } else if model.browse.query.is_empty() {
+                "no stations yet — press / to search"
+            } else {
+                "no matches — press / to search"
+            };
+            (empty_text.to_string(), pal.dim)
+        }
     };
     let inner = area.height.saturating_sub(2);
     let pad = (inner / 2) as usize;
