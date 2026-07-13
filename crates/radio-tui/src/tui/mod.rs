@@ -146,17 +146,18 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         Some(uuid) => {
             let _ = req_tx.send(WorkerReq::ResolveAndPlay(uuid));
         }
-        None => match model.browse.rows.first().cloned() {
-            Some(first) => {
-                run_effects(
-                    update(&mut model, Msg::AutoplayStation(first)),
-                    &mut model,
-                    &engine,
-                    &req_tx,
-                );
-            }
-            None => model.autoplay_first_pending = true,
-        },
+        None if !model.browse.rows.is_empty() => {
+            // pick a random available station
+            let idx = fastrand::usize(..model.browse.rows.len());
+            let row = model.browse.rows[idx].clone();
+            run_effects(
+                update(&mut model, Msg::AutoplayStation(row)),
+                &mut model,
+                &engine,
+                &req_tx,
+            );
+        }
+        None => model.autoplay_first_pending = true,
     }
     if should_sync {
         model.catalog_loading = model.browse.rows.is_empty();
