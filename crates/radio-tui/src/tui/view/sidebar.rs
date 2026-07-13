@@ -32,7 +32,7 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         Block::default().style(Style::default().bg(pal.bg).fg(pal.fg)),
         area,
     );
-    let lines = build_active_group_lines(model, pal);
+    let lines = build_active_group_lines(model, pal, area.height as usize);
     let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
     frame.render_widget(p, area);
 }
@@ -65,7 +65,7 @@ fn groups(model: &Model) -> [FilterGroup; 5] {
     ]
 }
 
-fn build_active_group_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
+fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<Line<'static>> {
     let groups = groups(model);
     let (active_group, active_option) = match model.browse.focus {
         BrowseFocus::Filters { group, option } => (group, Some(option)),
@@ -96,13 +96,35 @@ fn build_active_group_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> 
     lines.push(Line::from(""));
 
     let (_, opts, multi) = &groups[active_group];
-    for (oi, (label, selected)) in opts.iter().enumerate() {
+    // window the option list around the active row so a long list (e.g. 200+
+    // countries) stays navigable instead of running off the bottom.
+    let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
+    let viewport = height.saturating_sub(header_rows).max(1);
+    let sel = active_option.unwrap_or(0);
+    let start = sel
+        .saturating_sub(viewport / 2)
+        .min(opts.len().saturating_sub(viewport));
+    let start = start.min(sel);
+    let end = (start + viewport).min(opts.len());
+    if start > 0 {
+        lines.push(Line::styled(
+            format!("  ↑ {start} more"),
+            Style::default().fg(pal.dim),
+        ));
+    }
+    for (oi, (label, selected)) in opts.iter().enumerate().take(end).skip(start) {
         let marker = marker_for(*multi, oi == 0, *selected);
         let row_style = match Some(oi) == active_option {
             true => Style::default().fg(pal.peak).bold(),
             false => Style::default().fg(pal.fg),
         };
         lines.push(Line::styled(format!("{marker} {label}"), row_style));
+    }
+    if end < opts.len() {
+        lines.push(Line::styled(
+            format!("  ↓ {} more", opts.len() - end),
+            Style::default().fg(pal.dim),
+        ));
     }
     lines
 }
