@@ -70,9 +70,13 @@ pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<
         return Ok(None);
     }
     let asset = format!("{}-{}-{}.tar.gz", BIN_NAME, version, target_triple());
-    let tarball_url = format!("{releases_base}/{asset}");
+    // the release assets (tarball + its SHA256SUMS) live under the versioned
+    // github release path, which is always current — unlike a mirror that only
+    // updates when the site is redeployed. `{version}` in the base is expanded.
+    let base = releases_base.replace("{version}", &version);
+    let tarball_url = format!("{base}/{asset}");
     let sums = client
-        .get(format!("{releases_base}/SHA256SUMS"))
+        .get(format!("{base}/SHA256SUMS"))
         .send()?
         .error_for_status()?
         .text()?;
@@ -94,7 +98,7 @@ pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<
 pub fn fetch_latest() -> anyhow::Result<Option<Release>> {
     latest_from(
         "https://api.github.com/repos/Chubik/world-radio/releases?per_page=10",
-        "https://r4dio.net/releases",
+        "https://github.com/Chubik/world-radio/releases/download/v{version}",
     )
 }
 
@@ -192,6 +196,27 @@ mod tests {
         assert_eq!(rel.version, "99.0.0");
         assert_eq!(rel.sha256, "abc123");
         assert!(rel.tarball_url.ends_with(&asset));
+    }
+
+    #[test]
+    fn releases_base_expands_version_placeholder() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(r#"[{"tag_name":"v99.0.0"}]"#)
+            .create();
+        let asset = format!("{}-99.0.0-{}.tar.gz", BIN_NAME, target_triple());
+        // the versioned path segment must be present because {version} expands
+        server
+            .mock("GET", "/download/v99.0.0/SHA256SUMS")
+            .with_body(format!("abc123  {asset}\n"))
+            .create();
+        let base = format!("{}/download/v{{version}}", server.url());
+        let rel = latest_from(&format!("{}/releases/latest", server.url()), &base)
+            .unwrap()
+            .unwrap();
+        assert_eq!(rel.sha256, "abc123");
+        assert!(rel.tarball_url.contains("/download/v99.0.0/"));
     }
 
     #[test]
