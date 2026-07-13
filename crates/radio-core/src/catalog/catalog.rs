@@ -24,6 +24,30 @@ impl Catalog {
         self.cache.upsert(stations)
     }
 
+    pub fn list_by_popularity(
+        &self,
+        favourites: &[String],
+        limit: usize,
+    ) -> anyhow::Result<Vec<Station>> {
+        self.cache.list_by_popularity(favourites, limit)
+    }
+
+    pub fn last_sync(&self) -> anyhow::Result<Option<i64>> {
+        self.cache.last_sync()
+    }
+
+    pub fn set_last_sync(&self, secs: i64) -> anyhow::Result<()> {
+        self.cache.set_last_sync(secs)
+    }
+
+    pub fn catalog_count(&self) -> anyhow::Result<usize> {
+        self.cache.count()
+    }
+
+    pub fn replace_catalog(&self, stations: &[Station]) -> anyhow::Result<usize> {
+        self.cache.replace_all(stations)
+    }
+
     pub fn search_offline(&self, term: &str) -> anyhow::Result<Vec<Station>> {
         let stations = match term.trim().is_empty() {
             true => self.cache.list_all()?,

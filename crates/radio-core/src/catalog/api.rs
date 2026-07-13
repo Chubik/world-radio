@@ -59,6 +59,23 @@ impl RadioBrowser {
         let stations: Vec<Station> = resp.json()?;
         Ok(stations)
     }
+
+    pub fn fetch_top(&self, limit: usize) -> anyhow::Result<Vec<Station>> {
+        let url = format!("{}/json/stations", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("order", "votes"),
+                ("reverse", "true"),
+                ("limit", &limit.to_string()),
+                ("hidebroken", "true"),
+            ])
+            .send()?
+            .error_for_status()?;
+        let stations: Vec<Station> = resp.json()?;
+        Ok(stations)
+    }
 }
 
 pub fn resolve() -> RadioBrowser {

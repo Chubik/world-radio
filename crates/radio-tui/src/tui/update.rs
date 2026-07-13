@@ -114,6 +114,23 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::AutoplayStation(row) => play_row(model, row),
+        Msg::CatalogSynced { count } => {
+            model.catalog_count = Some(count);
+            model.catalog_loading = false;
+            model.browse.pending_online_search = Some(Instant::now());
+            autoplay_first_if_pending(model)
+        }
+        Msg::CatalogSyncFailed => {
+            model.catalog_loading = false;
+            vec![]
+        }
+        Msg::QuickTopReady { count } => {
+            if model.catalog_count.is_none() {
+                model.catalog_count = Some(count);
+            }
+            model.catalog_loading = false;
+            autoplay_first_if_pending(model)
+        }
         Msg::SearchFailed(e) => {
             model.browse.loading = false;
             model.browse.last_error = Some(e);
@@ -303,6 +320,17 @@ fn shuffle_play(model: &mut Model) -> Vec<Effect> {
     let pick = candidates[fastrand::usize(..candidates.len())];
     model.browse.selected = pick;
     play_selected(model)
+}
+
+fn autoplay_first_if_pending(model: &mut Model) -> Vec<Effect> {
+    if !model.autoplay_first_pending || model.is_playing() {
+        return vec![];
+    }
+    let Some(row) = model.browse.rows.first().cloned() else {
+        return vec![];
+    };
+    model.autoplay_first_pending = false;
+    play_row(model, row)
 }
 
 fn play_row(model: &mut Model, row: StationRow) -> Vec<Effect> {
@@ -1302,6 +1330,61 @@ mod tests {
         assert!(fx.is_empty());
         assert!(m.now.station_name.is_none());
         assert!(m.notice.is_none());
+    }
+
+    #[test]
+    fn catalog_synced_sets_count_and_clears_loading() {
+        let mut m = model();
+        m.catalog_loading = true;
+        let _ = update(&mut m, Msg::CatalogSynced { count: 30241 });
+        assert_eq!(m.catalog_count, Some(30241));
+        assert!(!m.catalog_loading);
+    }
+
+    #[test]
+    fn catalog_sync_failed_clears_loading_keeps_count() {
+        let mut m = model();
+        m.catalog_loading = true;
+        let _ = update(&mut m, Msg::CatalogSyncFailed);
+        assert!(!m.catalog_loading);
+        assert_eq!(m.catalog_count, None);
+    }
+
+    #[test]
+    fn catalog_synced_autoplays_first_when_pending_and_idle() {
+        let mut m = model();
+        m.autoplay_first_pending = true;
+        m.browse.rows = vec![row("u1")];
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Play(_))),
+            "plays first station"
+        );
+        assert!(!m.autoplay_first_pending, "flag cleared after autoplay");
+    }
+
+    #[test]
+    fn catalog_synced_does_not_autoplay_when_already_playing() {
+        let mut m = model();
+        m.autoplay_first_pending = true;
+        m.status = Status::Playing {
+            sample_rate: 44100,
+            channels: 2,
+            title: None,
+        };
+        m.browse.rows = vec![row("u1")];
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(!effects.iter().any(|e| matches!(e, Effect::Play(_))));
+    }
+
+    #[test]
+    fn quick_top_ready_autoplays_first_when_pending_and_idle() {
+        let mut m = model();
+        m.autoplay_first_pending = true;
+        m.browse.rows = vec![row("u1")];
+        let effects = update(&mut m, Msg::QuickTopReady { count: 5 });
+        assert!(effects.iter().any(|e| matches!(e, Effect::Play(_))));
+        assert!(!m.autoplay_first_pending);
     }
 
     fn eff_kind(e: &Effect) -> &'static str {
