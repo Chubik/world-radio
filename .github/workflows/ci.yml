@@ -55,6 +55,7 @@ jobs:
       contents: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
+      notes: ${{ steps.bump.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,6 +77,21 @@ jobs:
           next="$(./scripts/bump-version.sh next "$last" "$level")"
           echo "version=$next" >> "$GITHUB_OUTPUT"
           echo "last=$last level=$level next=$next"
+
+          # changelog: user-facing feat/fix commits since the last tag, prefixes
+          # stripped. drop chore/ci/style/docs/test/build and release commits.
+          range="v${last}..HEAD"
+          git rev-parse -q --verify "v${last}" >/dev/null 2>&1 || range="HEAD"
+          notes="$(git log "$range" --no-merges --pretty=%s \
+            | grep -E '^(feat|fix)(\([^)]*\))?!?:' \
+            | sed -E 's/^(feat|fix)(\([^)]*\))?!?: *//' \
+            | sed 's/^/- /' || true)"
+          [ -n "$notes" ] || notes="- Maintenance and internal improvements."
+          {
+            echo "notes<<CHANGELOG_EOF"
+            echo "$notes"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: stamp files + tag
         run: |
@@ -135,13 +151,14 @@ jobs:
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
 
       - name: release notes
+        env:
+          CHANGELOG: ${{ needs.version.outputs.notes }}
         run: |
           {
             printf '# r4dio v%s\n\n' "${{ needs.version.outputs.version }}"
             printf 'One release, all platforms — CLI (Linux + macOS) and the Android APK.\n\n'
             printf "## What's new\n\n"
-            printf -- '- Sync favourites and blocklist across your devices — link them with a key or QR code.\n'
-            printf -- '- Mirror playback: switch station on one device and the rest follow.\n\n'
+            printf '%s\n\n' "$CHANGELOG"
             printf '## Install\n\n'
             printf 'CLI: `curl -fsSL https://r4dio.net/install | sh`\n\n'
             printf 'Android: download `%s` (debug-signed beta, Android 8+).\n\n' "${{ steps.pkg.outputs.apk }}"
