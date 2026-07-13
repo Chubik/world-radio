@@ -52,6 +52,29 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         &data.join("blacklist.json"),
     );
 
+    let fav_ids: Vec<String> = catalog.favorite_ids().to_vec();
+    let seed_rows: Vec<crate::tui::model::StationRow> =
+        match catalog.list_by_popularity(&fav_ids, 200) {
+            Ok(stations) => stations
+                .iter()
+                .map(|s| {
+                    let uuid = &s.stationuuid;
+                    worker::station_to_row(s, catalog.is_favorite(uuid), catalog.is_hidden(uuid))
+                })
+                .collect(),
+            Err(e) => {
+                crate::log_warn!("startup: list_by_popularity failed: {e}");
+                Vec::new()
+            }
+        };
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let should_sync =
+        radio_core::catalog::should_sync(catalog.last_sync().ok().flatten(), now_secs, 86_400);
+    let catalog_count = catalog.catalog_count().ok().filter(|c| *c > 0);
+
     let (req_tx, req_rx) = channel::<WorkerReq>();
     let (msg_tx, msg_rx) = channel::<Msg>();
     let worker_paths = WorkerPaths {
@@ -99,6 +122,15 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.crossfade = config.crossfade;
     model.spectrum_style = config.spectrum_style;
     model.keymap = config.keybindings.clone();
+    if let Some(c) = catalog_count {
+        model.catalog_count = Some(c);
+    }
+    let seed_empty = seed_rows.is_empty();
+    if !seed_empty {
+        model.browse.rows_api = seed_rows.clone();
+        model.browse.rows = seed_rows;
+        model.browse.loading = false;
+    }
     engine.set_crossfade(config.crossfade);
     let mut spectrum = Spectrum::new();
     let mut tap_buf = vec![0.0_f32; TAP_SAMPLES];
@@ -110,8 +142,28 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         restored_query,
         model.browse.filters.clone(),
     ));
-    if let Some(uuid) = config.last_station.clone() {
-        let _ = req_tx.send(WorkerReq::ResolveAndPlay(uuid));
+    match config.last_station.clone() {
+        Some(uuid) => {
+            let _ = req_tx.send(WorkerReq::ResolveAndPlay(uuid));
+        }
+        None => match model.browse.rows.first().cloned() {
+            Some(first) => {
+                run_effects(
+                    update(&mut model, Msg::AutoplayStation(first)),
+                    &mut model,
+                    &engine,
+                    &req_tx,
+                );
+            }
+            None => model.autoplay_first_pending = true,
+        },
+    }
+    if should_sync {
+        model.catalog_loading = model.browse.rows.is_empty();
+        if seed_empty {
+            let _ = req_tx.send(WorkerReq::QuickTop);
+        }
+        let _ = req_tx.send(WorkerReq::SyncCatalog);
     }
     let _ = req_tx.send(WorkerReq::Sync);
 
