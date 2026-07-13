@@ -632,6 +632,34 @@ mod tests {
         assert_eq!(out[2].stationuuid, "lo");
     }
 
+    #[test]
+    fn list_by_popularity_empty_favourites_returns_popular() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "hi".into(),
+                name: "Hi".into(),
+                countrycode: "FR".into(),
+                votes: 50,
+                ..bare()
+            },
+            Station {
+                stationuuid: "lo".into(),
+                name: "Lo".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let out = c.list_by_popularity(&[], 10).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0].stationuuid, "hi",
+            "highest votes first when no favourites"
+        );
+    }
+
     fn rich_station(
         uuid: &str,
         name: &str,

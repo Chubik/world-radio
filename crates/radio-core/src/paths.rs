@@ -56,7 +56,7 @@ fn migrate_into(legacy: &Path, dest: &Path) -> std::io::Result<()> {
                 Ok(_) => moved_any = true,
                 Err(_) => {
                     std::fs::copy(&src, &dst)?;
-                    std::fs::remove_file(&src)?;
+                    let _ = std::fs::remove_file(&src);
                     moved_any = true;
                 }
             }
