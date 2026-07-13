@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   rust:
@@ -221,6 +222,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
+          retention-days: 1
           path: |
             ${{ steps.pkg.outputs.asset }}
             ${{ steps.pkg.outputs.asset }}.sha
@@ -256,3 +258,25 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+
+      - name: reclaim actions storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # keep only the 10 most recent workflow runs — logs are the bulk of the
+          # 0.5gb actions storage and pile up every release.
+          gh api "/repos/${{ github.repository }}/actions/runs?per_page=100" \
+            --jq '.workflow_runs | sort_by(.created_at) | reverse | .[10:] | .[].id' \
+            | while read -r rid; do
+                [ -n "$rid" ] || continue
+                gh api -X DELETE "/repos/${{ github.repository }}/actions/runs/$rid" >/dev/null 2>&1 \
+                  && echo "deleted run $rid" || true
+              done
+          # drop all actions caches (rebuilt on demand next run)
+          gh api "/repos/${{ github.repository }}/actions/caches?per_page=100" \
+            --jq '.actions_caches[].id' \
+            | while read -r cid; do
+                [ -n "$cid" ] || continue
+                gh api -X DELETE "/repos/${{ github.repository }}/actions/caches/$cid" >/dev/null 2>&1 \
+                  && echo "deleted cache $cid" || true
+              done
