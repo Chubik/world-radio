@@ -15,6 +15,8 @@ impl RadioBrowser {
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("world-radio/1.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
             .build()
             .expect("client build");
         Self {
@@ -26,6 +28,8 @@ impl RadioBrowser {
     pub fn with_mirror_ip(ip: IpAddr) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("world-radio/1.1")
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
             .resolve(MIRROR_HOST, SocketAddr::new(ip, 443))
             .build()
             .expect("client build");
@@ -42,6 +46,35 @@ impl RadioBrowser {
             .client
             .get(&url)
             .query(&params)
+            .send()?
+            .error_for_status()?;
+        let stations: Vec<Station> = resp.json()?;
+        Ok(stations)
+    }
+
+    pub fn fetch_all(&self) -> anyhow::Result<Vec<Station>> {
+        let url = format!("{}/json/stations", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[("limit", "500000"), ("hidebroken", "true")])
+            .send()?
+            .error_for_status()?;
+        let stations: Vec<Station> = resp.json()?;
+        Ok(stations)
+    }
+
+    pub fn fetch_top(&self, limit: usize) -> anyhow::Result<Vec<Station>> {
+        let url = format!("{}/json/stations", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[
+                ("order", "votes"),
+                ("reverse", "true"),
+                ("limit", &limit.to_string()),
+                ("hidebroken", "true"),
+            ])
             .send()?
             .error_for_status()?;
         let stations: Vec<Station> = resp.json()?;
@@ -139,5 +172,23 @@ mod tests {
         let raw = [ip("1.1.1.1"), ip("1.1.1.1"), ip("2.2.2.2")];
         let deduped: Vec<IpAddr> = raw.into_iter().filter(|x| seen.insert(*x)).collect();
         assert_eq!(deduped, vec![ip("1.1.1.1"), ip("2.2.2.2")]);
+    }
+
+    #[test]
+    fn fetch_all_parses_full_dump() {
+        let mut server = mockito::Server::new();
+        let body = r#"[{"stationuuid":"1","name":"A","votes":9},{"stationuuid":"2","name":"B","votes":3}]"#;
+        let m = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/json/stations(\?.*)?$".to_string()),
+            )
+            .with_body(body)
+            .create();
+        let rb = RadioBrowser::with_base_url(server.url());
+        let all = rb.fetch_all().unwrap();
+        m.assert();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].votes, 9);
     }
 }

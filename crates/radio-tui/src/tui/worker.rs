@@ -20,6 +20,8 @@ pub enum WorkerReq {
     },
     ResolveAndPlay(String),
     SaveState,
+    SyncCatalog,
+    QuickTop,
     Sync,
     SyncCreate,
     SyncLogout,
@@ -106,6 +108,8 @@ pub fn spawn(
                     handle_resolve_and_play(&catalog, &uuid, &msg_tx)
                 }
                 WorkerReq::SaveState => save_all(&catalog, &paths),
+                WorkerReq::SyncCatalog => handle_sync_catalog(&catalog, &msg_tx),
+                WorkerReq::QuickTop => handle_quick_top(&catalog, &msg_tx),
                 WorkerReq::Sync => {
                     handle_sync(&mut catalog, &paths, &msg_tx, true);
                 }
@@ -387,6 +391,69 @@ fn handle_resolve_and_play(catalog: &Catalog, uuid: &str, msg_tx: &Sender<Msg>) 
     }
 }
 
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn seed_rows_by_popularity(catalog: &Catalog) -> Vec<StationRow> {
+    let fav_ids: Vec<String> = catalog.favorite_ids().to_vec();
+    match catalog.list_by_popularity(&fav_ids, 200) {
+        Ok(stations) => rows_from(catalog, &stations),
+        Err(e) => {
+            crate::log_warn!("worker: list_by_popularity failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn handle_sync_catalog(catalog: &Catalog, msg_tx: &Sender<Msg>) {
+    let rb = api::resolve();
+    match rb.fetch_all() {
+        Ok(stations) => match catalog.replace_catalog(&stations) {
+            Ok(count) => {
+                let _ = catalog.set_last_sync(now_secs());
+                let rows = seed_rows_by_popularity(catalog);
+                if !rows.is_empty() {
+                    let _ = msg_tx.send(Msg::SearchResults(rows));
+                }
+                let _ = msg_tx.send(Msg::CatalogSynced { count });
+            }
+            Err(e) => {
+                crate::log_warn!("worker: replace_catalog failed: {e}");
+                let _ = msg_tx.send(Msg::CatalogSyncFailed);
+            }
+        },
+        Err(e) => {
+            crate::log_warn!("worker: fetch_all failed: {e}");
+            let _ = msg_tx.send(Msg::CatalogSyncFailed);
+        }
+    }
+}
+
+fn handle_quick_top(catalog: &Catalog, msg_tx: &Sender<Msg>) {
+    let rb = api::resolve();
+    match rb.fetch_top(200) {
+        Ok(stations) => {
+            if let Err(e) = catalog.ingest(&stations) {
+                crate::log_warn!("worker: quick-top ingest failed: {e}");
+                return;
+            }
+            let rows = seed_rows_by_popularity(catalog);
+            let count = rows.len();
+            if !rows.is_empty() {
+                let _ = msg_tx.send(Msg::SearchResults(rows));
+            }
+            let _ = msg_tx.send(Msg::QuickTopReady { count });
+        }
+        Err(e) => {
+            crate::log_warn!("worker: quick-top fetch failed: {e}");
+        }
+    }
+}
+
 fn handle_load_facets(catalog: &Catalog, msg_tx: &Sender<Msg>) {
     match catalog.facets(10) {
         Ok(f) => {
@@ -413,6 +480,7 @@ mod tests {
             tags: "jazz".into(),
             codec: "MP3".into(),
             bitrate: 128,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }

@@ -52,6 +52,7 @@ mod tests {
             tags: String::new(),
             codec: String::new(),
             bitrate: 0,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }

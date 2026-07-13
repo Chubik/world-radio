@@ -1,6 +1,7 @@
 use crate::catalog::filter::SearchQuery;
 use crate::catalog::station::Station;
 use rusqlite::Connection;
+use rusqlite::OptionalExtension;
 use std::collections::HashSet;
 
 fn dedup_stations(stations: Vec<Station>) -> Vec<Station> {
@@ -32,6 +33,16 @@ impl Cache {
     }
 
     fn init_schema(&self) -> anyhow::Result<()> {
+        let version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < SCHEMA_VERSION {
+            self.conn.execute_batch(
+                "DROP TABLE IF EXISTS stations;
+                 DROP TABLE IF EXISTS stations_fts;
+                 DROP TABLE IF EXISTS meta;",
+            )?;
+        }
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS stations (
                 stationuuid TEXT PRIMARY KEY,
@@ -42,12 +53,16 @@ impl Cache {
                 tags TEXT NOT NULL DEFAULT '',
                 codec TEXT NOT NULL DEFAULT '',
                 bitrate INTEGER NOT NULL DEFAULT 0,
+                votes INTEGER NOT NULL DEFAULT 0,
                 geo_lat REAL,
                 geo_long REAL
             );
+            CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE VIRTUAL TABLE IF NOT EXISTS stations_fts
                 USING fts5(stationuuid UNINDEXED, name, tags);",
         )?;
+        self.conn
+            .execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
         Ok(())
     }
 
@@ -61,21 +76,22 @@ impl Cache {
             [],
         )?;
         for s in stations {
-            if is_excluded(s) {
+            if is_banned(s) {
                 continue;
             }
             tx.execute(
                 "INSERT INTO stations
-                    (stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,geo_lat,geo_long)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+                    (stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
                  ON CONFLICT(stationuuid) DO UPDATE SET
                     name=excluded.name, url_resolved=excluded.url_resolved,
                     countrycode=excluded.countrycode, language=excluded.language,
                     tags=excluded.tags, codec=excluded.codec, bitrate=excluded.bitrate,
+                    votes=excluded.votes,
                     geo_lat=excluded.geo_lat, geo_long=excluded.geo_long",
                 rusqlite::params![
                     s.stationuuid, s.name, s.url_resolved, s.countrycode, s.language,
-                    s.tags, s.codec, s.bitrate, s.geo_lat, s.geo_long
+                    s.tags, s.codec, s.bitrate, s.votes, s.geo_lat, s.geo_long
                 ],
             )?;
             tx.execute(
@@ -94,7 +110,7 @@ impl Cache {
     pub fn search_name(&self, term: &str) -> anyhow::Result<Vec<Station>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.stationuuid,s.name,s.url_resolved,s.countrycode,s.language,
-                    s.tags,s.codec,s.bitrate,s.geo_lat,s.geo_long
+                    s.tags,s.codec,s.bitrate,s.votes,s.geo_lat,s.geo_long
              FROM stations s
              WHERE s.stationuuid IN (
                  SELECT stationuuid FROM stations_fts WHERE stations_fts MATCH ?1
@@ -112,7 +128,7 @@ impl Cache {
     pub fn list_all(&self) -> anyhow::Result<Vec<Station>> {
         let mut stmt = self.conn.prepare(
             "SELECT stationuuid,name,url_resolved,countrycode,language,
-                    tags,codec,bitrate,geo_lat,geo_long
+                    tags,codec,bitrate,votes,geo_lat,geo_long
              FROM stations
              ORDER BY name",
         )?;
@@ -126,7 +142,7 @@ impl Cache {
 
     pub fn search(&self, q: &SearchQuery) -> anyhow::Result<Vec<Station>> {
         let mut sql = String::from(
-            "SELECT stationuuid, name, url_resolved, countrycode, language, tags, codec, bitrate, geo_lat, geo_long FROM stations",
+            "SELECT stationuuid, name, url_resolved, countrycode, language, tags, codec, bitrate, votes, geo_lat, geo_long FROM stations",
         );
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         let mut where_parts: Vec<String> = Vec::new();
@@ -231,7 +247,7 @@ impl Cache {
     pub fn get_by_uuid(&self, uuid: &str) -> anyhow::Result<Option<Station>> {
         let mut stmt = self.conn.prepare(
             "SELECT stationuuid,name,url_resolved,countrycode,language,
-                    tags,codec,bitrate,geo_lat,geo_long
+                    tags,codec,bitrate,votes,geo_lat,geo_long
              FROM stations
              WHERE stationuuid = ?1",
         )?;
@@ -240,6 +256,105 @@ impl Cache {
             Some(r) => Ok(Some(r?)),
             None => Ok(None),
         }
+    }
+
+    pub fn replace_all(&self, stations: &[Station]) -> anyhow::Result<usize> {
+        if stations.is_empty() {
+            anyhow::bail!("refusing to replace catalog with an empty dump");
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM stations", [])?;
+        tx.execute("DELETE FROM stations_fts", [])?;
+        let mut n = 0usize;
+        for s in stations {
+            if is_banned(s) {
+                continue;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO stations
+                    (stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                rusqlite::params![
+                    s.stationuuid, s.name, s.url_resolved, s.countrycode, s.language,
+                    s.tags, s.codec, s.bitrate, s.votes, s.geo_lat, s.geo_long
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO stations_fts (stationuuid,name,tags) VALUES (?1,?2,?3)",
+                rusqlite::params![s.stationuuid, s.name, s.tags],
+            )?;
+            n += 1;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    pub fn set_last_sync(&self, unix_secs: i64) -> anyhow::Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key,value) VALUES ('last_sync', ?1)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [unix_secs.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn last_sync(&self) -> anyhow::Result<Option<i64>> {
+        let v: Option<String> = self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key='last_sync'", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(v.and_then(|s| s.parse().ok()))
+    }
+
+    pub fn count(&self) -> anyhow::Result<usize> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM stations", [], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
+    pub fn list_by_popularity(
+        &self,
+        favourites: &[String],
+        limit: usize,
+    ) -> anyhow::Result<Vec<Station>> {
+        let mut favs = Vec::new();
+        if !favourites.is_empty() {
+            let placeholders = vec!["?"; favourites.len()].join(",");
+            let sql = format!(
+                "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
+                 FROM stations WHERE stationuuid IN ({placeholders})
+                 ORDER BY votes DESC, name"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let params = rusqlite::params_from_iter(favourites.iter());
+            let rows = stmt.query_map(params, row_to_station)?;
+            for r in rows {
+                favs.push(r?);
+            }
+        }
+
+        let rest_limit = limit.saturating_sub(favs.len());
+        let placeholders = vec!["?"; favourites.len()].join(",");
+        let sql = format!(
+            "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
+             FROM stations WHERE stationuuid NOT IN ({placeholders})
+             ORDER BY votes DESC, name LIMIT ?"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = favourites
+            .iter()
+            .map(|f| Box::new(f.clone()) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        params.push(Box::new(rest_limit as i64));
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
+        for r in rows {
+            favs.push(r?);
+        }
+        Ok(dedup_stations(favs))
     }
 
     pub fn open(path: &std::path::Path) -> anyhow::Result<Self> {
@@ -271,6 +386,8 @@ impl Cache {
     }
 }
 
+const SCHEMA_VERSION: i64 = 1;
+
 const EXCLUDED_COUNTRYCODES: &[&str] = &["RU", "BY"];
 const EXCLUDED_NAME_SUBSTRINGS: &[&str] = &[
     "russia",
@@ -301,7 +418,7 @@ fn fts_prefix_query(input: &str) -> Option<String> {
     }
 }
 
-fn is_excluded(station: &Station) -> bool {
+fn is_banned(station: &Station) -> bool {
     if EXCLUDED_COUNTRYCODES
         .iter()
         .any(|c| station.countrycode.eq_ignore_ascii_case(c))
@@ -331,14 +448,217 @@ fn row_to_station(r: &rusqlite::Row) -> rusqlite::Result<Station> {
         tags: r.get(5)?,
         codec: r.get(6)?,
         bitrate: r.get(7)?,
-        geo_lat: r.get(8)?,
-        geo_long: r.get(9)?,
+        votes: r.get(8)?,
+        geo_lat: r.get(9)?,
+        geo_long: r.get(10)?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bare() -> Station {
+        Station {
+            stationuuid: String::new(),
+            name: String::new(),
+            url_resolved: String::new(),
+            countrycode: String::new(),
+            language: String::new(),
+            tags: String::new(),
+            codec: String::new(),
+            bitrate: 0,
+            votes: 0,
+            geo_lat: None,
+            geo_long: None,
+        }
+    }
+
+    #[test]
+    fn replace_all_bans_ru_by_and_counts_allowed() {
+        let c = Cache::open_in_memory().unwrap();
+        let dump = vec![
+            Station {
+                stationuuid: "1".into(),
+                name: "Jazz FM".into(),
+                countrycode: "FR".into(),
+                votes: 10,
+                ..bare()
+            },
+            Station {
+                stationuuid: "2".into(),
+                name: "Radio Moscow".into(),
+                countrycode: "US".into(),
+                votes: 99,
+                ..bare()
+            },
+            Station {
+                stationuuid: "3".into(),
+                name: "Any".into(),
+                countrycode: "RU".into(),
+                votes: 5,
+                ..bare()
+            },
+            Station {
+                stationuuid: "4".into(),
+                name: "Минск FM".into(),
+                countrycode: "PL".into(),
+                votes: 7,
+                ..bare()
+            },
+        ];
+        let n = c.replace_all(&dump).unwrap();
+        assert_eq!(n, 1, "only the FR jazz station survives the ban gate");
+        let all = c.list_all().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].stationuuid, "1");
+    }
+
+    #[test]
+    fn replace_all_refuses_empty_and_keeps_cache() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[Station {
+            stationuuid: "1".into(),
+            name: "Keep".into(),
+            countrycode: "FR".into(),
+            votes: 1,
+            ..bare()
+        }])
+        .unwrap();
+        assert!(c.replace_all(&[]).is_err());
+        assert_eq!(
+            c.list_all().unwrap().len(),
+            1,
+            "failed empty sync must not wipe cache"
+        );
+    }
+
+    #[test]
+    fn last_sync_roundtrips() {
+        let c = Cache::open_in_memory().unwrap();
+        assert_eq!(c.last_sync().unwrap(), None);
+        c.set_last_sync(1_700_000_000).unwrap();
+        assert_eq!(c.last_sync().unwrap(), Some(1_700_000_000));
+    }
+
+    #[test]
+    fn list_by_popularity_keeps_low_vote_favourite_beyond_limit() {
+        let c = Cache::open_in_memory().unwrap();
+        let mut dump = Vec::new();
+        for i in 0..20 {
+            dump.push(Station {
+                stationuuid: format!("p{i}"),
+                name: format!("Pop{i}"),
+                countrycode: "FR".into(),
+                votes: 1000 - i as u64,
+                ..bare()
+            });
+        }
+        dump.push(Station {
+            stationuuid: "fav".into(),
+            name: "NicheFav".into(),
+            countrycode: "FR".into(),
+            votes: 0,
+            ..bare()
+        });
+        c.replace_all(&dump).unwrap();
+        let out = c.list_by_popularity(&["fav".to_string()], 5).unwrap();
+        assert_eq!(
+            out[0].stationuuid, "fav",
+            "favourite hoisted even though 0 votes and beyond top-5"
+        );
+        assert!(out.len() <= 6, "roughly limit + hoisted favs");
+    }
+
+    #[test]
+    fn opening_old_schema_db_recreates_cleanly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("old.db");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE stations (stationuuid TEXT PRIMARY KEY, name TEXT, bitrate INTEGER);",
+            )
+            .unwrap();
+            // no votes column, no meta table, user_version stays 0
+        }
+        let c = Cache::open(&path).unwrap(); // must not error
+                                             // replace_all + list must work (proves votes column + meta exist now)
+        c.replace_all(&[Station {
+            stationuuid: "1".into(),
+            name: "X".into(),
+            countrycode: "FR".into(),
+            votes: 5,
+            ..bare()
+        }])
+        .unwrap();
+        assert_eq!(c.count().unwrap(), 1);
+        assert!(c.last_sync().unwrap().is_none());
+    }
+
+    #[test]
+    fn list_by_popularity_hoists_favourites_then_votes_desc() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "hi".into(),
+                name: "HighVotes".into(),
+                countrycode: "FR".into(),
+                votes: 100,
+                ..bare()
+            },
+            Station {
+                stationuuid: "lo".into(),
+                name: "LowVotes".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+            Station {
+                stationuuid: "fav".into(),
+                name: "Favourite".into(),
+                countrycode: "FR".into(),
+                votes: 2,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let out = c.list_by_popularity(&["fav".to_string()], 10).unwrap();
+        assert_eq!(
+            out[0].stationuuid, "fav",
+            "favourite first regardless of votes"
+        );
+        assert_eq!(out[1].stationuuid, "hi", "then highest votes");
+        assert_eq!(out[2].stationuuid, "lo");
+    }
+
+    #[test]
+    fn list_by_popularity_empty_favourites_returns_popular() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "hi".into(),
+                name: "Hi".into(),
+                countrycode: "FR".into(),
+                votes: 50,
+                ..bare()
+            },
+            Station {
+                stationuuid: "lo".into(),
+                name: "Lo".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let out = c.list_by_popularity(&[], 10).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(
+            out[0].stationuuid, "hi",
+            "highest votes first when no favourites"
+        );
+    }
 
     fn rich_station(
         uuid: &str,
@@ -357,6 +677,7 @@ mod tests {
             tags: tags.into(),
             codec: codec.into(),
             bitrate,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }
@@ -372,6 +693,7 @@ mod tests {
             tags: String::new(),
             codec: String::new(),
             bitrate: 0,
+            votes: 0,
             geo_lat: None,
             geo_long: None,
         }

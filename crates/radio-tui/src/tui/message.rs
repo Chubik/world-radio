@@ -60,6 +60,9 @@ pub enum Msg {
     MirrorPlay(radio_core::mirror::MirrorEvent),
     UpdateAvailable(radio_core::update::Release),
     UpdateNow,
+    CatalogSynced { count: usize },
+    CatalogSyncFailed,
+    QuickTopReady { count: usize },
 }
 
 #[allow(dead_code)]

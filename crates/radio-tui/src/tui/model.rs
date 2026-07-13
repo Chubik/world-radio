@@ -361,6 +361,9 @@ pub struct Model {
     pub sync_key: Option<String>,
     pub mirror_seq: u64,
     pub pending_update: Option<radio_core::update::Release>,
+    pub catalog_loading: bool,
+    pub catalog_count: Option<usize>,
+    pub autoplay_first_pending: bool,
 }
 
 impl Model {
@@ -390,6 +393,9 @@ impl Model {
             sync_key: radio_core::sync::load_key(),
             mirror_seq: 0,
             pending_update: None,
+            catalog_loading: false,
+            catalog_count: None,
+            autoplay_first_pending: false,
         }
     }
 
