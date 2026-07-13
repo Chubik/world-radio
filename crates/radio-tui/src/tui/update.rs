@@ -118,7 +118,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.catalog_count = Some(count);
             model.catalog_loading = false;
             model.browse.pending_online_search = Some(Instant::now());
-            autoplay_first_if_pending(model)
+            autoplay_random_if_pending(model)
         }
         Msg::CatalogSyncFailed => {
             model.catalog_loading = false;
@@ -129,7 +129,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 model.catalog_count = Some(count);
             }
             model.catalog_loading = false;
-            autoplay_first_if_pending(model)
+            autoplay_random_if_pending(model)
         }
         Msg::SearchFailed(e) => {
             model.browse.loading = false;
@@ -322,13 +322,15 @@ fn shuffle_play(model: &mut Model) -> Vec<Effect> {
     play_selected(model)
 }
 
-fn autoplay_first_if_pending(model: &mut Model) -> Vec<Effect> {
+fn autoplay_random_if_pending(model: &mut Model) -> Vec<Effect> {
     if !model.autoplay_first_pending || model.is_playing() {
         return vec![];
     }
-    let Some(row) = model.browse.rows.first().cloned() else {
+    if model.browse.rows.is_empty() {
         return vec![];
-    };
+    }
+    let idx = fastrand::usize(..model.browse.rows.len());
+    let row = model.browse.rows[idx].clone();
     model.autoplay_first_pending = false;
     play_row(model, row)
 }
@@ -1351,14 +1353,14 @@ mod tests {
     }
 
     #[test]
-    fn catalog_synced_autoplays_first_when_pending_and_idle() {
+    fn catalog_synced_autoplays_random_when_pending_and_idle() {
         let mut m = model();
         m.autoplay_first_pending = true;
         m.browse.rows = vec![row("u1")];
         let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
         assert!(
             effects.iter().any(|e| matches!(e, Effect::Play(_))),
-            "plays first station"
+            "plays a station"
         );
         assert!(!m.autoplay_first_pending, "flag cleared after autoplay");
     }
