@@ -50,7 +50,12 @@ impl RadioBrowser {
 
     pub fn fetch_all(&self) -> anyhow::Result<Vec<Station>> {
         let url = format!("{}/json/stations", self.base_url);
-        let resp = self.client.get(&url).send()?.error_for_status()?;
+        let resp = self
+            .client
+            .get(&url)
+            .query(&[("limit", "500000"), ("hidebroken", "true")])
+            .send()?
+            .error_for_status()?;
         let stations: Vec<Station> = resp.json()?;
         Ok(stations)
     }
@@ -153,7 +158,10 @@ mod tests {
         let mut server = mockito::Server::new();
         let body = r#"[{"stationuuid":"1","name":"A","votes":9},{"stationuuid":"2","name":"B","votes":3}]"#;
         let m = server
-            .mock("GET", "/json/stations")
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"^/json/stations(\?.*)?$".to_string()),
+            )
             .with_body(body)
             .create();
         let rb = RadioBrowser::with_base_url(server.url());
