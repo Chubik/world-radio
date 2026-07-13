@@ -35,6 +35,7 @@ enum Cmd {
         action: sync_cmd::SyncCmd,
     },
     Update,
+    SyncCatalog,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -46,6 +47,10 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(Cmd::Update) = &cli.command {
         return run_update();
+    }
+
+    if let Some(Cmd::SyncCatalog) = &cli.command {
+        return run_sync_catalog();
     }
 
     if let Some(Cmd::Play { url }) = &cli.command {
@@ -112,6 +117,21 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
         stations.len(),
         data.display()
     );
+    Ok(())
+}
+
+fn run_sync_catalog() -> anyhow::Result<()> {
+    let data = paths::ensure_data_dir()?;
+    let cache = Cache::open(&data.join("stations.db"))?;
+    let rb = api::resolve();
+    let stations = rb.fetch_all()?;
+    let n = cache.replace_all(&stations)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    cache.set_last_sync(now)?;
+    println!("synced {n} stations");
     Ok(())
 }
 
