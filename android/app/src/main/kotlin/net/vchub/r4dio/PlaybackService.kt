@@ -31,6 +31,7 @@ const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
+const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -123,6 +124,7 @@ class PlaybackService : MediaSessionService() {
         when (intent?.action) {
             ACTION_WIDGET_SHUFFLE -> shuffle()
             ACTION_WIDGET_TOGGLE -> exo?.let { if (it.isPlaying) it.pause() else it.play() }
+            ACTION_SYNC_NOW -> syncNow()
         }
         return super.onStartCommand(intent, flags, startId)
     }

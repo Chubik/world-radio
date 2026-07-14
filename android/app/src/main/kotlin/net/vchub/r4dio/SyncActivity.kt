@@ -118,7 +118,12 @@ class SyncActivity : ComponentActivity() {
 
     private fun countryChoices(): List<String> = countryCodes.sorted()
 
-    private fun triggerSync() {}
+    private fun triggerSync() {
+        startService(
+            android.content.Intent(this, PlaybackService::class.java)
+                .setAction(ACTION_SYNC_NOW)
+        )
+    }
 
     private val countryCodes = listOf(
         "AR", "AT", "AU", "BE", "BR", "CA", "CH", "CL", "CN", "CO",
