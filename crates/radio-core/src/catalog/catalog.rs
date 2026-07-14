@@ -7,6 +7,7 @@ pub struct Catalog {
     favorites: Favorites,
     history: History,
     blacklist: Favorites,
+    excluded_countries: Favorites,
 }
 
 impl Catalog {
@@ -17,6 +18,7 @@ impl Catalog {
             favorites: Favorites::new(),
             history: History::new(),
             blacklist: Favorites::new(),
+            excluded_countries: Favorites::new(),
         }
     }
 
@@ -29,7 +31,27 @@ impl Catalog {
         favourites: &[String],
         limit: usize,
     ) -> anyhow::Result<Vec<Station>> {
-        self.cache.list_by_popularity(favourites, limit)
+        self.cache
+            .list_by_popularity(favourites, limit, self.excluded_country_ids())
+    }
+
+    pub fn excluded_country_ids(&self) -> &[String] {
+        self.excluded_countries.ids()
+    }
+
+    pub fn set_excluded_countries(&mut self, codes: Vec<String>) {
+        let mut f = Favorites::new();
+        for code in codes {
+            let up = code.to_uppercase();
+            if !f.contains(&up) {
+                f.toggle(&up);
+            }
+        }
+        self.excluded_countries = f;
+    }
+
+    pub fn toggle_excluded_country(&mut self, code: &str) -> bool {
+        self.excluded_countries.toggle(&code.to_uppercase())
     }
 
     pub fn last_sync(&self) -> anyhow::Result<Option<i64>> {
@@ -50,12 +72,13 @@ impl Catalog {
 
     pub fn search_offline(&self, term: &str) -> anyhow::Result<Vec<Station>> {
         let stations = match term.trim().is_empty() {
-            true => self.cache.list_all()?,
+            true => self.cache.list_all(self.excluded_country_ids())?,
             false => {
                 let sanitized = term.replace('*', "");
                 let escaped = sanitized.replace('"', "\"\"");
                 let phrase = format!("\"{escaped}\"");
-                self.cache.search_name(&phrase)?
+                self.cache
+                    .search_name(&phrase, self.excluded_country_ids())?
             }
         };
         Ok(stations
@@ -65,7 +88,7 @@ impl Catalog {
     }
 
     pub fn search_offline_filtered(&self, q: &SearchQuery) -> anyhow::Result<Vec<Station>> {
-        self.cache.search(q)
+        self.cache.search(q, self.excluded_country_ids())
     }
 
     pub fn is_hidden(&self, uuid: &str) -> bool {
@@ -138,6 +161,7 @@ impl Catalog {
         fav_path: &std::path::Path,
         hist_path: &std::path::Path,
         blacklist_path: &std::path::Path,
+        excluded_path: &std::path::Path,
     ) -> Self {
         Self {
             cache,
@@ -145,6 +169,7 @@ impl Catalog {
             favorites: Favorites::load(fav_path),
             history: History::load(hist_path),
             blacklist: Favorites::load(blacklist_path),
+            excluded_countries: Favorites::load(excluded_path),
         }
     }
 
@@ -153,10 +178,12 @@ impl Catalog {
         fav_path: &std::path::Path,
         hist_path: &std::path::Path,
         blacklist_path: &std::path::Path,
+        excluded_path: &std::path::Path,
     ) -> anyhow::Result<()> {
         self.favorites.save(fav_path)?;
         self.history.save(hist_path)?;
         self.blacklist.save(blacklist_path)?;
+        self.excluded_countries.save(excluded_path)?;
         Ok(())
     }
 
@@ -352,6 +379,7 @@ mod tests {
         let fav = dir.path().join("favorites.json");
         let hist = dir.path().join("history.json");
         let bl = dir.path().join("blacklist.json");
+        let excl = dir.path().join("excluded_countries.json");
 
         {
             let cache = Cache::open_in_memory().unwrap();
@@ -359,11 +387,11 @@ mod tests {
             cat.toggle_favorite("u1");
             cat.record_history("u9");
             cat.toggle_blacklist("ux");
-            cat.save_state(&fav, &hist, &bl).unwrap();
+            cat.save_state(&fav, &hist, &bl, &excl).unwrap();
         }
 
         let cache = Cache::open_in_memory().unwrap();
-        let cat = Catalog::load(cache, Health::new(), &fav, &hist, &bl);
+        let cat = Catalog::load(cache, Health::new(), &fav, &hist, &bl, &excl);
         assert_eq!(cat.favorite_ids(), &["u1".to_string()]);
         assert_eq!(cat.history_ids(), &["u9".to_string()]);
         assert!(cat.is_blacklisted("ux"));

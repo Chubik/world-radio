@@ -33,6 +33,7 @@ pub fn render(pal: &Palette, frame: &mut Frame, area: Rect) {
         Line::from("  ⇥ tab     filter focus on/off"),
         Line::from("  h l ←→    switch group (in filters)"),
         Line::from("  c / C     clear group / all"),
+        Line::from("  x         exclude / include country (in filters)"),
         Line::from("  /         search"),
         Line::from("  h         hide dead + unstable (in list)"),
         Line::from("  status: all · favorites · recent · blocked"),
