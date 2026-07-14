@@ -127,6 +127,7 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::Stop => Msg::Stop,
         Action::ToggleFavorite => Msg::ToggleFavoriteSelected,
         Action::Blacklist => Msg::BlacklistSelected,
+        Action::ExcludeCountry => Msg::ExcludeCountrySelected,
         Action::Recheck => Msg::RecheckSelected,
         Action::Shuffle => Msg::Shuffle,
         Action::Sync => Msg::OpenSyncOverlay,
