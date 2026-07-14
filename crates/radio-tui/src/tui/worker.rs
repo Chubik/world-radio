@@ -185,6 +185,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let local = SyncData {
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
+        excluded_countries: catalog.excluded_country_ids().to_vec(),
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
@@ -207,12 +208,14 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             catalog.toggle_blacklist(uuid);
         }
     }
+    catalog.set_excluded_countries(merged.excluded_countries.clone());
     save_all(catalog, paths);
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
-            "synced: {} favourites, {} blocked",
+            "synced: {} favourites, {} blocked, {} excluded countries",
             merged.favs.len(),
-            merged.blocked.len()
+            merged.blocked.len(),
+            merged.excluded_countries.len()
         )));
     }
 }
