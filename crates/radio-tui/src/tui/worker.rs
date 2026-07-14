@@ -218,6 +218,9 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     }
     catalog.set_excluded_countries(merged.excluded_countries.clone());
     save_all(catalog, paths);
+    let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
+        catalog.excluded_country_ids().to_vec(),
+    ));
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
             "synced: {} favourites, {} blocked, {} excluded countries",

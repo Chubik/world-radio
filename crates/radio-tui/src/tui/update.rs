@@ -181,6 +181,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::ExcludeCountrySelected => exclude_country_selected(model),
         Msg::ExcludedCountriesChanged(codes) => {
             model.browse.excluded_countries = codes;
+            model.browse.pending_online_search = Some(Instant::now());
             vec![]
         }
         Msg::RecheckSelected => recheck_selected(model),
@@ -1456,6 +1457,7 @@ mod tests {
             m.browse.excluded_countries,
             vec!["RU".to_string(), "BY".to_string()]
         );
+        assert!(m.browse.pending_online_search.is_some());
     }
 
     fn eff_kind(e: &Effect) -> &'static str {
