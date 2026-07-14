@@ -160,25 +160,32 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun launchSyncActivity() {
+        // android 16 blocks a background service from starting an activity even
+        // with both BAL opt-ins, so we post a tappable notification instead —
+        // launching from the user's tap on the notification is always allowed.
         val intent = android.content.Intent(this, SyncActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         val flags = android.app.PendingIntent.FLAG_IMMUTABLE or
             android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        val pending = when (android.os.Build.VERSION.SDK_INT >= 35) {
-            true -> {
-                val opts = android.app.ActivityOptions.makeBasic()
-                    .setPendingIntentCreatorBackgroundActivityStartMode(
-                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
-                    )
-                android.app.PendingIntent.getActivity(this, 0, intent, flags, opts.toBundle())
-            }
-            false -> android.app.PendingIntent.getActivity(this, 0, intent, flags)
-        }
-        val sendOpts = android.app.ActivityOptions.makeBasic()
-            .setPendingIntentBackgroundActivityStartMode(
-                android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
-            )
-        runCatching { pending.send(this, 0, null, null, null, null, sendOpts.toBundle()) }
+        val contentIntent = android.app.PendingIntent.getActivity(this, 1, intent, flags)
+
+        val channelId = "r4dio_sync"
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        nm.createNotificationChannel(
+            android.app.NotificationChannel(
+                channelId,
+                "sync",
+                android.app.NotificationManager.IMPORTANCE_HIGH,
+            ),
+        )
+        val notif = android.app.Notification.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_sync)
+            .setContentTitle("r4dio sync")
+            .setContentText("tap to open sync settings")
+            .setContentIntent(contentIntent)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(42, notif)
     }
 
     private fun syncNow() {
