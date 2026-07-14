@@ -1,5 +1,6 @@
 package net.vchub.r4dio
 
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -91,7 +92,40 @@ class SyncActivity : ComponentActivity() {
                 }
             }
         }
+        findViewById<Button>(R.id.excluded_countries).setOnClickListener {
+            lifecycleScope.launch {
+                val all = countryChoices()
+                val current = favStore.currentExcluded()
+                val checked = BooleanArray(all.size) { all[it] in current }
+                AlertDialog.Builder(this@SyncActivity)
+                    .setTitle("hide countries")
+                    .setMultiChoiceItems(all.toTypedArray(), checked) { _, which, isChecked ->
+                        checked[which] = isChecked
+                    }
+                    .setPositiveButton("save") { _, _ ->
+                        lifecycleScope.launch {
+                            val sel = all.filterIndexed { i, _ -> checked[i] }.toSet()
+                            favStore.setExcluded(sel)
+                            triggerSync()
+                            toast("saved")
+                        }
+                    }
+                    .setNegativeButton("cancel", null)
+                    .show()
+            }
+        }
     }
+
+    private fun countryChoices(): List<String> = countryCodes.sorted()
+
+    private fun triggerSync() {}
+
+    private val countryCodes = listOf(
+        "AR", "AT", "AU", "BE", "BR", "CA", "CH", "CL", "CN", "CO",
+        "CZ", "DE", "DK", "EG", "ES", "FI", "FR", "GB", "GR", "HU",
+        "ID", "IE", "IL", "IN", "IT", "JP", "KR", "MX", "NL", "NO",
+        "NZ", "PL", "PT", "RO", "SE", "TH", "TR", "UA", "US", "ZA",
+    )
 
     private fun render() {
         lifecycleScope.launch {
