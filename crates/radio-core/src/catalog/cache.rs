@@ -107,17 +107,22 @@ impl Cache {
         Ok(())
     }
 
-    pub fn search_name(&self, term: &str) -> anyhow::Result<Vec<Station>> {
-        let mut stmt = self.conn.prepare(
+    pub fn search_name(&self, term: &str, excluded: &[String]) -> anyhow::Result<Vec<Station>> {
+        let sql = format!(
             "SELECT s.stationuuid,s.name,s.url_resolved,s.countrycode,s.language,
                     s.tags,s.codec,s.bitrate,s.votes,s.geo_lat,s.geo_long
              FROM stations s
              WHERE s.stationuuid IN (
-                 SELECT stationuuid FROM stations_fts WHERE stations_fts MATCH ?1
-             )
+                 SELECT stationuuid FROM stations_fts WHERE stations_fts MATCH ?
+             ){}
              ORDER BY s.name",
-        )?;
-        let rows = stmt.query_map([term], row_to_station)?;
+            excluded_clause(excluded)
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(term.to_string())];
+        params.extend(excluded_params(excluded));
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -794,9 +799,34 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         c.upsert(&[station("u1", "Smooth Jazz FM"), station("u2", "Rock Radio")])
             .unwrap();
-        let found = c.search_name("jazz").unwrap();
+        let found = c.search_name("jazz", &[]).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].stationuuid, "u1");
+    }
+
+    #[test]
+    fn search_name_excludes_user_countries() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "1".into(),
+                name: "Jazz FR".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+            Station {
+                stationuuid: "2".into(),
+                name: "Jazz US".into(),
+                countrycode: "US".into(),
+                votes: 1,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let out = c.search_name("jazz", &["US".to_string()]).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].countrycode, "FR");
     }
 
     #[test]
@@ -827,7 +857,7 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         c.upsert(&[station("u1", "Jazz One")]).unwrap();
         c.upsert(&[station("u1", "Jazz One Renamed")]).unwrap();
-        let found = c.search_name("jazz").unwrap();
+        let found = c.search_name("jazz", &[]).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "Jazz One Renamed");
     }
