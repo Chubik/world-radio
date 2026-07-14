@@ -153,4 +153,39 @@ impl Backend {
     pub fn phase(&self) -> Phase {
         self.state.phase
     }
+
+    pub fn sync(&mut self) -> anyhow::Result<()> {
+        let Some(key) = radio_core::sync::load_key() else {
+            return Ok(());
+        };
+        let local = radio_core::sync::SyncData {
+            favs: self.catalog.favorite_ids().to_vec(),
+            blocked: self.catalog.blacklist_ids().to_vec(),
+            excluded_countries: self.catalog.excluded_country_ids().to_vec(),
+        };
+        let client = radio_core::sync::SyncClient::new("https://r4dio.net");
+        let merged = client.push(&key, &local)?;
+        for uuid in &merged.favs {
+            if !self.catalog.is_favorite(uuid) {
+                self.catalog.toggle_favorite(uuid);
+            }
+        }
+        for uuid in &merged.blocked {
+            if !self.catalog.is_blacklisted(uuid) {
+                self.catalog.toggle_blacklist(uuid);
+            }
+        }
+        self.catalog
+            .set_excluded_countries(merged.excluded_countries.clone());
+        self.catalog.save_state(
+            &self.fav_path,
+            &self.hist_path,
+            &self.blacklist_path,
+            &self.excluded_path,
+        )?;
+        let all = catalog_src::all_stations(&self.catalog)?;
+        let favorites = catalog_src::favorite_stations(&self.catalog)?;
+        self.state.load_stations(all, favorites);
+        Ok(())
+    }
 }
