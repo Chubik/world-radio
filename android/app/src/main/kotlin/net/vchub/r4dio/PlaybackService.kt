@@ -31,6 +31,7 @@ const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
+const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -123,6 +124,7 @@ class PlaybackService : MediaSessionService() {
         when (intent?.action) {
             ACTION_WIDGET_SHUFFLE -> shuffle()
             ACTION_WIDGET_TOGGLE -> exo?.let { if (it.isPlaying) it.pause() else it.play() }
+            ACTION_SYNC_NOW -> syncNow()
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -151,7 +153,8 @@ class PlaybackService : MediaSessionService() {
             val fetched = catalog.fetchStations()
             stations = fetched
             Log.i("r4dio", "loaded ${fetched.size} stations")
-            val pick = pickRandom(fetched) ?: return@thread
+            val userExcluded = runBlocking { favStore.currentExcluded() }
+            val pick = pickRandom(fetched, userExcluded) ?: return@thread
             main.post { playPick(pick) }
         }
     }
@@ -184,9 +187,10 @@ class PlaybackService : MediaSessionService() {
             val local = SyncData(
                 favs = favStore.currentFavUuids().toList(),
                 blocked = favStore.currentBlocked().toList(),
+                excluded_countries = favStore.currentExcluded().toList(),
             )
             val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
-            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet())
+            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
             refreshCustomLayout()
         }
     }
@@ -233,7 +237,8 @@ class PlaybackService : MediaSessionService() {
         }
         mirrorSeq = evt.seq
         val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
-        if (isExcluded(station)) {
+        val userExcluded = runBlocking { favStore.currentExcluded() }
+        if (isExcluded(station) || station.country.uppercase() in userExcluded) {
             return
         }
         when (exo?.isPlaying) {
@@ -254,7 +259,8 @@ class PlaybackService : MediaSessionService() {
             val sc = favStore.currentScope()
             val favs = favStore.currentCachedFavs()
             val cat = withReadyCatalog()
-            val pick = pickForScope(sc, cat, favs)
+            val userExcluded = favStore.currentExcluded()
+            val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
                 null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
                 else -> playPick(pick)
