@@ -24,4 +24,5 @@
         <Button android:id="@+id/logout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="log out" android:visibility="gone" />
         <Button android:id="@+id/delete" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="delete account" android:visibility="gone" />
     </LinearLayout>
+    <Button android:id="@+id/excluded_countries" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="hide countries" />
 </LinearLayout>

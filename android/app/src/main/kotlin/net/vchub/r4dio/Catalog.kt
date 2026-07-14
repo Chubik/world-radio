@@ -20,11 +20,17 @@ fun isExcluded(station: Station): Boolean {
     return EXCLUDED_NAME_SUBSTRINGS.any { haystack.contains(it) }
 }
 
-fun allowedStation(station: Station): Boolean =
-    station.url.isNotBlank() && !isExcluded(station)
+fun allowedStation(station: Station, userExcluded: Set<String> = emptySet()): Boolean =
+    station.url.isNotBlank() &&
+        !isExcluded(station) &&
+        station.country.uppercase() !in userExcluded
 
-fun pickRandom(stations: List<Station>, rng: Random = Random.Default): Station? {
-    val playable = stations.filter { allowedStation(it) }
+fun pickRandom(
+    stations: List<Station>,
+    userExcluded: Set<String> = emptySet(),
+    rng: Random = Random.Default,
+): Station? {
+    val playable = stations.filter { allowedStation(it, userExcluded) }
     if (playable.isEmpty()) return null
     return playable[rng.nextInt(playable.size)]
 }
@@ -33,10 +39,11 @@ fun pickForScope(
     scope: Scope,
     catalog: List<Station>,
     favs: List<Station>,
+    userExcluded: Set<String> = emptySet(),
     rng: Random = Random.Default,
 ): Station? =
     when (scope) {
-        Scope.ALL -> pickRandom(catalog, rng)
+        Scope.ALL -> pickRandom(catalog, userExcluded, rng)
         Scope.FAVS -> FavLogic.pickFav(favs, rng)
     }
 

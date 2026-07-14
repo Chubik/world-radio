@@ -198,10 +198,13 @@ impl Cache {
         Ok(dedup_stations(stations?))
     }
 
-    pub fn facets(&self, limit: usize) -> anyhow::Result<crate::catalog::Facets> {
-        let countries = self.facet_column("countrycode", limit)?;
-        let codecs = self.facet_column("codec", limit)?;
-        let tags = self.facet_tags(limit)?;
+    pub fn facets(&self, tag_limit: usize) -> anyhow::Result<crate::catalog::Facets> {
+        // countries and codecs are bounded (a few hundred / a dozen), so list
+        // them all — otherwise a top-N cut hides smaller countries entirely.
+        // tags run into the thousands, so keep the top-N there.
+        let countries = self.facet_column("countrycode", 1000)?;
+        let codecs = self.facet_column("codec", 1000)?;
+        let tags = self.facet_tags(tag_limit)?;
         Ok(crate::catalog::Facets {
             countries,
             codecs,
@@ -945,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn facets_respects_limit() {
+    fn facets_limit_bounds_tags_but_lists_all_countries_and_codecs() {
         let cache = Cache::open_in_memory().unwrap();
         cache
             .upsert(&[
@@ -954,10 +957,16 @@ mod tests {
                 rich_station("u3", "C", "US", "rock,country,folk", "OGG", 128),
             ])
             .unwrap();
+        // the limit only bounds tags; every country and codec is listed so a
+        // smaller country is never hidden from the filter.
         let f = cache.facets(2).unwrap();
-        assert_eq!(f.countries.len(), 2);
-        assert_eq!(f.codecs.len(), 2);
-        assert_eq!(f.tags.len(), 2);
+        assert_eq!(
+            f.countries.len(),
+            3,
+            "all 3 countries listed regardless of limit"
+        );
+        assert_eq!(f.codecs.len(), 3, "all 3 codecs listed regardless of limit");
+        assert_eq!(f.tags.len(), 2, "tags bounded by the limit");
     }
 
     #[test]

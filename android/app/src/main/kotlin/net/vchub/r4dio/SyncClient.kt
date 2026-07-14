@@ -8,7 +8,12 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 @Serializable
-data class SyncData(val favs: List<String>, val blocked: List<String>)
+data class SyncData(
+    val favs: List<String>,
+    val blocked: List<String>,
+    @kotlinx.serialization.SerialName("excluded_countries")
+    val excluded_countries: List<String> = emptyList(),
+)
 
 class SyncClient(
     private val baseUrl: String = "https://r4dio.net",
