@@ -9,6 +9,7 @@ pub enum WorkerReq {
     LoadFacets,
     ToggleFavorite(String),
     Blacklist(String),
+    ToggleExcludedCountry(String),
     Recheck(String),
     RecheckAll,
     RecordHistory(String),
@@ -35,6 +36,7 @@ pub struct WorkerPaths {
     pub hist: PathBuf,
     pub health: PathBuf,
     pub blacklist: PathBuf,
+    pub excluded: PathBuf,
 }
 
 pub fn station_to_row(s: &Station, favorite: bool, hidden: bool) -> StationRow {
@@ -71,6 +73,13 @@ pub fn spawn(
                 WorkerReq::Blacklist(uuid) => {
                     catalog.toggle_blacklist(&uuid);
                     handle_sync(&mut catalog, &paths, &msg_tx, false);
+                }
+                WorkerReq::ToggleExcludedCountry(code) => {
+                    catalog.toggle_excluded_country(&code);
+                    save_all(&catalog, &paths);
+                    let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
+                        catalog.excluded_country_ids().to_vec(),
+                    ));
                 }
                 WorkerReq::Recheck(uuid) => {
                     catalog.clear_health(&uuid);
@@ -162,7 +171,7 @@ pub fn spawn(
 }
 
 fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
-    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist) {
+    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
         crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
     }
     if let Err(e) = catalog.save_health(&paths.health) {
@@ -184,6 +193,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let local = SyncData {
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
+        excluded_countries: catalog.excluded_country_ids().to_vec(),
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
@@ -206,12 +216,17 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             catalog.toggle_blacklist(uuid);
         }
     }
+    catalog.set_excluded_countries(merged.excluded_countries.clone());
     save_all(catalog, paths);
+    let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
+        catalog.excluded_country_ids().to_vec(),
+    ));
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
-            "synced: {} favourites, {} blocked",
+            "synced: {} favourites, {} blocked, {} excluded countries",
             merged.favs.len(),
-            merged.blocked.len()
+            merged.blocked.len(),
+            merged.excluded_countries.len()
         )));
     }
 }

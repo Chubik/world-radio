@@ -107,17 +107,22 @@ impl Cache {
         Ok(())
     }
 
-    pub fn search_name(&self, term: &str) -> anyhow::Result<Vec<Station>> {
-        let mut stmt = self.conn.prepare(
+    pub fn search_name(&self, term: &str, excluded: &[String]) -> anyhow::Result<Vec<Station>> {
+        let sql = format!(
             "SELECT s.stationuuid,s.name,s.url_resolved,s.countrycode,s.language,
                     s.tags,s.codec,s.bitrate,s.votes,s.geo_lat,s.geo_long
              FROM stations s
              WHERE s.stationuuid IN (
-                 SELECT stationuuid FROM stations_fts WHERE stations_fts MATCH ?1
-             )
+                 SELECT stationuuid FROM stations_fts WHERE stations_fts MATCH ?
+             ){}
              ORDER BY s.name",
-        )?;
-        let rows = stmt.query_map([term], row_to_station)?;
+            excluded_clause(excluded)
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(term.to_string())];
+        params.extend(excluded_params(excluded));
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -125,14 +130,19 @@ impl Cache {
         Ok(dedup_stations(out))
     }
 
-    pub fn list_all(&self) -> anyhow::Result<Vec<Station>> {
-        let mut stmt = self.conn.prepare(
+    pub fn list_all(&self, excluded: &[String]) -> anyhow::Result<Vec<Station>> {
+        let sql = format!(
             "SELECT stationuuid,name,url_resolved,countrycode,language,
                     tags,codec,bitrate,votes,geo_lat,geo_long
              FROM stations
+             WHERE 1=1{}
              ORDER BY name",
-        )?;
-        let rows = stmt.query_map([], row_to_station)?;
+            excluded_clause(excluded)
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params = excluded_params(excluded);
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -140,7 +150,7 @@ impl Cache {
         Ok(dedup_stations(out))
     }
 
-    pub fn search(&self, q: &SearchQuery) -> anyhow::Result<Vec<Station>> {
+    pub fn search(&self, q: &SearchQuery, excluded: &[String]) -> anyhow::Result<Vec<Station>> {
         let mut sql = String::from(
             "SELECT stationuuid, name, url_resolved, countrycode, language, tags, codec, bitrate, votes, geo_lat, geo_long FROM stations",
         );
@@ -188,6 +198,13 @@ impl Cache {
         if !where_parts.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&where_parts.join(" AND "));
+        }
+        if !excluded.is_empty() {
+            if where_parts.is_empty() {
+                sql.push_str(" WHERE 1=1");
+            }
+            sql.push_str(&excluded_clause(excluded));
+            params.extend(excluded_params(excluded));
         }
         sql.push_str(" ORDER BY name");
 
@@ -322,18 +339,25 @@ impl Cache {
         &self,
         favourites: &[String],
         limit: usize,
+        excluded: &[String],
     ) -> anyhow::Result<Vec<Station>> {
+        let excl_clause = excluded_clause(excluded);
         let mut favs = Vec::new();
         if !favourites.is_empty() {
             let placeholders = vec!["?"; favourites.len()].join(",");
             let sql = format!(
                 "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
-                 FROM stations WHERE stationuuid IN ({placeholders})
+                 FROM stations WHERE stationuuid IN ({placeholders}){excl_clause}
                  ORDER BY votes DESC, name"
             );
             let mut stmt = self.conn.prepare(&sql)?;
-            let params = rusqlite::params_from_iter(favourites.iter());
-            let rows = stmt.query_map(params, row_to_station)?;
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = favourites
+                .iter()
+                .map(|f| Box::new(f.clone()) as Box<dyn rusqlite::ToSql>)
+                .collect();
+            params.extend(excluded_params(excluded));
+            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
             for r in rows {
                 favs.push(r?);
             }
@@ -343,7 +367,7 @@ impl Cache {
         let placeholders = vec!["?"; favourites.len()].join(",");
         let sql = format!(
             "SELECT stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long
-             FROM stations WHERE stationuuid NOT IN ({placeholders})
+             FROM stations WHERE stationuuid NOT IN ({placeholders}){excl_clause}
              ORDER BY votes DESC, name LIMIT ?"
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -351,6 +375,7 @@ impl Cache {
             .iter()
             .map(|f| Box::new(f.clone()) as Box<dyn rusqlite::ToSql>)
             .collect();
+        params.extend(excluded_params(excluded));
         params.push(Box::new(rest_limit as i64));
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
@@ -408,6 +433,21 @@ const EXCLUDED_NAME_SUBSTRINGS: &[&str] = &[
     "минск",
     "minsk",
 ];
+
+fn excluded_clause(excluded: &[String]) -> String {
+    if excluded.is_empty() {
+        return String::new();
+    }
+    let placeholders = excluded.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    format!(" AND UPPER(countrycode) NOT IN ({placeholders})")
+}
+
+fn excluded_params(excluded: &[String]) -> Vec<Box<dyn rusqlite::ToSql>> {
+    excluded
+        .iter()
+        .map(|c| Box::new(c.to_uppercase()) as Box<dyn rusqlite::ToSql>)
+        .collect()
+}
 
 fn fts_prefix_query(input: &str) -> Option<String> {
     let tokens: Vec<String> = input
@@ -478,6 +518,33 @@ mod tests {
     }
 
     #[test]
+    fn search_excludes_user_countries() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "1".into(),
+                name: "FR one".into(),
+                countrycode: "FR".into(),
+                votes: 5,
+                ..bare()
+            },
+            Station {
+                stationuuid: "2".into(),
+                name: "US one".into(),
+                countrycode: "US".into(),
+                votes: 9,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let all = c.list_all(&["US".to_string()]).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].countrycode, "FR");
+        // empty exclude set returns everything (minus the always-on RU/BY at ingest)
+        assert_eq!(c.list_all(&[]).unwrap().len(), 2);
+    }
+
+    #[test]
     fn replace_all_bans_ru_by_and_counts_allowed() {
         let c = Cache::open_in_memory().unwrap();
         let dump = vec![
@@ -512,7 +579,7 @@ mod tests {
         ];
         let n = c.replace_all(&dump).unwrap();
         assert_eq!(n, 1, "only the FR jazz station survives the ban gate");
-        let all = c.list_all().unwrap();
+        let all = c.list_all(&[]).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].stationuuid, "1");
     }
@@ -530,7 +597,7 @@ mod tests {
         .unwrap();
         assert!(c.replace_all(&[]).is_err());
         assert_eq!(
-            c.list_all().unwrap().len(),
+            c.list_all(&[]).unwrap().len(),
             1,
             "failed empty sync must not wipe cache"
         );
@@ -565,7 +632,7 @@ mod tests {
             ..bare()
         });
         c.replace_all(&dump).unwrap();
-        let out = c.list_by_popularity(&["fav".to_string()], 5).unwrap();
+        let out = c.list_by_popularity(&["fav".to_string()], 5, &[]).unwrap();
         assert_eq!(
             out[0].stationuuid, "fav",
             "favourite hoisted even though 0 votes and beyond top-5"
@@ -626,7 +693,7 @@ mod tests {
             },
         ])
         .unwrap();
-        let out = c.list_by_popularity(&["fav".to_string()], 10).unwrap();
+        let out = c.list_by_popularity(&["fav".to_string()], 10, &[]).unwrap();
         assert_eq!(
             out[0].stationuuid, "fav",
             "favourite first regardless of votes"
@@ -655,7 +722,7 @@ mod tests {
             },
         ])
         .unwrap();
-        let out = c.list_by_popularity(&[], 10).unwrap();
+        let out = c.list_by_popularity(&[], 10, &[]).unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(
             out[0].stationuuid, "hi",
@@ -732,9 +799,34 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         c.upsert(&[station("u1", "Smooth Jazz FM"), station("u2", "Rock Radio")])
             .unwrap();
-        let found = c.search_name("jazz").unwrap();
+        let found = c.search_name("jazz", &[]).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].stationuuid, "u1");
+    }
+
+    #[test]
+    fn search_name_excludes_user_countries() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "1".into(),
+                name: "Jazz FR".into(),
+                countrycode: "FR".into(),
+                votes: 1,
+                ..bare()
+            },
+            Station {
+                stationuuid: "2".into(),
+                name: "Jazz US".into(),
+                countrycode: "US".into(),
+                votes: 1,
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let out = c.search_name("jazz", &["US".to_string()]).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].countrycode, "FR");
     }
 
     #[test]
@@ -742,7 +834,7 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         c.upsert(&[station("u2", "Beta"), station("u1", "Alpha")])
             .unwrap();
-        let all = c.list_all().unwrap();
+        let all = c.list_all(&[]).unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].name, "Alpha");
         assert_eq!(all[1].name, "Beta");
@@ -765,7 +857,7 @@ mod tests {
         let c = Cache::open_in_memory().unwrap();
         c.upsert(&[station("u1", "Jazz One")]).unwrap();
         c.upsert(&[station("u1", "Jazz One Renamed")]).unwrap();
-        let found = c.search_name("jazz").unwrap();
+        let found = c.search_name("jazz", &[]).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "Jazz One Renamed");
     }
@@ -783,7 +875,7 @@ mod tests {
             name: Some("\"jazz\"".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -802,7 +894,7 @@ mod tests {
             countrycode: Some("GB".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let mut uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.clone()).collect();
         uuids.sort();
         assert_eq!(uuids, vec!["u1", "u3"]);
@@ -822,7 +914,7 @@ mod tests {
             countrycode: Some("GB".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -841,7 +933,7 @@ mod tests {
             bitrate_min: Some(128),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let mut uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.clone()).collect();
         uuids.sort();
         assert_eq!(uuids, vec!["u2", "u3"]);
@@ -860,7 +952,7 @@ mod tests {
             tag: Some("jazz".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -878,7 +970,7 @@ mod tests {
             name: Some("jazz".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -893,7 +985,7 @@ mod tests {
             name: Some("  jazz  ".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -993,7 +1085,7 @@ mod tests {
             name: Some("80".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         let uuids: Vec<_> = rows.iter().map(|s| s.stationuuid.as_str()).collect();
         assert_eq!(uuids, vec!["u1"]);
     }
@@ -1011,7 +1103,7 @@ mod tests {
             name: Some("disco".into()),
             ..Default::default()
         };
-        let rows = cache.search(&q).unwrap();
+        let rows = cache.search(&q, &[]).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].stationuuid, "u1");
     }
