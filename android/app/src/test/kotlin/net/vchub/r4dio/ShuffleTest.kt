@@ -1,6 +1,7 @@
 package net.vchub.r4dio
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,7 +44,7 @@ class ShuffleTest {
     fun pickRandom_neverPicksExcluded() {
         val list = listOf(stc("ru", "RU"), stc("ua", "UA"))
         repeat(20) {
-            val p = pickRandom(list, Random(it.toLong()))!!
+            val p = pickRandom(list, rng = Random(it.toLong()))!!
             assertEquals("ua", p.uuid)
         }
     }
@@ -51,13 +52,13 @@ class ShuffleTest {
     @Test
     fun pickRandom_skipsStationsWithBlankUrl() {
         val list = listOf(st("a", ""), st("b", "http://x"))
-        assertEquals("b", pickRandom(list, Random(1))?.uuid)
+        assertEquals("b", pickRandom(list, rng = Random(1))?.uuid)
     }
 
     @Test
     fun pickRandom_returnsAPlayableOne() {
         val list = listOf(st("a", "http://a"), st("b", "http://b"))
-        val p = pickRandom(list, Random(42))!!
+        val p = pickRandom(list, rng = Random(42))!!
         assertTrue(p.uuid == "a" || p.uuid == "b")
         assertTrue(p.url.isNotBlank())
     }
@@ -65,7 +66,7 @@ class ShuffleTest {
     @Test
     fun pickForScope_all_usesCatalog() {
         val cat = listOf(st("a", "http://a"))
-        val p = pickForScope(Scope.ALL, cat, emptyList(), Random(1))
+        val p = pickForScope(Scope.ALL, cat, emptyList(), rng = Random(1))
         assertEquals("a", p?.uuid)
     }
 
@@ -73,12 +74,28 @@ class ShuffleTest {
     fun pickForScope_favs_usesFavs() {
         val cat = listOf(st("a", "http://a"))
         val favs = listOf(st("f", "http://f"))
-        val p = pickForScope(Scope.FAVS, cat, favs, Random(1))
+        val p = pickForScope(Scope.FAVS, cat, favs, rng = Random(1))
         assertEquals("f", p?.uuid)
     }
 
     @Test
     fun pickForScope_favs_emptyReturnsNull() {
         assertNull(pickForScope(Scope.FAVS, listOf(st("a", "http://a")), emptyList()))
+    }
+
+    @Test
+    fun userExcludedCountryIsNeverPicked() {
+        val stations = listOf(stc("1", "FR", "FR one"), stc("2", "US", "US one"))
+        repeat(50) {
+            val pick = pickRandom(stations, userExcluded = setOf("US"))
+            assertNotNull(pick)
+            assertEquals("US is user-excluded, must never be picked", "FR", pick!!.country)
+        }
+    }
+
+    @Test
+    fun ruByStillExcludedRegardlessOfUserSet() {
+        val stations = listOf(stc("1", "RU", "ru"))
+        assertNull(pickRandom(stations, userExcluded = emptySet()))
     }
 }
