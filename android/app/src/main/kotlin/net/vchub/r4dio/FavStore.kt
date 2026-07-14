@@ -130,7 +130,7 @@ class FavStore(context: Context) {
         store.edit { prefs ->
             prefs[keyFavs] = favs
             prefs[keyBlocked] = blocked
-            prefs[keyExcludedCountries] = excluded
+            prefs[keyExcludedCountries] = excluded.map { it.uppercase() }.toSet()
         }
     }
 }
