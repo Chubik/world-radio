@@ -151,7 +151,8 @@ class PlaybackService : MediaSessionService() {
             val fetched = catalog.fetchStations()
             stations = fetched
             Log.i("r4dio", "loaded ${fetched.size} stations")
-            val pick = pickRandom(fetched) ?: return@thread
+            val userExcluded = runBlocking { favStore.currentExcluded() }
+            val pick = pickRandom(fetched, userExcluded) ?: return@thread
             main.post { playPick(pick) }
         }
     }
@@ -234,7 +235,8 @@ class PlaybackService : MediaSessionService() {
         }
         mirrorSeq = evt.seq
         val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
-        if (isExcluded(station)) {
+        val userExcluded = runBlocking { favStore.currentExcluded() }
+        if (isExcluded(station) || station.country.uppercase() in userExcluded) {
             return
         }
         when (exo?.isPlaying) {
@@ -255,7 +257,8 @@ class PlaybackService : MediaSessionService() {
             val sc = favStore.currentScope()
             val favs = favStore.currentCachedFavs()
             val cat = withReadyCatalog()
-            val pick = pickForScope(sc, cat, favs)
+            val userExcluded = favStore.currentExcluded()
+            val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
                 null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
                 else -> playPick(pick)
