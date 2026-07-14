@@ -9,6 +9,9 @@ fn main() {
     radio_core::single_instance::take_over();
 
     let mut backend = backend::Backend::new().expect("failed to init backend");
+    if radio_core::sync::load_key().is_some() {
+        let _ = backend.sync();
+    }
     backend.play_last();
     run(backend);
 }
