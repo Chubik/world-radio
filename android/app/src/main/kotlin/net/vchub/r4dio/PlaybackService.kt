@@ -184,9 +184,10 @@ class PlaybackService : MediaSessionService() {
             val local = SyncData(
                 favs = favStore.currentFavUuids().toList(),
                 blocked = favStore.currentBlocked().toList(),
+                excluded_countries = favStore.currentExcluded().toList(),
             )
             val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
-            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet())
+            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
             refreshCustomLayout()
         }
     }

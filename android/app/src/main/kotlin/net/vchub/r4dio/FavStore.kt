@@ -45,6 +45,7 @@ class FavStore(context: Context) {
     private val keyCached = stringPreferencesKey("cached_favs")
     private val keySyncKey = stringPreferencesKey("sync_key")
     private val keyBlocked = stringSetPreferencesKey("blocked_uuids")
+    private val keyExcludedCountries = stringSetPreferencesKey("excluded_countries")
     private val keyDeviceId = stringPreferencesKey("device_id")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
@@ -104,6 +105,16 @@ class FavStore(context: Context) {
 
     suspend fun currentBlocked(): Set<String> = store.data.first()[keyBlocked] ?: emptySet()
 
+    val excludedCountries: Flow<Set<String>> =
+        store.data.map { it[keyExcludedCountries] ?: emptySet() }
+
+    suspend fun currentExcluded(): Set<String> =
+        store.data.first()[keyExcludedCountries] ?: emptySet()
+
+    suspend fun setExcluded(countries: Set<String>) {
+        store.edit { it[keyExcludedCountries] = countries.map { c -> c.uppercase() }.toSet() }
+    }
+
     suspend fun deviceId(): String {
         val existing = store.data.first()[keyDeviceId]
         when (existing) {
@@ -115,10 +126,11 @@ class FavStore(context: Context) {
         return id
     }
 
-    suspend fun applyMerged(favs: Set<String>, blocked: Set<String>) {
+    suspend fun applyMerged(favs: Set<String>, blocked: Set<String>, excluded: Set<String>) {
         store.edit { prefs ->
             prefs[keyFavs] = favs
             prefs[keyBlocked] = blocked
+            prefs[keyExcludedCountries] = excluded
         }
     }
 }
