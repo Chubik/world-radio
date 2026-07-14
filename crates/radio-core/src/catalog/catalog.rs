@@ -77,7 +77,8 @@ impl Catalog {
                 let sanitized = term.replace('*', "");
                 let escaped = sanitized.replace('"', "\"\"");
                 let phrase = format!("\"{escaped}\"");
-                self.cache.search_name(&phrase)?
+                self.cache
+                    .search_name(&phrase, self.excluded_country_ids())?
             }
         };
         Ok(stations
