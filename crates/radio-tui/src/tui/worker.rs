@@ -35,6 +35,7 @@ pub struct WorkerPaths {
     pub hist: PathBuf,
     pub health: PathBuf,
     pub blacklist: PathBuf,
+    pub excluded: PathBuf,
 }
 
 pub fn station_to_row(s: &Station, favorite: bool, hidden: bool) -> StationRow {
@@ -162,7 +163,7 @@ pub fn spawn(
 }
 
 fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
-    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist) {
+    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
         crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
     }
     if let Err(e) = catalog.save_health(&paths.health) {

@@ -11,6 +11,7 @@ pub struct Backend {
     fav_path: PathBuf,
     hist_path: PathBuf,
     blacklist_path: PathBuf,
+    excluded_path: PathBuf,
 }
 
 impl Backend {
@@ -21,7 +22,15 @@ impl Backend {
         let fav_path = data.join("favorites.json");
         let hist_path = data.join("history.json");
         let blacklist_path = data.join("blacklist.json");
-        let catalog = Catalog::load(cache, health, &fav_path, &hist_path, &blacklist_path);
+        let excluded_path = data.join("excluded_countries.json");
+        let catalog = Catalog::load(
+            cache,
+            health,
+            &fav_path,
+            &hist_path,
+            &blacklist_path,
+            &excluded_path,
+        );
 
         let all = catalog_src::all_stations(&catalog)?;
         let favorites = catalog_src::favorite_stations(&catalog)?;
@@ -41,6 +50,7 @@ impl Backend {
             fav_path,
             hist_path,
             blacklist_path,
+            excluded_path,
         })
     }
 
@@ -49,10 +59,12 @@ impl Backend {
             engine.play(&pick.url);
         }
         self.catalog.record_history(&pick.uuid);
-        if let Err(e) =
-            self.catalog
-                .save_state(&self.fav_path, &self.hist_path, &self.blacklist_path)
-        {
+        if let Err(e) = self.catalog.save_state(
+            &self.fav_path,
+            &self.hist_path,
+            &self.blacklist_path,
+            &self.excluded_path,
+        ) {
             eprintln!("save history failed: {e}");
         }
         self.state.begin_play(pick);
@@ -115,10 +127,12 @@ impl Backend {
             Ok(favorites) => self.state.set_favorites(favorites),
             Err(e) => eprintln!("toggle favorite failed: {e}"),
         }
-        if let Err(e) =
-            self.catalog
-                .save_state(&self.fav_path, &self.hist_path, &self.blacklist_path)
-        {
+        if let Err(e) = self.catalog.save_state(
+            &self.fav_path,
+            &self.hist_path,
+            &self.blacklist_path,
+            &self.excluded_path,
+        ) {
             eprintln!("save favorites failed: {e}");
         }
     }

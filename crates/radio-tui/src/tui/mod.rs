@@ -50,6 +50,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         &data.join("favorites.json"),
         &data.join("history.json"),
         &data.join("blacklist.json"),
+        &data.join("excluded_countries.json"),
     );
 
     let fav_ids: Vec<String> = catalog.favorite_ids().to_vec();
@@ -82,6 +83,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         hist: data.join("history.json"),
         health: data.join("station_health.json"),
         blacklist: data.join("blacklist.json"),
+        excluded: data.join("excluded_countries.json"),
     };
     let worker_handle = worker::spawn(catalog, worker_paths, req_rx, msg_tx.clone());
 
