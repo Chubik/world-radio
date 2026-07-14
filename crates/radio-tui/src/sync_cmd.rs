@@ -36,6 +36,10 @@ fn blacklist_path() -> std::path::PathBuf {
     paths::data_dir().join("blacklist.json")
 }
 
+fn excluded_path() -> std::path::PathBuf {
+    paths::data_dir().join("excluded_countries.json")
+}
+
 fn favorites_from(ids: Vec<String>) -> Favorites {
     let mut f = Favorites::new();
     for id in ids {
@@ -139,17 +143,21 @@ fn run_sync() -> anyhow::Result<()> {
     };
     let favs = Favorites::load(&fav_path());
     let blocked = Favorites::load(&blacklist_path());
+    let excluded = Favorites::load(&excluded_path());
     let local = SyncData {
         favs: favs.ids().to_vec(),
         blocked: blocked.ids().to_vec(),
+        excluded_countries: excluded.ids().to_vec(),
     };
     let merged = client().push(&key, &local)?;
     favorites_from(merged.favs.clone()).save(&fav_path())?;
     favorites_from(merged.blocked.clone()).save(&blacklist_path())?;
+    favorites_from(merged.excluded_countries.clone()).save(&excluded_path())?;
     println!(
-        "synced: {} favourites, {} blocked",
+        "synced: {} favourites, {} blocked, {} excluded countries",
         merged.favs.len(),
-        merged.blocked.len()
+        merged.blocked.len(),
+        merged.excluded_countries.len()
     );
     Ok(())
 }

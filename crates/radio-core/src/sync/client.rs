@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct SyncData {
     pub favs: Vec<String>,
     pub blocked: Vec<String>,
+    #[serde(default)]
+    pub excluded_countries: Vec<String>,
 }
 
 pub struct SyncClient {
@@ -108,7 +110,8 @@ mod tests {
             d,
             SyncData {
                 favs: vec!["a".into(), "b".into()],
-                blocked: vec!["x".into()]
+                blocked: vec!["x".into()],
+                excluded_countries: vec![]
             }
         );
     }
@@ -135,6 +138,7 @@ mod tests {
                 &SyncData {
                     favs: vec!["c".into()],
                     blocked: vec![],
+                    excluded_countries: vec![],
                 },
             )
             .unwrap();
@@ -155,5 +159,26 @@ mod tests {
         server.mock("DELETE", "/account").with_status(401).create();
         let c = SyncClient::new(server.url());
         assert!(c.delete("r4-bad").is_err());
+    }
+
+    #[test]
+    fn syncdata_serializes_excluded_countries_key() {
+        let d = SyncData {
+            favs: vec![],
+            blocked: vec![],
+            excluded_countries: vec!["US".into()],
+        };
+        let j = serde_json::to_string(&d).unwrap();
+        assert!(
+            j.contains("\"excluded_countries\":[\"US\"]"),
+            "wire key must be excluded_countries: {j}"
+        );
+    }
+
+    #[test]
+    fn syncdata_deserializes_without_excluded_field() {
+        // older server response with no excluded_countries must still parse
+        let d: SyncData = serde_json::from_str("{\"favs\":[],\"blocked\":[]}").unwrap();
+        assert!(d.excluded_countries.is_empty());
     }
 }

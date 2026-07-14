@@ -4,6 +4,7 @@ const MIGRATE_FILES: &[&str] = &[
     "stations.db",
     "favorites.json",
     "blacklist.json",
+    "excluded_countries.json",
     "history.json",
     "station_health.json",
     "config.toml",
