@@ -27,6 +27,9 @@ fn run(backend: backend::Backend) {
             commands::toggle_favorite,
             commands::now_state,
             commands::spectrum,
+            commands::sync,
+            commands::set_sync_key,
+            commands::clear_sync_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

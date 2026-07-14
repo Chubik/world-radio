@@ -95,6 +95,29 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
     state.lock().unwrap().read_spectrum(16)
 }
 
+#[tauri::command]
+pub fn sync(state: tauri::State<Shared>) {
+    let mut backend = state.lock().unwrap();
+    if let Err(e) = backend.sync() {
+        eprintln!("sync failed: {e}");
+    }
+}
+
+#[tauri::command]
+pub fn set_sync_key(key: String) -> bool {
+    if !radio_core::sync::is_valid_format(&key) {
+        return false;
+    }
+    radio_core::sync::store_key(&key).is_ok()
+}
+
+#[tauri::command]
+pub fn clear_sync_key() {
+    if let Err(e) = radio_core::sync::clear_key() {
+        eprintln!("clear sync key failed: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
