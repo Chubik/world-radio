@@ -9,6 +9,7 @@ pub enum WorkerReq {
     LoadFacets,
     ToggleFavorite(String),
     Blacklist(String),
+    ToggleExcludedCountry(String),
     Recheck(String),
     RecheckAll,
     RecordHistory(String),
@@ -72,6 +73,13 @@ pub fn spawn(
                 WorkerReq::Blacklist(uuid) => {
                     catalog.toggle_blacklist(&uuid);
                     handle_sync(&mut catalog, &paths, &msg_tx, false);
+                }
+                WorkerReq::ToggleExcludedCountry(code) => {
+                    catalog.toggle_excluded_country(&code);
+                    save_all(&catalog, &paths);
+                    let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
+                        catalog.excluded_country_ids().to_vec(),
+                    ));
                 }
                 WorkerReq::Recheck(uuid) => {
                     catalog.clear_health(&uuid);

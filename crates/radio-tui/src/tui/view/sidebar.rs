@@ -192,7 +192,17 @@ fn group_options(model: &Model, group: usize, facets: &[(String, u32)]) -> Vec<(
     };
     let mut out = vec![("all".to_string(), none_selected)];
     for (v, count) in facets {
-        out.push((format!("{v} ({count})"), f.group_selected(group, v)));
+        let excluded = group == 1
+            && model
+                .browse
+                .excluded_countries
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(v));
+        let label = match excluded {
+            true => format!("{v} ({count}) ✕"),
+            false => format!("{v} ({count})"),
+        };
+        out.push((label, f.group_selected(group, v)));
     }
     out
 }

@@ -54,6 +54,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     );
 
     let fav_ids: Vec<String> = catalog.favorite_ids().to_vec();
+    let excluded_countries: Vec<String> = catalog.excluded_country_ids().to_vec();
     let seed_rows: Vec<crate::tui::model::StationRow> =
         match catalog.list_by_popularity(&fav_ids, 200) {
             Ok(stations) => stations
@@ -120,6 +121,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.browse.loading = true;
     model.browse.query = config.query.clone();
     model.browse.filters = config.filters.clone();
+    model.browse.excluded_countries = excluded_countries;
     model.fft_divisor = config.fft_divisor;
     model.crossfade = config.crossfade;
     model.spectrum_style = config.spectrum_style;
@@ -345,6 +347,9 @@ fn run_effects(
             }
             Effect::Blacklist(uuid) => {
                 let _ = req_tx.send(WorkerReq::Blacklist(uuid));
+            }
+            Effect::ToggleExcludedCountry(code) => {
+                let _ = req_tx.send(WorkerReq::ToggleExcludedCountry(code));
             }
             Effect::Recheck(uuid) => {
                 let _ = req_tx.send(WorkerReq::Recheck(uuid));

@@ -231,6 +231,8 @@ pub struct BrowseState {
     #[allow(dead_code)]
     pub facets: Facets,
     #[allow(dead_code)]
+    pub excluded_countries: Vec<String>,
+    #[allow(dead_code)]
     pub facets_loading: bool,
     #[allow(dead_code)]
     pub pending_online_search: Option<Instant>,
