@@ -214,7 +214,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::UpdateNow => match model.pending_update.clone() {
-            None => vec![],
+            None => {
+                model.notice = Some(format!(
+                    "already up to date (v{})",
+                    radio_core::update::current_version()
+                ));
+                vec![]
+            }
             Some(rel) => {
                 model.notice = Some(format!("updating to v{}…", rel.version));
                 vec![Effect::Update(rel)]
