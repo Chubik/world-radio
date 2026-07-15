@@ -9,17 +9,12 @@ use ratatui::Frame;
 pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, area);
     let cursor = model.settings_cursor;
-    let glyph_mark = match model.glyphs.emoji_flags {
-        true => "[✓] unicode + emoji",
-        false => "[ ] unicode + emoji",
-    };
     let crossfade_mark = match model.crossfade {
         true => "[✓] on",
         false => "[ ] off",
     };
     let rows = [
         format!("theme        {}", theme_name(model.theme)),
-        format!("glyphs       {glyph_mark}"),
         format!("crossfade    {crossfade_mark}"),
         format!("spectrum     {}", model.spectrum_style.label()),
         "keybindings  → edit".to_string(),

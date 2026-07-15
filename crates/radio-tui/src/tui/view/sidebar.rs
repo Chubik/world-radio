@@ -90,7 +90,7 @@ fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(tabs));
     let hint = match active_group == 1 {
-        true => "← → group · ↵ filter · x hide country",
+        true => "↵ show only [✓] · x hide ✕ · ← → group",
         false => "← → switch group · ↵ apply",
     };
     lines.push(Line::styled(hint, Style::default().fg(pal.dim)));
@@ -164,8 +164,10 @@ fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
 
 fn marker_for(multi: bool, is_all: bool, selected: bool) -> &'static str {
     if multi && !is_all {
+        // a filter selection means "show only these" — use a check, not [x], which
+        // reads as "excluded/removed" and is easily confused with `x hide country`.
         return match selected {
-            true => "[x]",
+            true => "[✓]",
             false => "[ ]",
         };
     }
@@ -223,6 +225,15 @@ fn bitrate_options(current: Option<u32>) -> Vec<(String, bool)> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn filter_selection_marker_is_check_not_x() {
+        // an included ("show only") country must read as a check, not [x] —
+        // [x] reads as excluded and caused users to confuse it with `x hide`.
+        assert_eq!(marker_for(true, false, true), "[✓]");
+        assert_eq!(marker_for(true, false, false), "[ ]");
+    }
+
     use super::*;
 
     #[test]
