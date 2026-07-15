@@ -281,17 +281,25 @@ jobs:
           OPS_TOKEN: ${{ secrets.ADO_OPS_TOKEN }}
         run: |
           # release is fully published now — ping ops so it deploys the new
-          # version immediately instead of waiting for its 30-min cron.
+          # version immediately instead of waiting for its 30-min cron. this is
+          # best-effort: a failure here must not fail the release, since the ops
+          # cron still picks the new version up within 30 min.
           if [ -z "$OPS_TOKEN" ]; then
             echo "ADO_OPS_TOKEN not set — ops will pick this up on its next cron"
             exit 0
           fi
-          curl -fsSL -X POST \
+          code="$(curl -sS -o /tmp/ops-resp.txt -w '%{http_code}' -X POST \
             -H "Authorization: Bearer $OPS_TOKEN" \
             -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
             https://api.github.com/repos/Chubik/world-radio-ops/dispatches \
-            -d '{"event_type":"release-published","client_payload":{"version":"${{ steps.sums.outputs.version }}"}}'
-          echo "dispatched release-published to ops for v${{ steps.sums.outputs.version }}"
+            -d '{"event_type":"release-published","client_payload":{"version":"${{ steps.sums.outputs.version }}"}}')"
+          if [ "$code" = "204" ]; then
+            echo "dispatched release-published to ops for v${{ steps.sums.outputs.version }}"
+          else
+            echo "ops dispatch failed with HTTP $code — ops cron will still pick it up"
+            echo "response body:"; cat /tmp/ops-resp.txt
+          fi
 
       - name: reclaim actions storage
         env:
