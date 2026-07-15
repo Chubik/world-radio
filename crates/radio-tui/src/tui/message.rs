@@ -62,6 +62,8 @@ pub enum Msg {
     MirrorPlay(radio_core::mirror::MirrorEvent),
     UpdateAvailable(radio_core::update::Release),
     UpdateNow,
+    UpdateFound(radio_core::update::Release),
+    UpdateUpToDate,
     UpdateApplied(String),
     CatalogSynced { count: usize },
     CatalogSyncFailed,
@@ -95,5 +97,6 @@ pub enum Effect {
         url: String,
     },
     SaveState,
+    CheckUpdate,
     Update(radio_core::update::Release),
 }

@@ -220,13 +220,26 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 vec![Effect::Update(rel)]
             }
             (false, None) => {
-                model.notice = Some(format!(
-                    "already up to date (v{})",
-                    radio_core::update::current_version()
-                ));
-                vec![]
+                // no update was known at startup — check fresh instead of wrongly
+                // claiming up-to-date, since a release may have shipped since then.
+                model.notice = Some("checking for updates…".to_string());
+                vec![Effect::CheckUpdate]
             }
         },
+        Msg::UpdateFound(rel) => {
+            // fresh check found a newer version — download it right away, since the
+            // user pressed U to update, not merely to check.
+            model.pending_update = Some(rel.clone());
+            model.notice = Some("↓ downloading…".to_string());
+            vec![Effect::Update(rel)]
+        }
+        Msg::UpdateUpToDate => {
+            model.notice = Some(format!(
+                "already up to date (v{})",
+                radio_core::update::current_version()
+            ));
+            vec![]
+        }
         Msg::UpdateApplied(version) => {
             model.update_applied = true;
             model.notice = Some(format!("✓ updated to v{version} — press U to restart"));
