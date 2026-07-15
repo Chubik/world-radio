@@ -13,6 +13,9 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.MultiFormatWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.BarcodeEncoder
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -149,7 +152,15 @@ class SyncActivity : ComponentActivity() {
             when (hasKey) {
                 false -> qr.visibility = android.view.View.GONE
                 true -> {
-                    val bmp = BarcodeEncoder().encodeBitmap(key, BarcodeFormat.QR_CODE, 500, 500)
+                    // encode with an explicit quiet-zone margin and high error
+                    // correction — without a margin zxing's own scanner fails to
+                    // lock onto the finder patterns even though phone cameras cope.
+                    val hints = mapOf(
+                        EncodeHintType.MARGIN to 2,
+                        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
+                    )
+                    val matrix = MultiFormatWriter().encode(key, BarcodeFormat.QR_CODE, 500, 500, hints)
+                    val bmp = BarcodeEncoder().createBitmap(matrix)
                     qr.setImageBitmap(bmp)
                     qr.visibility = android.view.View.VISIBLE
                 }

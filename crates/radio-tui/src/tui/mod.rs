@@ -358,13 +358,27 @@ fn run_effects(
                 let _ = req_tx.send(WorkerReq::RecheckAll);
             }
             Effect::Restart => {
-                // restore the terminal and exit cleanly with a note; re-execing
-                // in place fights for the tty and errors, so let the user relaunch.
+                // fully restore the terminal first, then replace this process with
+                // the freshly-written binary. the earlier i/o error came from
+                // exec-ing while still in raw mode / the alternate screen with an
+                // unflushed stdout — restoring and flushing before exec fixes it.
+                use std::io::Write;
                 let _ = disable_raw_mode();
                 let mut out = std::io::stdout();
                 let _ = out.execute(LeaveAlternateScreen);
                 let _ = out.execute(crossterm::cursor::Show);
-                println!("updated — run r4dio again to use the new version");
+                let _ = out.flush();
+                if let Ok(exe) = std::env::current_exe() {
+                    use std::os::unix::process::CommandExt;
+                    // exec replaces the image in place; it only returns on failure.
+                    let err = std::process::Command::new(exe)
+                        .args(std::env::args_os().skip(1))
+                        .exec();
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "could not relaunch ({err}) — run r4dio again to use the new version"
+                    );
+                }
                 std::process::exit(0);
             }
             Effect::RecordHistory(uuid) => {
