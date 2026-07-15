@@ -122,12 +122,16 @@ fn build_active_group_lines(
     let (_, opts, _) = &groups[active_group];
     let sel = active_option.unwrap_or(0);
 
-    // lay the options out in a grid so a long list (200+ countries) fills the
-    // width instead of a single tall column the user must scroll forever. each
-    // cell is a fixed width; the number of columns is whatever fits the panel.
+    // only long lists (countries, tags) get a multi-column grid to fill the width
+    // and cut scrolling. short groups (status, codec, bitrate) stay a single
+    // vertical column so the selected option is obvious and easy to move through.
+    const GRID_MIN_OPTS: usize = 12;
     let cell_w = grid_cell_width(opts).max(1);
     let inner_w = width.saturating_sub(2); // panel borders
-    let cols = (inner_w / cell_w).clamp(1, 6);
+    let cols = match opts.len() > GRID_MIN_OPTS {
+        true => (inner_w / cell_w).clamp(1, 6),
+        false => 1,
+    };
     let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
     let grid_rows = height.saturating_sub(header_rows).max(1);
     let total_rows = opts.len().div_ceil(cols);
@@ -151,11 +155,15 @@ fn build_active_group_lines(
             let Some((label, state)) = opts.get(oi) else {
                 break;
             };
-            let style = opt_style(pal, *state, Some(oi) == active_option);
-            // pad each cell to a uniform width so the columns line up; no marker —
-            // colour alone conveys the state.
-            let padded = format!("{label:<cell_w$}");
-            spans.push(ratatui::text::Span::styled(padded, style));
+            let focused = Some(oi) == active_option;
+            let style = opt_style(pal, *state, focused);
+            // in a grid, pad each cell to a uniform width so columns line up; in a
+            // single column, keep the label tight so the cursor highlight hugs it.
+            let text = match cols > 1 {
+                true => format!("{label:<cell_w$}"),
+                false => format!(" {label} "),
+            };
+            spans.push(ratatui::text::Span::styled(text, style));
         }
         lines.push(Line::from(spans));
     }
@@ -204,17 +212,22 @@ fn grid_cell_width(opts: &[(String, OptState)]) -> usize {
     longest + 2
 }
 
-/// colour conveys the option's state — no checkbox markers. the focused row is
-/// always the bright peak colour; otherwise show-only is accent, hidden is the
-/// hot (danger) colour, normal is the default foreground.
+/// colour conveys the option's state — no checkbox markers. show-only is accent,
+/// hidden is the hot (danger) colour, normal is the default foreground. the
+/// cursor is drawn as an inverted block (bg fill) so "where am i" is unmistakable
+/// regardless of the option's state colour.
 fn opt_style(pal: &Palette, state: OptState, focused: bool) -> Style {
-    if focused {
-        return Style::default().fg(pal.peak).bold();
-    }
-    match state {
-        OptState::ShowOnly => Style::default().fg(pal.accent).bold(),
-        OptState::Hidden => Style::default().fg(pal.hot),
-        OptState::Normal => Style::default().fg(pal.fg),
+    let fg = match state {
+        OptState::ShowOnly => pal.accent,
+        OptState::Hidden => pal.hot,
+        OptState::Normal => pal.fg,
+    };
+    match focused {
+        true => Style::default().fg(pal.bg).bg(fg).bold(),
+        false => match state {
+            OptState::Normal => Style::default().fg(fg),
+            _ => Style::default().fg(fg).bold(),
+        },
     }
 }
 
@@ -320,8 +333,11 @@ mod tests {
         );
         assert_eq!(opt_style(&pal, OptState::Hidden, false).fg, Some(pal.hot));
         assert_eq!(opt_style(&pal, OptState::Normal, false).fg, Some(pal.fg));
-        // focus always wins with the bright peak colour.
-        assert_eq!(opt_style(&pal, OptState::Hidden, true).fg, Some(pal.peak));
+        // the cursor is an inverted block: the state colour fills the background
+        // and the text flips to the panel bg, so it's visible on any state.
+        let cursor = opt_style(&pal, OptState::Hidden, true);
+        assert_eq!(cursor.bg, Some(pal.hot));
+        assert_eq!(cursor.fg, Some(pal.bg));
     }
 
     use super::*;
