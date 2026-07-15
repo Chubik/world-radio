@@ -32,12 +32,23 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         Block::default().style(Style::default().bg(pal.bg).fg(pal.fg)),
         area,
     );
-    let lines = build_active_group_lines(model, pal, area.height as usize);
+    let lines = build_active_group_lines(model, pal, area.height as usize, area.width as usize);
     let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
     frame.render_widget(p, area);
 }
 
-type FilterGroup = (&'static str, Vec<(String, bool)>, bool);
+/// how an option relates to the current filter — drives its colour, no marker.
+#[derive(Clone, Copy, PartialEq)]
+enum OptState {
+    /// not selected
+    Normal,
+    /// filter is narrowed to this value ("show only")
+    ShowOnly,
+    /// this country is hidden ("x hide")
+    Hidden,
+}
+
+type FilterGroup = (&'static str, Vec<(String, OptState)>, bool);
 
 fn groups(model: &Model) -> [FilterGroup; 5] {
     [
@@ -65,7 +76,12 @@ fn groups(model: &Model) -> [FilterGroup; 5] {
     ]
 }
 
-fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<Line<'static>> {
+fn build_active_group_lines(
+    model: &Model,
+    pal: &Palette,
+    height: usize,
+    width: usize,
+) -> Vec<Line<'static>> {
     let groups = groups(model);
     let (active_group, active_option) = match model.browse.focus {
         BrowseFocus::Filters { group, option } => (group, Some(option)),
@@ -89,45 +105,63 @@ fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(tabs));
-    let hint = match active_group == 1 {
-        true => "↵ show only [✓] · x hide ✕ · ← → group",
-        false => "← → switch group · ↵ apply",
+    // colour legend, not markers: accent = showing only, red = hidden.
+    let hint_line = match active_group == 1 {
+        true => Line::from(vec![
+            ratatui::text::Span::styled("↵ ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled("show only", Style::default().fg(pal.accent)),
+            ratatui::text::Span::styled(" · x ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled("hide", Style::default().fg(pal.hot)),
+            ratatui::text::Span::styled(" · ← → group", Style::default().fg(pal.dim)),
+        ]),
+        false => Line::styled("← → switch group · ↵ apply", Style::default().fg(pal.dim)),
     };
-    lines.push(Line::styled(hint, Style::default().fg(pal.dim)));
+    lines.push(hint_line);
     lines.push(Line::from(""));
 
-    let (_, opts, multi) = &groups[active_group];
-    // window the option list around the active row so a long list (e.g. 200+
-    // countries) stays navigable instead of running off the bottom.
-    let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
-    let viewport = height.saturating_sub(header_rows).max(1);
+    let (_, opts, _) = &groups[active_group];
     let sel = active_option.unwrap_or(0);
-    let start = sel
-        .saturating_sub(viewport / 2)
-        .min(opts.len().saturating_sub(viewport));
-    let start = start.min(sel);
-    let end = (start + viewport).min(opts.len());
-    if start > 0 {
+
+    // lay the options out in a grid so a long list (200+ countries) fills the
+    // width instead of a single tall column the user must scroll forever. each
+    // cell is a fixed width; the number of columns is whatever fits the panel.
+    let cell_w = grid_cell_width(opts).max(1);
+    let inner_w = width.saturating_sub(2); // panel borders
+    let cols = (inner_w / cell_w).clamp(1, 6);
+    let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
+    let grid_rows = height.saturating_sub(header_rows).max(1);
+    let total_rows = opts.len().div_ceil(cols);
+    // window vertically around the selected row so it stays on screen.
+    let sel_row = sel / cols;
+    let start_row = sel_row
+        .saturating_sub(grid_rows / 2)
+        .min(total_rows.saturating_sub(grid_rows));
+    let end_row = (start_row + grid_rows).min(total_rows);
+
+    if start_row > 0 {
         lines.push(Line::styled(
-            format!("  ↑ {start} more"),
+            format!("  ↑ {} more", start_row * cols),
             Style::default().fg(pal.dim),
         ));
     }
-    for (oi, (label, selected)) in opts.iter().enumerate().take(end).skip(start) {
-        let marker = marker_for(*multi, oi == 0, *selected);
-        // a hidden country (label carries ✕) renders in the hot colour so it's
-        // clearly "hidden", distinct from a checkbox filter selection.
-        let hidden = label.contains('✕');
-        let row_style = match (Some(oi) == active_option, hidden) {
-            (true, _) => Style::default().fg(pal.peak).bold(),
-            (false, true) => Style::default().fg(pal.hot),
-            (false, false) => Style::default().fg(pal.fg),
-        };
-        lines.push(Line::styled(format!("{marker} {label}"), row_style));
+    for row in start_row..end_row {
+        let mut spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+        for col in 0..cols {
+            let oi = row * cols + col;
+            let Some((label, state)) = opts.get(oi) else {
+                break;
+            };
+            let style = opt_style(pal, *state, Some(oi) == active_option);
+            // pad each cell to a uniform width so the columns line up; no marker —
+            // colour alone conveys the state.
+            let padded = format!("{label:<cell_w$}");
+            spans.push(ratatui::text::Span::styled(padded, style));
+        }
+        lines.push(Line::from(spans));
     }
-    if end < opts.len() {
+    if end_row < total_rows {
         lines.push(Line::styled(
-            format!("  ↓ {} more", opts.len() - end),
+            format!("  ↓ {} more", (total_rows - end_row) * cols),
             Style::default().fg(pal.dim),
         ));
     }
@@ -143,53 +177,67 @@ fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
     };
 
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for (gi, (name, opts, multi)) in groups.iter().enumerate() {
+    for (gi, (name, opts, _)) in groups.iter().enumerate() {
         let header_style = match Some(gi) == active_group {
             true => Style::default().fg(pal.accent).bold(),
             false => Style::default().fg(pal.dim),
         };
         lines.push(Line::styled(name.to_string(), header_style));
-        for (oi, (label, selected)) in opts.iter().enumerate() {
-            let marker = marker_for(*multi, oi == 0, *selected);
-            let row_style = match (Some(gi) == active_group, Some(oi) == active_option) {
-                (true, true) => Style::default().fg(pal.peak).bold(),
-                _ => Style::default().fg(pal.fg),
-            };
-            lines.push(Line::styled(format!("{marker} {label}"), row_style));
+        for (oi, (label, state)) in opts.iter().enumerate() {
+            let focused = Some(gi) == active_group && Some(oi) == active_option;
+            let row_style = opt_style(pal, *state, focused);
+            lines.push(Line::styled(label.clone(), row_style));
         }
         lines.push(Line::from(""));
     }
     lines
 }
 
-fn marker_for(multi: bool, is_all: bool, selected: bool) -> &'static str {
-    if multi && !is_all {
-        // a filter selection means "show only these" — use a check, not [x], which
-        // reads as "excluded/removed" and is easily confused with `x hide country`.
-        return match selected {
-            true => "[✓]",
-            false => "[ ]",
-        };
+/// width of one grid cell: the longest label plus a two-space gutter, so every
+/// column lines up and cells never touch.
+fn grid_cell_width(opts: &[(String, OptState)]) -> usize {
+    let longest = opts
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0);
+    longest + 2
+}
+
+/// colour conveys the option's state — no checkbox markers. the focused row is
+/// always the bright peak colour; otherwise show-only is accent, hidden is the
+/// hot (danger) colour, normal is the default foreground.
+fn opt_style(pal: &Palette, state: OptState, focused: bool) -> Style {
+    if focused {
+        return Style::default().fg(pal.peak).bold();
     }
-    match selected {
-        true => "◉",
-        false => "○",
+    match state {
+        OptState::ShowOnly => Style::default().fg(pal.accent).bold(),
+        OptState::Hidden => Style::default().fg(pal.hot),
+        OptState::Normal => Style::default().fg(pal.fg),
     }
 }
 
-fn status_options(model: &Model) -> Vec<(String, bool)> {
+fn on(selected: bool) -> OptState {
+    match selected {
+        true => OptState::ShowOnly,
+        false => OptState::Normal,
+    }
+}
+
+fn status_options(model: &Model) -> Vec<(String, OptState)> {
     use crate::tui::model::StatusFilter;
     let s = model.browse.filters.status;
     vec![
-        ("all".into(), s == StatusFilter::All),
-        ("favorites".into(), s == StatusFilter::Favorites),
-        ("recent".into(), s == StatusFilter::Recent),
-        ("blocked".into(), s == StatusFilter::Blocked),
-        ("dead".into(), s == StatusFilter::Dead),
+        ("all".into(), on(s == StatusFilter::All)),
+        ("favorites".into(), on(s == StatusFilter::Favorites)),
+        ("recent".into(), on(s == StatusFilter::Recent)),
+        ("blocked".into(), on(s == StatusFilter::Blocked)),
+        ("dead".into(), on(s == StatusFilter::Dead)),
     ]
 }
 
-fn group_options(model: &Model, group: usize, facets: &[(String, u32)]) -> Vec<(String, bool)> {
+fn group_options(model: &Model, group: usize, facets: &[(String, u32)]) -> Vec<(String, OptState)> {
     let f = &model.browse.filters;
     let none_selected = match group {
         1 => f.countries.is_empty(),
@@ -197,29 +245,31 @@ fn group_options(model: &Model, group: usize, facets: &[(String, u32)]) -> Vec<(
         3 => f.codecs.is_empty(),
         _ => true,
     };
-    let mut out = vec![("all".to_string(), none_selected)];
+    let mut out = vec![("all".to_string(), on(none_selected))];
     for (v, count) in facets {
-        let excluded = group == 1
+        let hidden = group == 1
             && model
                 .browse
                 .excluded_countries
                 .iter()
                 .any(|c| c.eq_ignore_ascii_case(v));
-        let label = match excluded {
-            true => format!("{v} ({count})  ✕ hidden"),
-            false => format!("{v} ({count})"),
+        // colour carries the state; the label stays clean with no markers.
+        let state = match (hidden, f.group_selected(group, v)) {
+            (true, _) => OptState::Hidden,
+            (false, true) => OptState::ShowOnly,
+            (false, false) => OptState::Normal,
         };
-        out.push((label, f.group_selected(group, v)));
+        out.push((format!("{v} ({count})"), state));
     }
     out
 }
 
-fn bitrate_options(current: Option<u32>) -> Vec<(String, bool)> {
+fn bitrate_options(current: Option<u32>) -> Vec<(String, OptState)> {
     vec![
-        ("any".to_string(), current.is_none()),
-        ("≥128 kbps".to_string(), current == Some(128)),
-        ("≥256 kbps".to_string(), current == Some(256)),
-        ("≥320 kbps".to_string(), current == Some(320)),
+        ("any".to_string(), on(current.is_none())),
+        ("≥128 kbps".to_string(), on(current == Some(128))),
+        ("≥256 kbps".to_string(), on(current == Some(256))),
+        ("≥320 kbps".to_string(), on(current == Some(320))),
     ]
 }
 
@@ -227,11 +277,51 @@ fn bitrate_options(current: Option<u32>) -> Vec<(String, bool)> {
 mod tests {
 
     #[test]
-    fn filter_selection_marker_is_check_not_x() {
-        // an included ("show only") country must read as a check, not [x] —
-        // [x] reads as excluded and caused users to confuse it with `x hide`.
-        assert_eq!(marker_for(true, false, true), "[✓]");
-        assert_eq!(marker_for(true, false, false), "[ ]");
+    fn grid_cell_width_is_longest_label_plus_gutter() {
+        let opts = vec![
+            ("US (7475)".to_string(), OptState::Normal),
+            ("DE (6009)".to_string(), OptState::Normal),
+        ];
+        // longest label 9 chars + 2 (gutter) = 11
+        assert_eq!(grid_cell_width(&opts), 11);
+    }
+
+    #[test]
+    fn country_grid_uses_multiple_columns_when_wide() {
+        use crate::tui::model::BrowseFocus;
+        let mut m = Model::new(
+            crate::tui::theme::Theme::AmberCrt,
+            crate::tui::theme::ColorTier::Truecolor,
+            crate::tui::theme::Glyphs::unicode(),
+        );
+        m.browse.facets.countries = (0..40).map(|i| (format!("C{i:02}"), 100u32)).collect();
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        // wide + short panel: must wrap into several columns, not 40 tall rows.
+        let lines =
+            build_active_group_lines(&m, &crate::tui::theme::Theme::AmberCrt.palette(), 12, 120);
+        // header (tabs+hint+blank)=3; the rest are grid rows, far fewer than 40.
+        let grid_line_count = lines.len() - 3;
+        assert!(
+            grid_line_count < 15,
+            "expected wrapped grid, got {grid_line_count} rows"
+        );
+    }
+
+    #[test]
+    fn opt_state_colour_conveys_show_only_vs_hidden() {
+        // no markers — colour alone must distinguish the states.
+        let pal = crate::tui::theme::Theme::AmberCrt.palette();
+        assert_eq!(
+            opt_style(&pal, OptState::ShowOnly, false).fg,
+            Some(pal.accent)
+        );
+        assert_eq!(opt_style(&pal, OptState::Hidden, false).fg, Some(pal.hot));
+        assert_eq!(opt_style(&pal, OptState::Normal, false).fg, Some(pal.fg));
+        // focus always wins with the bright peak colour.
+        assert_eq!(opt_style(&pal, OptState::Hidden, true).fg, Some(pal.peak));
     }
 
     use super::*;
