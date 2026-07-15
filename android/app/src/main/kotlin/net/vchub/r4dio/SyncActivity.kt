@@ -26,9 +26,10 @@ class SyncActivity : ComponentActivity() {
 
     private val scanner = registerForActivityResult(ScanContract()) { result ->
         val contents = result.contents
-        when (contents == null || !contents.startsWith("r4-")) {
-            true -> {}
-            false -> lifecycleScope.launch {
+        when {
+            contents == null -> toast("scan cancelled")
+            !contents.startsWith("r4-") -> toast("not an r4dio key")
+            else -> lifecycleScope.launch {
                 favStore.setSyncKey(contents)
                 render()
                 toast("key imported")
@@ -64,9 +65,10 @@ class SyncActivity : ComponentActivity() {
             scanner.launch(
                 ScanOptions()
                     .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setOrientationLocked(true)
+                    .setOrientationLocked(false)
+                    .setCaptureActivity(PortraitCaptureActivity::class.java)
                     .setBeepEnabled(false)
-                    .setPrompt("point at the r4dio qr"),
+                    .setPrompt("point at the r4dio qr · back to cancel"),
             )
         }
         findViewById<Button>(R.id.copy).setOnClickListener {
