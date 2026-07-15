@@ -192,6 +192,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::FilterApply => filter_apply(model),
         Msg::FilterClear => filter_clear(model, false),
         Msg::FilterClearAll => filter_clear(model, true),
+        Msg::FilterTypeahead(c) => {
+            filter_typeahead(model, Some(c));
+            vec![]
+        }
+        Msg::FilterTypeaheadBackspace => {
+            filter_typeahead(model, None);
+            vec![]
+        }
         Msg::FacetsLoaded(f) => {
             model.browse.facets = f;
             model.browse.facets_loading = false;
@@ -545,6 +553,7 @@ fn focus_toggle(model: &mut Model) -> Vec<Effect> {
 }
 
 fn filter_nav(model: &mut Model, next: bool) -> Vec<Effect> {
+    model.browse.filter_typeahead.clear();
     if let BrowseFocus::Filters { group, .. } = model.browse.focus {
         let g = match next {
             true => (group + 1) % 5,
@@ -559,6 +568,7 @@ fn filter_nav(model: &mut Model, next: bool) -> Vec<Effect> {
 }
 
 fn filter_option_nav(model: &mut Model, next: bool) -> Vec<Effect> {
+    model.browse.filter_typeahead.clear();
     if let BrowseFocus::Filters { group, option } = model.browse.focus {
         let max = group_option_count(model, group);
         let new_option = match next {
@@ -571,6 +581,41 @@ fn filter_option_nav(model: &mut Model, next: bool) -> Vec<Effect> {
         };
     }
     vec![]
+}
+
+/// type-ahead within a long filter group: append `c` (or backspace when None) to
+/// the buffer and jump the cursor to the first option whose value starts with it,
+/// e.g. typing "in" lands on India. only the country and tag groups (which have
+/// facet values) participate.
+fn filter_typeahead(model: &mut Model, c: Option<char>) {
+    let BrowseFocus::Filters { group, .. } = model.browse.focus else {
+        return;
+    };
+    let facets: &[(String, u32)] = match group {
+        1 => &model.browse.facets.countries,
+        2 => &model.browse.facets.tags,
+        _ => return,
+    };
+    match c {
+        Some(c) => model.browse.filter_typeahead.push(c.to_ascii_lowercase()),
+        None => {
+            model.browse.filter_typeahead.pop();
+        }
+    }
+    let needle = model.browse.filter_typeahead.clone();
+    if needle.is_empty() {
+        return;
+    }
+    if let Some(idx) = facets
+        .iter()
+        .position(|(v, _)| v.to_ascii_lowercase().starts_with(&needle))
+    {
+        // option index is facet index + 1 because option 0 is the "all" row.
+        model.browse.focus = BrowseFocus::Filters {
+            group,
+            option: idx + 1,
+        };
+    }
 }
 
 fn group_option_count(model: &Model, group: usize) -> usize {
@@ -682,6 +727,35 @@ fn tick(model: &mut Model, now: Instant) -> Vec<Effect> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn filter_typeahead_jumps_to_first_matching_country() {
+        let mut m = model();
+        m.browse.facets.countries =
+            vec![("US".into(), 100), ("IN".into(), 50), ("INDIA".into(), 40)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 0,
+        };
+        // typing "in" lands on the first country starting with it (IN, option 2).
+        update(&mut m, Msg::FilterTypeahead('i'));
+        update(&mut m, Msg::FilterTypeahead('n'));
+        assert_eq!(
+            m.browse.focus,
+            BrowseFocus::Filters {
+                group: 1,
+                option: 2
+            }
+        );
+        assert_eq!(m.browse.filter_typeahead, "in");
+        // backspace shortens the buffer.
+        update(&mut m, Msg::FilterTypeaheadBackspace);
+        assert_eq!(m.browse.filter_typeahead, "i");
+        // moving the cursor clears the buffer.
+        update(&mut m, Msg::FilterOptionNext);
+        assert_eq!(m.browse.filter_typeahead, "");
+    }
+
     use super::*;
     use crate::tui::model::{Model, Overlay, RowState, StationRow, StatusFilter};
     use crate::tui::theme::{ColorTier, Glyphs, Theme};

@@ -236,6 +236,10 @@ pub struct BrowseState {
     pub facets_loading: bool,
     #[allow(dead_code)]
     pub pending_online_search: Option<Instant>,
+    /// type-ahead buffer for jumping to a filter option by typing its name
+    /// (e.g. "in" → India) while a long filter group is focused.
+    #[allow(dead_code)]
+    pub filter_typeahead: String,
 }
 
 impl BrowseState {
