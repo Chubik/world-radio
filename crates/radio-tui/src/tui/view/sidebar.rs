@@ -32,7 +32,7 @@ pub fn render_modal(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect)
         Block::default().style(Style::default().bg(pal.bg).fg(pal.fg)),
         area,
     );
-    let lines = build_active_group_lines(model, pal, area.height as usize);
+    let lines = build_active_group_lines(model, pal, area.height as usize, area.width as usize);
     let p = Paragraph::new(lines).block(Block::bordered().title("FILTERS"));
     frame.render_widget(p, area);
 }
@@ -65,7 +65,12 @@ fn groups(model: &Model) -> [FilterGroup; 5] {
     ]
 }
 
-fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<Line<'static>> {
+fn build_active_group_lines(
+    model: &Model,
+    pal: &Palette,
+    height: usize,
+    width: usize,
+) -> Vec<Line<'static>> {
     let groups = groups(model);
     let (active_group, active_option) = match model.browse.focus {
         BrowseFocus::Filters { group, option } => (group, Some(option)),
@@ -97,37 +102,54 @@ fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<
     lines.push(Line::from(""));
 
     let (_, opts, multi) = &groups[active_group];
-    // window the option list around the active row so a long list (e.g. 200+
-    // countries) stays navigable instead of running off the bottom.
-    let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
-    let viewport = height.saturating_sub(header_rows).max(1);
     let sel = active_option.unwrap_or(0);
-    let start = sel
-        .saturating_sub(viewport / 2)
-        .min(opts.len().saturating_sub(viewport));
-    let start = start.min(sel);
-    let end = (start + viewport).min(opts.len());
-    if start > 0 {
+
+    // lay the options out in a grid so a long list (200+ countries) fills the
+    // width instead of a single tall column the user must scroll forever. each
+    // cell is a fixed width; the number of columns is whatever fits the panel.
+    let cell_w = grid_cell_width(opts).max(1);
+    let inner_w = width.saturating_sub(2); // panel borders
+    let cols = (inner_w / cell_w).clamp(1, 6);
+    let header_rows = lines.len() + 2; // tabs + hint + blank, plus border
+    let grid_rows = height.saturating_sub(header_rows).max(1);
+    let total_rows = opts.len().div_ceil(cols);
+    // window vertically around the selected row so it stays on screen.
+    let sel_row = sel / cols;
+    let start_row = sel_row
+        .saturating_sub(grid_rows / 2)
+        .min(total_rows.saturating_sub(grid_rows));
+    let end_row = (start_row + grid_rows).min(total_rows);
+
+    if start_row > 0 {
         lines.push(Line::styled(
-            format!("  ↑ {start} more"),
+            format!("  ↑ {} more", start_row * cols),
             Style::default().fg(pal.dim),
         ));
     }
-    for (oi, (label, selected)) in opts.iter().enumerate().take(end).skip(start) {
-        let marker = marker_for(*multi, oi == 0, *selected);
-        // a hidden country (label carries ✕) renders in the hot colour so it's
-        // clearly "hidden", distinct from a checkbox filter selection.
-        let hidden = label.contains('✕');
-        let row_style = match (Some(oi) == active_option, hidden) {
-            (true, _) => Style::default().fg(pal.peak).bold(),
-            (false, true) => Style::default().fg(pal.hot),
-            (false, false) => Style::default().fg(pal.fg),
-        };
-        lines.push(Line::styled(format!("{marker} {label}"), row_style));
+    for row in start_row..end_row {
+        let mut spans: Vec<ratatui::text::Span<'static>> = Vec::new();
+        for col in 0..cols {
+            let oi = row * cols + col;
+            let Some((label, selected)) = opts.get(oi) else {
+                break;
+            };
+            let marker = marker_for(*multi, oi == 0, *selected);
+            let hidden = label.contains('✕');
+            let style = match (Some(oi) == active_option, hidden) {
+                (true, _) => Style::default().fg(pal.peak).bold(),
+                (false, true) => Style::default().fg(pal.hot),
+                (false, false) => Style::default().fg(pal.fg),
+            };
+            let text = format!("{marker} {label}");
+            // pad each cell to a uniform width so the columns line up.
+            let padded = format!("{text:<cell_w$}");
+            spans.push(ratatui::text::Span::styled(padded, style));
+        }
+        lines.push(Line::from(spans));
     }
-    if end < opts.len() {
+    if end_row < total_rows {
         lines.push(Line::styled(
-            format!("  ↓ {} more", opts.len() - end),
+            format!("  ↓ {} more", (total_rows - end_row) * cols),
             Style::default().fg(pal.dim),
         ));
     }
@@ -160,6 +182,18 @@ fn build_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         lines.push(Line::from(""));
     }
     lines
+}
+
+/// width of one grid cell: the longest "[m] label" plus a two-space gutter, so
+/// every column lines up and cells never touch.
+fn grid_cell_width(opts: &[(String, bool)]) -> usize {
+    let longest = opts
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0);
+    // "[✓] " marker prefix (4) + label + 2-space gutter.
+    longest + 4 + 2
 }
 
 fn marker_for(multi: bool, is_all: bool, selected: bool) -> &'static str {
@@ -225,6 +259,40 @@ fn bitrate_options(current: Option<u32>) -> Vec<(String, bool)> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn grid_cell_width_accounts_for_marker_and_gutter() {
+        let opts = vec![
+            ("US (7475)".to_string(), false),
+            ("DE (6009)".to_string(), false),
+        ];
+        // longest label 9 chars + 4 (marker) + 2 (gutter) = 15
+        assert_eq!(grid_cell_width(&opts), 15);
+    }
+
+    #[test]
+    fn country_grid_uses_multiple_columns_when_wide() {
+        use crate::tui::model::BrowseFocus;
+        let mut m = Model::new(
+            crate::tui::theme::Theme::AmberCrt,
+            crate::tui::theme::ColorTier::Truecolor,
+            crate::tui::theme::Glyphs::unicode(),
+        );
+        m.browse.facets.countries = (0..40).map(|i| (format!("C{i:02}"), 100u32)).collect();
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        // wide + short panel: must wrap into several columns, not 40 tall rows.
+        let lines =
+            build_active_group_lines(&m, &crate::tui::theme::Theme::AmberCrt.palette(), 12, 120);
+        // header (tabs+hint+blank)=3; the rest are grid rows, far fewer than 40.
+        let grid_line_count = lines.len() - 3;
+        assert!(
+            grid_line_count < 15,
+            "expected wrapped grid, got {grid_line_count} rows"
+        );
+    }
 
     #[test]
     fn filter_selection_marker_is_check_not_x() {
