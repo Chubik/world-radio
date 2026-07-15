@@ -5,8 +5,6 @@ use crate::tui::model::{
 use radio_audio::Status;
 use std::time::{Duration, Instant};
 
-const VOLUME_STEP: f32 = 0.05;
-
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Quit => {
@@ -185,14 +183,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::RecheckSelected => recheck_selected(model),
-        Msg::VolumeUp => {
-            model.volume = (model.volume + VOLUME_STEP).clamp(0.0, 1.0);
-            vec![Effect::SetVolume(model.volume)]
-        }
-        Msg::VolumeDown => {
-            model.volume = (model.volume - VOLUME_STEP).clamp(0.0, 1.0);
-            vec![Effect::SetVolume(model.volume)]
-        }
         Msg::AudioStatus(s) => audio_status(model, s),
         Msg::FocusToggle => focus_toggle(model),
         Msg::FilterNavNext => filter_nav(model, true),
@@ -855,15 +845,6 @@ mod tests {
     }
 
     #[test]
-    fn volume_up_clamps_at_one_and_emits_set_volume() {
-        let mut m = model();
-        m.volume = 0.98;
-        let fx = update(&mut m, Msg::VolumeUp);
-        assert!((m.volume - 1.0).abs() < 1e-6);
-        assert!(matches!(fx.as_slice(), [Effect::SetVolume(v)] if (*v - 1.0).abs() < 1e-6));
-    }
-
-    #[test]
     fn audio_status_playing_sets_status() {
         let mut m = model();
         update(
@@ -1489,7 +1470,6 @@ mod tests {
             Effect::LoadFacets => "loadfacets",
             Effect::Play(_) => "play",
             Effect::StopAudio => "stop",
-            Effect::SetVolume(_) => "setvol",
             Effect::SetCrossfade(_) => "setcrossfade",
             Effect::ToggleFavorite(_) => "toggle",
             Effect::Blacklist(_) => "blacklist",

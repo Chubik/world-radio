@@ -13,7 +13,7 @@ Fast, keyboard-driven, no browser, no mouse.
   full-text cache. Search by name; filter (multi-select) by country, tag, codec
   and bitrate.
 - **Real-time spectrum** — a live FFT analyzer in block glyphs (bars / mirror /
-  dots / wave) plus a VU-style volume bar.
+  dots / wave).
 - **Crossfade** — the current station keeps playing while the next buffers, then a
   smooth swap (toggleable).
 - **Favorites, history & blocklist**, all as filters — never separate screens.

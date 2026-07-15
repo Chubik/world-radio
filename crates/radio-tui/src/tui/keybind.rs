@@ -15,15 +15,13 @@ pub enum Action {
     EnterSearch,
     OpenSettings,
     OpenHelp,
-    VolumeUp,
-    VolumeDown,
     FocusFilters,
     Quit,
     Update,
 }
 
 impl Action {
-    pub const ALL: [Action; 17] = [
+    pub const ALL: [Action; 15] = [
         Action::Play,
         Action::Stop,
         Action::ToggleFavorite,
@@ -36,8 +34,6 @@ impl Action {
         Action::EnterSearch,
         Action::OpenSettings,
         Action::OpenHelp,
-        Action::VolumeUp,
-        Action::VolumeDown,
         Action::FocusFilters,
         Action::Quit,
         Action::Update,
@@ -57,8 +53,6 @@ impl Action {
             Action::EnterSearch => "search",
             Action::OpenSettings => "settings",
             Action::OpenHelp => "help",
-            Action::VolumeUp => "volume up",
-            Action::VolumeDown => "volume down",
             Action::FocusFilters => "filter focus",
             Action::Quit => "quit",
             Action::Update => "update",
@@ -165,8 +159,6 @@ impl Default for Keymap {
         map.insert(Action::EnterSearch, ch('/'));
         map.insert(Action::OpenSettings, ch(','));
         map.insert(Action::OpenHelp, ch('?'));
-        map.insert(Action::VolumeUp, ch(']'));
-        map.insert(Action::VolumeDown, ch('['));
         map.insert(
             Action::FocusFilters,
             KeyChord {

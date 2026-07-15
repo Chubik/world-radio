@@ -135,8 +135,6 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::EnterSearch => Msg::EnterSearch,
         Action::OpenSettings => Msg::OpenSettings,
         Action::OpenHelp => Msg::OpenHelp,
-        Action::VolumeUp => Msg::VolumeUp,
-        Action::VolumeDown => Msg::VolumeDown,
         Action::FocusFilters => Msg::FocusToggle,
         Action::Quit => Msg::Quit,
         Action::Update => Msg::UpdateNow,
