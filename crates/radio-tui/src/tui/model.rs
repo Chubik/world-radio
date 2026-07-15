@@ -438,7 +438,11 @@ mod tests {
 
     #[test]
     fn synced_reflects_key_presence() {
+        // synced() reflects sync_key only, independent of any key on disk;
+        // set both states explicitly rather than relying on Model::new (which
+        // loads the real on-disk key).
         let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.sync_key = None;
         assert!(!m.synced());
         m.sync_key = Some("r4-x".to_string());
         assert!(m.synced());
