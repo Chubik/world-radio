@@ -358,11 +358,18 @@ fn run_effects(
                 let _ = req_tx.send(WorkerReq::RecheckAll);
             }
             Effect::Restart => {
-                // restore the terminal, then re-exec the freshly-written binary.
+                // fully restore the terminal, then REPLACE this process with the
+                // freshly-written binary (exec, not spawn+exit — spawning a
+                // second process that fights for the same tty gives os error 5).
                 let _ = disable_raw_mode();
-                let _ = std::io::stdout().execute(LeaveAlternateScreen);
+                let mut out = std::io::stdout();
+                let _ = out.execute(LeaveAlternateScreen);
+                let _ = out.execute(crossterm::cursor::Show);
                 if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe).spawn();
+                    use std::os::unix::process::CommandExt;
+                    let err = std::process::Command::new(exe).exec();
+                    // exec only returns on failure; fall through to a clean exit.
+                    let _ = err;
                 }
                 std::process::exit(0);
             }
