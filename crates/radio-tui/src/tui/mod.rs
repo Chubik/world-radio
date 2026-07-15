@@ -114,7 +114,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     });
 
     let engine = AudioEngine::spawn()?;
-    engine.set_volume(0.6);
+    engine.set_volume(1.0);
 
     let mut model = Model::new(theme, tier, glyphs);
     model.browse.facets_loading = true;
@@ -340,7 +340,6 @@ fn run_effects(
             }
             Effect::Play(url) => engine.play(&url),
             Effect::StopAudio => engine.stop(),
-            Effect::SetVolume(v) => engine.set_volume(v),
             Effect::SetCrossfade(on) => engine.set_crossfade(on),
             Effect::ToggleFavorite(uuid) => {
                 let _ = req_tx.send(WorkerReq::ToggleFavorite(uuid));
@@ -404,6 +403,9 @@ fn run_effects(
             }
             Effect::SyncDelete => {
                 let _ = req_tx.send(WorkerReq::SyncDelete);
+            }
+            Effect::CheckUpdate => {
+                let _ = req_tx.send(WorkerReq::CheckUpdate);
             }
             Effect::Update(rel) => {
                 let _ = req_tx.send(WorkerReq::Update(rel));

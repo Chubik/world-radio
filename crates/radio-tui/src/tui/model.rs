@@ -236,6 +236,10 @@ pub struct BrowseState {
     pub facets_loading: bool,
     #[allow(dead_code)]
     pub pending_online_search: Option<Instant>,
+    /// type-ahead buffer for jumping to a filter option by typing its name
+    /// (e.g. "in" → India) while a long filter group is focused.
+    #[allow(dead_code)]
+    pub filter_typeahead: String,
 }
 
 impl BrowseState {
@@ -343,7 +347,6 @@ pub struct Model {
     pub tier: ColorTier,
     pub glyphs: Glyphs,
     pub status: Status,
-    pub volume: f32,
     pub now: NowPlaying,
     pub browse: BrowseState,
     pub spectrum_bars: Vec<f32>,
@@ -376,7 +379,6 @@ impl Model {
             tier,
             glyphs,
             status: Status::Idle,
-            volume: 0.6,
             now: NowPlaying::default(),
             browse: BrowseState::default(),
             spectrum_bars: Vec::new(),

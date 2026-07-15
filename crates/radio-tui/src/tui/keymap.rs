@@ -10,7 +10,7 @@ pub fn key_to_msg(model: &Model, ev: KeyEvent) -> Option<Msg> {
         return search_input_key(ev);
     }
     if let BrowseFocus::Filters { .. } = model.browse.focus {
-        if let Some(msg) = filters_key(ev) {
+        if let Some(msg) = filters_key(model, ev) {
             return Some(msg);
         }
     }
@@ -65,15 +65,37 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
     None
 }
 
-fn filters_key(ev: KeyEvent) -> Option<Msg> {
+fn filters_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
+    // arrows always navigate; when a long facet group (country/tag) is focused,
+    // typing letters does type-ahead ("in" → India) instead of firing shortcuts.
     match ev.code {
-        KeyCode::Tab => Some(Msg::FocusToggle),
-        KeyCode::Esc => Some(Msg::FocusToggle),
-        KeyCode::Char('j') | KeyCode::Down => Some(Msg::FilterOptionNext),
-        KeyCode::Char('k') | KeyCode::Up => Some(Msg::FilterOptionPrev),
-        KeyCode::Char('l') | KeyCode::Right => Some(Msg::FilterNavNext),
-        KeyCode::Char('h') | KeyCode::Left => Some(Msg::FilterNavPrev),
-        KeyCode::Enter => Some(Msg::FilterApply),
+        KeyCode::Tab => return Some(Msg::FocusToggle),
+        KeyCode::Esc => return Some(Msg::FocusToggle),
+        KeyCode::Down => return Some(Msg::FilterOptionNext),
+        KeyCode::Up => return Some(Msg::FilterOptionPrev),
+        KeyCode::Right => return Some(Msg::FilterNavNext),
+        KeyCode::Left => return Some(Msg::FilterNavPrev),
+        KeyCode::Enter => return Some(Msg::FilterApply),
+        _ => {}
+    }
+    let typeahead_group = matches!(
+        model.browse.focus,
+        BrowseFocus::Filters { group: 1 | 2, .. }
+    );
+    if typeahead_group {
+        return match ev.code {
+            KeyCode::Backspace => Some(Msg::FilterTypeaheadBackspace),
+            KeyCode::Char(c) if c.is_alphanumeric() => Some(Msg::FilterTypeahead(c)),
+            KeyCode::Char('/') => Some(Msg::EnterSearch),
+            _ => None,
+        };
+    }
+    // short groups keep the vim-style single-key shortcuts.
+    match ev.code {
+        KeyCode::Char('j') => Some(Msg::FilterOptionNext),
+        KeyCode::Char('k') => Some(Msg::FilterOptionPrev),
+        KeyCode::Char('l') => Some(Msg::FilterNavNext),
+        KeyCode::Char('h') => Some(Msg::FilterNavPrev),
         KeyCode::Char('c') => Some(Msg::FilterClear),
         KeyCode::Char('C') => Some(Msg::FilterClearAll),
         KeyCode::Char('/') => Some(Msg::EnterSearch),
@@ -135,8 +157,6 @@ fn action_to_msg(action: crate::tui::keybind::Action) -> Msg {
         Action::EnterSearch => Msg::EnterSearch,
         Action::OpenSettings => Msg::OpenSettings,
         Action::OpenHelp => Msg::OpenHelp,
-        Action::VolumeUp => Msg::VolumeUp,
-        Action::VolumeDown => Msg::VolumeDown,
         Action::FocusFilters => Msg::FocusToggle,
         Action::Quit => Msg::Quit,
         Action::Update => Msg::UpdateNow,

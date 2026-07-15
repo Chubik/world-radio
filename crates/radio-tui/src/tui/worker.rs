@@ -27,6 +27,7 @@ pub enum WorkerReq {
     SyncCreate,
     SyncLogout,
     SyncDelete,
+    CheckUpdate,
     Update(radio_core::update::Release),
     Shutdown,
 }
@@ -150,6 +151,21 @@ pub fn spawn(
                     let _ = radio_core::sync::clear_key();
                     let _ = msg_tx.send(Msg::SyncKeyChanged(None));
                     let _ = msg_tx.send(Msg::Notice("account deleted".into()));
+                }
+                WorkerReq::CheckUpdate => {
+                    // a fresh check so pressing U picks up a release published
+                    // after this session started; downloads immediately if newer.
+                    match radio_core::update::fetch_latest() {
+                        Ok(Some(rel)) => {
+                            let _ = msg_tx.send(Msg::UpdateFound(rel));
+                        }
+                        Ok(None) => {
+                            let _ = msg_tx.send(Msg::UpdateUpToDate);
+                        }
+                        Err(e) => {
+                            let _ = msg_tx.send(Msg::Notice(format!("update check failed: {e}")));
+                        }
+                    }
                 }
                 WorkerReq::Update(rel) => match radio_core::update::apply(&rel) {
                     Ok(()) => {
