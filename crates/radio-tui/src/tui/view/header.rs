@@ -10,10 +10,13 @@ use ratatui::Frame;
 pub const SPECTRUM_H: u16 = 4;
 
 pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
-    let info_h = match model.now.title.is_some() {
-        true => 2,
-        false => 1,
-    };
+    let mut info_h = 2u16;
+    if model.now.title.is_some() {
+        info_h += 1;
+    }
+    if model.notice.is_some() {
+        info_h += 1;
+    }
     let rows = Layout::vertical([Constraint::Length(info_h), Constraint::Min(0)]).split(area);
 
     let top = Layout::horizontal([Constraint::Min(0), Constraint::Length(16)]).split(rows[0]);
@@ -26,7 +29,30 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
 }
 
 fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
-    let title = Span::styled("▌WR · WORLD RADIO", Style::default().fg(pal.peak).bold());
+    // line 1 — system info, muted: brand · sync · version · update indicator.
+    let brand = Span::styled("▌WR · WORLD RADIO", Style::default().fg(pal.dim).bold());
+    let sync_span = match model.synced() {
+        true => Span::styled("  ⊙ synced", Style::default().fg(pal.accent)),
+        false => Span::styled("  ○ local", Style::default().fg(pal.dim)),
+    };
+    let version_span = Span::styled(
+        format!(" · v{}", radio_core::update::current_version()),
+        Style::default().fg(pal.dim),
+    );
+    let update_span = match (&model.pending_update, model.update_applied) {
+        (_, true) => Span::styled(
+            "  ↑ press U to restart",
+            Style::default().fg(pal.accent).bold(),
+        ),
+        (Some(rel), false) => Span::styled(
+            format!("  ↑ v{} available", rel.version),
+            Style::default().fg(pal.accent).bold(),
+        ),
+        (None, false) => Span::raw(""),
+    };
+    let system_line = Line::from(vec![brand, sync_span, version_span, update_span]);
+
+    // line 2 — the content: status · station · meta, bright.
     let state = status_label(model, pal);
     let name = model
         .now
@@ -39,29 +65,15 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
         model.now.codec,
         model.now.bitrate
     );
-    let sync_span = match model.synced() {
-        true => Span::styled(" ⊙ synced", Style::default().fg(pal.accent)),
-        false => Span::styled(" ○ local", Style::default().fg(pal.dim)),
-    };
-    let update_span = match &model.pending_update {
-        None => Span::raw(""),
-        Some(rel) => Span::styled(
-            format!(" ↑ v{} available", rel.version),
-            Style::default().fg(pal.accent).bold(),
-        ),
-    };
-    let line1 = vec![
-        title,
-        Span::raw("  "),
+    let content_line = Line::from(vec![
         state,
         Span::raw("  "),
         Span::styled(name, Style::default().fg(pal.fg).bold()),
         Span::raw("  "),
         Span::styled(meta, Style::default().fg(pal.dim)),
-        sync_span,
-        update_span,
-    ];
-    let mut lines = vec![Line::from(line1)];
+    ]);
+
+    let mut lines = vec![system_line, content_line];
     if let Some(t) = &model.now.title {
         lines.push(Line::from(Span::styled(
             format!("♪ {t}"),

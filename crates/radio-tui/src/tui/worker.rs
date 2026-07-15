@@ -153,11 +153,7 @@ pub fn spawn(
                 }
                 WorkerReq::Update(rel) => match radio_core::update::apply(&rel) {
                     Ok(()) => {
-                        let _ = msg_tx.send(Msg::Notice(format!(
-                            "updated to v{} — restart to apply",
-                            rel.version
-                        )));
-                        let _ = msg_tx.send(Msg::UpdateAvailable(rel.clone()));
+                        let _ = msg_tx.send(Msg::UpdateApplied(rel.version.clone()));
                     }
                     Err(e) => {
                         crate::log_warn!("worker: update failed: {e}");
