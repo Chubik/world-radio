@@ -22,13 +22,10 @@ pub fn view(model: &Model, frame: &mut Frame) {
         area,
     );
 
-    let info_h = match model.now.title.is_some() {
-        true => 2,
-        false => 1,
-    };
+    let info_h = header::info_height(model);
     let header_h = match model.spectrum_style.is_off() {
         true => info_h,
-        false => info_h.max(header::SPECTRUM_H),
+        false => info_h + header::SPECTRUM_H,
     };
     let rows = Layout::vertical([
         Constraint::Length(header_h),

@@ -9,14 +9,21 @@ use ratatui::Frame;
 
 pub const SPECTRUM_H: u16 = 4;
 
-pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
-    let mut info_h = 2u16;
+/// height of the info block (system row + content row, plus optional song and
+/// notice rows). the spectrum, when on, is drawn in SPECTRUM_H rows below this.
+pub fn info_height(model: &Model) -> u16 {
+    let mut h = 2u16;
     if model.now.title.is_some() {
-        info_h += 1;
+        h += 1;
     }
     if model.notice.is_some() {
-        info_h += 1;
+        h += 1;
     }
+    h
+}
+
+pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
+    let info_h = info_height(model);
     let rows = Layout::vertical([Constraint::Length(info_h), Constraint::Min(0)]).split(area);
 
     let top = Layout::horizontal([Constraint::Min(0), Constraint::Length(16)]).split(rows[0]);
