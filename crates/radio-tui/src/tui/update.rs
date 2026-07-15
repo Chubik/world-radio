@@ -1504,6 +1504,7 @@ mod tests {
             Effect::SyncCreate => "synccreate",
             Effect::SyncLogout => "synclogout",
             Effect::SyncDelete => "syncdelete",
+            Effect::CheckUpdate => "checkupdate",
             Effect::Update(_) => "update",
             Effect::Restart => "restart",
         }
