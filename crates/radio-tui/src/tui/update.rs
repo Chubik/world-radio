@@ -213,19 +213,25 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.pending_update = Some(rel);
             vec![]
         }
-        Msg::UpdateNow => match model.pending_update.clone() {
-            None => {
+        Msg::UpdateNow => match (model.update_applied, model.pending_update.clone()) {
+            (true, _) => vec![Effect::Restart],
+            (false, Some(rel)) => {
+                model.notice = Some("↓ downloading…".to_string());
+                vec![Effect::Update(rel)]
+            }
+            (false, None) => {
                 model.notice = Some(format!(
                     "already up to date (v{})",
                     radio_core::update::current_version()
                 ));
                 vec![]
             }
-            Some(rel) => {
-                model.notice = Some(format!("updating to v{}…", rel.version));
-                vec![Effect::Update(rel)]
-            }
         },
+        Msg::UpdateApplied(version) => {
+            model.update_applied = true;
+            model.notice = Some(format!("✓ updated to v{version} — press U to restart"));
+            vec![]
+        }
     }
 }
 
@@ -1488,6 +1494,7 @@ mod tests {
             Effect::SyncLogout => "synclogout",
             Effect::SyncDelete => "syncdelete",
             Effect::Update(_) => "update",
+            Effect::Restart => "restart",
         }
     }
 }

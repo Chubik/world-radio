@@ -357,6 +357,15 @@ fn run_effects(
             Effect::RecheckAll => {
                 let _ = req_tx.send(WorkerReq::RecheckAll);
             }
+            Effect::Restart => {
+                // restore the terminal, then re-exec the freshly-written binary.
+                let _ = disable_raw_mode();
+                let _ = std::io::stdout().execute(LeaveAlternateScreen);
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+                std::process::exit(0);
+            }
             Effect::RecordHistory(uuid) => {
                 let _ = req_tx.send(WorkerReq::RecordHistory(uuid));
             }
