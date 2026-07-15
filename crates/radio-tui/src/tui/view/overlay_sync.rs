@@ -2,7 +2,7 @@ use crate::tui::model::Model;
 use crate::tui::theme::Palette;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
@@ -22,8 +22,14 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
             lines.push(Line::from(""));
             lines.push(Line::from(format!("key: {key}")));
             lines.push(Line::from(""));
+            // the qr must be dark-on-light with real contrast regardless of theme —
+            // rendering it in the accent colour on a dark bg is unscannable. force
+            // black modules on a white ground so any phone camera locks onto it.
+            let qr_style = Style::default()
+                .fg(ratatui::style::Color::Black)
+                .bg(ratatui::style::Color::White);
             for row in qr_lines(key) {
-                lines.push(Line::from(row));
+                lines.push(Line::from(Span::styled(row, qr_style)));
             }
             lines.push(Line::from(""));
             lines.push(Line::from("  [c] copy   [r] re-sync"));
@@ -44,12 +50,15 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
 }
 
 fn qr_lines(key: &str) -> Vec<String> {
-    let code = match qrcode::QrCode::with_error_correction_level(key, qrcode::EcLevel::L) {
+    // medium error-correction and a full 4-module quiet zone — scanning a qr off
+    // a monitor is unforgiving, and a 1-module margin with L-level correction is
+    // why phone cameras fail to lock onto it.
+    let code = match qrcode::QrCode::with_error_correction_level(key, qrcode::EcLevel::M) {
         Err(_) => return Vec::new(),
         Ok(c) => c,
     };
     let width = code.width();
-    let quiet = 1;
+    let quiet = 4;
     let side = width + quiet * 2;
     let dark: Vec<Vec<bool>> = code
         .to_colors()
@@ -61,28 +70,26 @@ fn qr_lines(key: &str) -> Vec<String> {
             padded
         })
         .collect();
-    let is_dark = |r: i64, c: usize| -> bool {
-        match r < quiet as i64 || r >= (width + quiet) as i64 {
+    let is_dark = |r: usize, c: usize| -> bool {
+        match r < quiet || r >= width + quiet {
             true => false,
-            false => dark[(r - quiet as i64) as usize][c],
+            false => dark[r - quiet][c],
         }
     };
+    // one text row per module row, each module two full blocks wide — half-block
+    // glyphs leave vertical line gaps between rows that break the scan; solid rows
+    // keep the modules connected. two columns per module compensates for narrow cells.
     let mut lines = Vec::new();
-    let mut r = 0i64;
-    while r < side as i64 {
+    for r in 0..side {
         let mut line = String::new();
         for c in 0..side {
-            let top = is_dark(r, c);
-            let bot = is_dark(r + 1, c);
-            line.push(match (top, bot) {
-                (true, true) => '█',
-                (true, false) => '▀',
-                (false, true) => '▄',
-                (false, false) => ' ',
-            });
+            let cell = match is_dark(r, c) {
+                true => "██",
+                false => "  ",
+            };
+            line.push_str(cell);
         }
         lines.push(line);
-        r += 2;
     }
     lines
 }

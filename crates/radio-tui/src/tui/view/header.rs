@@ -48,7 +48,7 @@ fn info_lines(model: &Model, pal: &Palette) -> Vec<Line<'static>> {
     );
     let update_span = match (&model.pending_update, model.update_applied) {
         (_, true) => Span::styled(
-            "  ↑ press U to close",
+            "  ↑ press U to restart",
             Style::default().fg(pal.accent).bold(),
         ),
         (Some(rel), false) => Span::styled(
