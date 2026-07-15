@@ -405,6 +405,9 @@ fn run_effects(
             Effect::SyncDelete => {
                 let _ = req_tx.send(WorkerReq::SyncDelete);
             }
+            Effect::CheckUpdate => {
+                let _ = req_tx.send(WorkerReq::CheckUpdate);
+            }
             Effect::Update(rel) => {
                 let _ = req_tx.send(WorkerReq::Update(rel));
             }
