@@ -229,7 +229,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         },
         Msg::UpdateApplied(version) => {
             model.update_applied = true;
-            model.notice = Some(format!("✓ updated to v{version} — press U to close"));
+            model.notice = Some(format!("✓ updated to v{version} — press U to restart"));
             vec![]
         }
     }
