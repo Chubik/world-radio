@@ -24,11 +24,11 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     let info_h = info_height(model);
     let rows = Layout::vertical([Constraint::Length(info_h), Constraint::Min(0)]).split(area);
 
-    let top = Layout::horizontal([Constraint::Min(0), Constraint::Length(16)]).split(rows[0]);
-    frame.render_widget(Paragraph::new(info_lines(model, pal, top[0].width)), top[0]);
+    // the info block spans the full width now that the volume meter is gone —
+    // playback runs at full level and volume is controlled by the system mixer.
     frame.render_widget(
-        Paragraph::new(volume_label(model)).style(Style::default().fg(pal.accent).bold()),
-        top[1],
+        Paragraph::new(info_lines(model, pal, rows[0].width)),
+        rows[0],
     );
     render_spectrum(model, pal, frame, rows[1]);
 }
@@ -134,14 +134,6 @@ fn status_label(model: &Model, pal: &Palette) -> Span<'static> {
         Status::Error(_) => Span::styled("✗ ERROR", Style::default().fg(pal.err)),
         Status::Idle => Span::styled("■ IDLE", Style::default().fg(pal.dim)),
     }
-}
-
-fn volume_label(model: &Model) -> String {
-    let pct = (model.volume.clamp(0.0, 1.0) * 100.0) as u16;
-    let bars = (pct / 10).min(10) as usize;
-    let filled = "█".repeat(bars);
-    let empty = "░".repeat(10 - bars);
-    format!("{filled}{empty} {pct:>3}%")
 }
 
 fn render_spectrum(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
