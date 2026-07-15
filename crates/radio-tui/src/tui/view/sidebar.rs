@@ -89,10 +89,11 @@ fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(tabs));
-    lines.push(Line::styled(
-        "← → switch group",
-        Style::default().fg(pal.dim),
-    ));
+    let hint = match active_group == 1 {
+        true => "← → group · ↵ filter · x hide country",
+        false => "← → switch group · ↵ apply",
+    };
+    lines.push(Line::styled(hint, Style::default().fg(pal.dim)));
     lines.push(Line::from(""));
 
     let (_, opts, multi) = &groups[active_group];
@@ -114,9 +115,13 @@ fn build_active_group_lines(model: &Model, pal: &Palette, height: usize) -> Vec<
     }
     for (oi, (label, selected)) in opts.iter().enumerate().take(end).skip(start) {
         let marker = marker_for(*multi, oi == 0, *selected);
-        let row_style = match Some(oi) == active_option {
-            true => Style::default().fg(pal.peak).bold(),
-            false => Style::default().fg(pal.fg),
+        // a hidden country (label carries ✕) renders in the hot colour so it's
+        // clearly "hidden", distinct from a checkbox filter selection.
+        let hidden = label.contains('✕');
+        let row_style = match (Some(oi) == active_option, hidden) {
+            (true, _) => Style::default().fg(pal.peak).bold(),
+            (false, true) => Style::default().fg(pal.hot),
+            (false, false) => Style::default().fg(pal.fg),
         };
         lines.push(Line::styled(format!("{marker} {label}"), row_style));
     }
@@ -199,7 +204,7 @@ fn group_options(model: &Model, group: usize, facets: &[(String, u32)]) -> Vec<(
                 .iter()
                 .any(|c| c.eq_ignore_ascii_case(v));
         let label = match excluded {
-            true => format!("{v} ({count}) ✕"),
+            true => format!("{v} ({count})  ✕ hidden"),
             false => format!("{v} ({count})"),
         };
         out.push((label, f.group_selected(group, v)));
