@@ -64,29 +64,38 @@ fn qr_rows(key: &str) -> Vec<Line<'static>> {
             padded
         })
         .collect();
-    let is_dark = |r: usize, c: usize| -> bool {
-        match r < quiet || r >= width + quiet {
+    let is_dark = |r: i64, c: usize| -> bool {
+        match r < quiet as i64 || r >= (width + quiet) as i64 {
             true => false,
-            false => dark[r - quiet][c],
+            false => dark[(r - quiet as i64) as usize][c],
         }
     };
-    // draw each module as two blank spaces coloured by BACKGROUND, not with block
-    // glyphs — block glyphs anti-alias to grey and leave gaps, which is why cameras
-    // could not read it. spaces on a bg colour are clean solid squares. two spaces
-    // per module keep the aspect roughly square against narrow terminal cells.
-    let black = Style::default().bg(Color::Black);
-    let white = Style::default().bg(Color::White);
+    // half-block rendering: two vertically-stacked modules per character cell via
+    // ▀ ▄ █, so a module stays roughly square against the ~1:2 terminal cell and the
+    // whole code is compact. crucially, set BOTH fg and bg to exact rgb black/white
+    // (not named colours, which map to the terminal palette where "white" is often
+    // grey) so the finder patterns have the hard contrast a phone scanner needs.
+    let fg_dark = Color::Rgb(0, 0, 0);
+    let bg_light = Color::Rgb(255, 255, 255);
+    // each output line covers two module rows (top = r, bottom = r+1).
     let mut rows = Vec::new();
-    for r in 0..side {
+    let mut r = 0i64;
+    while r < side as i64 {
         let mut spans: Vec<Span> = Vec::new();
         for c in 0..side {
-            let style = match is_dark(r, c) {
-                true => black,
-                false => white,
+            let top = is_dark(r, c);
+            let bot = is_dark(r + 1, c);
+            // ▀ paints the top half in fg, bottom in bg; ▄ the reverse; █/space full.
+            let (glyph, fg, bg) = match (top, bot) {
+                (true, true) => ("█", fg_dark, bg_light),
+                (true, false) => ("▀", fg_dark, bg_light),
+                (false, true) => ("▄", fg_dark, bg_light),
+                (false, false) => (" ", fg_dark, bg_light),
             };
-            spans.push(Span::styled("  ", style));
+            spans.push(Span::styled(glyph, Style::default().fg(fg).bg(bg)));
         }
         rows.push(Line::from(spans));
+        r += 2;
     }
     rows
 }
