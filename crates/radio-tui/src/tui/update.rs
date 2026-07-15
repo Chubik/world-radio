@@ -418,12 +418,11 @@ fn toggle_favorite_selected(model: &mut Model) -> Vec<Effect> {
 }
 
 const SETTINGS_THEME_ROW: usize = 0;
-const SETTINGS_GLYPH_ROW: usize = 1;
-const SETTINGS_CROSSFADE_ROW: usize = 2;
-const SETTINGS_SPECTRUM_ROW: usize = 3;
-const SETTINGS_KEYBIND_ROW: usize = 4;
-const SETTINGS_DIVISOR_ROW: usize = 5;
-const SETTINGS_ROW_COUNT: usize = 6;
+const SETTINGS_CROSSFADE_ROW: usize = 1;
+const SETTINGS_SPECTRUM_ROW: usize = 2;
+const SETTINGS_KEYBIND_ROW: usize = 3;
+const SETTINGS_DIVISOR_ROW: usize = 4;
+const SETTINGS_ROW_COUNT: usize = 5;
 
 fn settings_nav(model: &mut Model, down: bool) {
     model.settings_cursor = match down {
@@ -461,7 +460,6 @@ fn capture_key(model: &mut Model, chord: crate::tui::keybind::KeyChord) {
 fn settings_toggle(model: &mut Model) -> Vec<Effect> {
     match model.settings_cursor {
         SETTINGS_THEME_ROW => model.theme = model.theme.next(),
-        SETTINGS_GLYPH_ROW => model.glyphs.emoji_flags = !model.glyphs.emoji_flags,
         SETTINGS_CROSSFADE_ROW => {
             model.crossfade = !model.crossfade;
             return vec![Effect::SetCrossfade(model.crossfade)];

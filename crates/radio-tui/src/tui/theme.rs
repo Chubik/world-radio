@@ -351,29 +351,24 @@ impl Glyphs {
         if code.len() != 2 || !code.chars().all(|c| c.is_ascii_alphabetic()) {
             return "  ".to_string();
         }
-        if self.emoji_flags {
-            flag_emoji(code).unwrap_or_else(|| format!("[{}]", code.to_uppercase()))
-        } else {
-            format!("[{}]", code.to_uppercase())
-        }
-    }
-}
-
-fn flag_emoji(code: &str) -> Option<String> {
-    let code = code.trim();
-    match code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic()) {
-        false => None,
-        true => Some(
-            code.to_uppercase()
-                .chars()
-                .map(|c| char::from_u32(0x1F1E6 + (c as u32 - 'A' as u32)).unwrap())
-                .collect(),
-        ),
+        // always a fixed-width text code: flag emoji render inconsistently across
+        // terminals (as tofu boxes or double-width) and desync the column layout.
+        format!("[{}]", code.to_uppercase())
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn country_is_fixed_width_text_code_not_emoji() {
+        // flag emoji render inconsistently and desync columns; a text code is
+        // always 4 cols and scannable in every terminal.
+        assert_eq!(Glyphs::unicode().country("de"), "[DE]");
+        assert_eq!(Glyphs::unicode().country("US"), "[US]");
+        assert_eq!(Glyphs::unicode().country(""), "  ");
+    }
+
     use super::*;
 
     #[test]
