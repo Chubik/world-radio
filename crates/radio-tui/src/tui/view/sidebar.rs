@@ -105,16 +105,29 @@ fn build_active_group_lines(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(tabs));
-    // colour legend, not markers: accent = showing only, red = hidden.
-    let hint_line = match active_group == 1 {
-        true => Line::from(vec![
-            ratatui::text::Span::styled("↵ ", Style::default().fg(pal.dim)),
-            ratatui::text::Span::styled("show only", Style::default().fg(pal.accent)),
+    // colour legend, not markers: accent = showing only, red = hidden. when the
+    // user is typing to jump to a country/tag, show the type-ahead buffer instead.
+    let typing = matches!(active_group, 1 | 2) && !model.browse.filter_typeahead.is_empty();
+    let hint_line = match (active_group, typing) {
+        (_, true) => Line::from(vec![
+            ratatui::text::Span::styled("type: ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled(
+                model.browse.filter_typeahead.clone(),
+                Style::default().fg(pal.peak).bold(),
+            ),
+            ratatui::text::Span::styled("  (⌫ clear)", Style::default().fg(pal.dim)),
+        ]),
+        (1, false) => Line::from(vec![
+            ratatui::text::Span::styled("type to find · ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled("↵ show only", Style::default().fg(pal.accent)),
             ratatui::text::Span::styled(" · x ", Style::default().fg(pal.dim)),
             ratatui::text::Span::styled("hide", Style::default().fg(pal.hot)),
-            ratatui::text::Span::styled(" · ← → group", Style::default().fg(pal.dim)),
         ]),
-        false => Line::styled("← → switch group · ↵ apply", Style::default().fg(pal.dim)),
+        (2, false) => Line::styled(
+            "type to find · ↵ show only · ← → group",
+            Style::default().fg(pal.dim),
+        ),
+        _ => Line::styled("← → switch group · ↵ apply", Style::default().fg(pal.dim)),
     };
     lines.push(hint_line);
     lines.push(Line::from(""));

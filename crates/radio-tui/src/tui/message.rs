@@ -55,6 +55,8 @@ pub enum Msg {
     FilterApply,
     FilterClear,
     FilterClearAll,
+    FilterTypeahead(char),
+    FilterTypeaheadBackspace,
     FacetsLoaded(radio_core::catalog::Facets),
     Tick(std::time::Instant),
     MirrorPlay(radio_core::mirror::MirrorEvent),
