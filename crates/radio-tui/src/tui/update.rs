@@ -5,8 +5,6 @@ use crate::tui::model::{
 use radio_audio::Status;
 use std::time::{Duration, Instant};
 
-const VOLUME_STEP: f32 = 0.05;
-
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
     match msg {
         Msg::Quit => {
@@ -185,14 +183,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::RecheckSelected => recheck_selected(model),
-        Msg::VolumeUp => {
-            model.volume = (model.volume + VOLUME_STEP).clamp(0.0, 1.0);
-            vec![Effect::SetVolume(model.volume)]
-        }
-        Msg::VolumeDown => {
-            model.volume = (model.volume - VOLUME_STEP).clamp(0.0, 1.0);
-            vec![Effect::SetVolume(model.volume)]
-        }
         Msg::AudioStatus(s) => audio_status(model, s),
         Msg::FocusToggle => focus_toggle(model),
         Msg::FilterNavNext => filter_nav(model, true),
@@ -202,6 +192,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::FilterApply => filter_apply(model),
         Msg::FilterClear => filter_clear(model, false),
         Msg::FilterClearAll => filter_clear(model, true),
+        Msg::FilterTypeahead(c) => {
+            filter_typeahead(model, Some(c));
+            vec![]
+        }
+        Msg::FilterTypeaheadBackspace => {
+            filter_typeahead(model, None);
+            vec![]
+        }
         Msg::FacetsLoaded(f) => {
             model.browse.facets = f;
             model.browse.facets_loading = false;
@@ -220,13 +218,26 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 vec![Effect::Update(rel)]
             }
             (false, None) => {
-                model.notice = Some(format!(
-                    "already up to date (v{})",
-                    radio_core::update::current_version()
-                ));
-                vec![]
+                // no update was known at startup — check fresh instead of wrongly
+                // claiming up-to-date, since a release may have shipped since then.
+                model.notice = Some("checking for updates…".to_string());
+                vec![Effect::CheckUpdate]
             }
         },
+        Msg::UpdateFound(rel) => {
+            // fresh check found a newer version — download it right away, since the
+            // user pressed U to update, not merely to check.
+            model.pending_update = Some(rel.clone());
+            model.notice = Some("↓ downloading…".to_string());
+            vec![Effect::Update(rel)]
+        }
+        Msg::UpdateUpToDate => {
+            model.notice = Some(format!(
+                "already up to date (v{})",
+                radio_core::update::current_version()
+            ));
+            vec![]
+        }
         Msg::UpdateApplied(version) => {
             model.update_applied = true;
             model.notice = Some(format!("✓ updated to v{version} — press U to restart"));
@@ -542,6 +553,7 @@ fn focus_toggle(model: &mut Model) -> Vec<Effect> {
 }
 
 fn filter_nav(model: &mut Model, next: bool) -> Vec<Effect> {
+    model.browse.filter_typeahead.clear();
     if let BrowseFocus::Filters { group, .. } = model.browse.focus {
         let g = match next {
             true => (group + 1) % 5,
@@ -556,6 +568,7 @@ fn filter_nav(model: &mut Model, next: bool) -> Vec<Effect> {
 }
 
 fn filter_option_nav(model: &mut Model, next: bool) -> Vec<Effect> {
+    model.browse.filter_typeahead.clear();
     if let BrowseFocus::Filters { group, option } = model.browse.focus {
         let max = group_option_count(model, group);
         let new_option = match next {
@@ -568,6 +581,41 @@ fn filter_option_nav(model: &mut Model, next: bool) -> Vec<Effect> {
         };
     }
     vec![]
+}
+
+/// type-ahead within a long filter group: append `c` (or backspace when None) to
+/// the buffer and jump the cursor to the first option whose value starts with it,
+/// e.g. typing "in" lands on India. only the country and tag groups (which have
+/// facet values) participate.
+fn filter_typeahead(model: &mut Model, c: Option<char>) {
+    let BrowseFocus::Filters { group, .. } = model.browse.focus else {
+        return;
+    };
+    let facets: &[(String, u32)] = match group {
+        1 => &model.browse.facets.countries,
+        2 => &model.browse.facets.tags,
+        _ => return,
+    };
+    match c {
+        Some(c) => model.browse.filter_typeahead.push(c.to_ascii_lowercase()),
+        None => {
+            model.browse.filter_typeahead.pop();
+        }
+    }
+    let needle = model.browse.filter_typeahead.clone();
+    if needle.is_empty() {
+        return;
+    }
+    if let Some(idx) = facets
+        .iter()
+        .position(|(v, _)| v.to_ascii_lowercase().starts_with(&needle))
+    {
+        // option index is facet index + 1 because option 0 is the "all" row.
+        model.browse.focus = BrowseFocus::Filters {
+            group,
+            option: idx + 1,
+        };
+    }
 }
 
 fn group_option_count(model: &Model, group: usize) -> usize {
@@ -679,6 +727,35 @@ fn tick(model: &mut Model, now: Instant) -> Vec<Effect> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn filter_typeahead_jumps_to_first_matching_country() {
+        let mut m = model();
+        m.browse.facets.countries =
+            vec![("US".into(), 100), ("IN".into(), 50), ("INDIA".into(), 40)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 0,
+        };
+        // typing "in" lands on the first country starting with it (IN, option 2).
+        update(&mut m, Msg::FilterTypeahead('i'));
+        update(&mut m, Msg::FilterTypeahead('n'));
+        assert_eq!(
+            m.browse.focus,
+            BrowseFocus::Filters {
+                group: 1,
+                option: 2
+            }
+        );
+        assert_eq!(m.browse.filter_typeahead, "in");
+        // backspace shortens the buffer.
+        update(&mut m, Msg::FilterTypeaheadBackspace);
+        assert_eq!(m.browse.filter_typeahead, "i");
+        // moving the cursor clears the buffer.
+        update(&mut m, Msg::FilterOptionNext);
+        assert_eq!(m.browse.filter_typeahead, "");
+    }
+
     use super::*;
     use crate::tui::model::{Model, Overlay, RowState, StationRow, StatusFilter};
     use crate::tui::theme::{ColorTier, Glyphs, Theme};
@@ -839,15 +916,6 @@ mod tests {
         assert!(kinds.contains(&"savestate"));
         assert!(!kinds.contains(&"loadfav"));
         assert!(m.browse.rows[0].favorite);
-    }
-
-    #[test]
-    fn volume_up_clamps_at_one_and_emits_set_volume() {
-        let mut m = model();
-        m.volume = 0.98;
-        let fx = update(&mut m, Msg::VolumeUp);
-        assert!((m.volume - 1.0).abs() < 1e-6);
-        assert!(matches!(fx.as_slice(), [Effect::SetVolume(v)] if (*v - 1.0).abs() < 1e-6));
     }
 
     #[test]
@@ -1476,7 +1544,6 @@ mod tests {
             Effect::LoadFacets => "loadfacets",
             Effect::Play(_) => "play",
             Effect::StopAudio => "stop",
-            Effect::SetVolume(_) => "setvol",
             Effect::SetCrossfade(_) => "setcrossfade",
             Effect::ToggleFavorite(_) => "toggle",
             Effect::Blacklist(_) => "blacklist",
@@ -1491,6 +1558,7 @@ mod tests {
             Effect::SyncCreate => "synccreate",
             Effect::SyncLogout => "synclogout",
             Effect::SyncDelete => "syncdelete",
+            Effect::CheckUpdate => "checkupdate",
             Effect::Update(_) => "update",
             Effect::Restart => "restart",
         }
