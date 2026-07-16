@@ -42,6 +42,9 @@ pub fn render(pal: &Palette, frame: &mut Frame, area: Rect) {
         Line::from("  ,         settings (toggle)"),
         Line::from("  ?         help (toggle)"),
         Line::from("  esc / q   dismiss / quit"),
+        Line::from(""),
+        Line::from("FEEDBACK"),
+        Line::from("  ✉ ideas or bugs? support@r4dio.net"),
     ];
     frame.render_widget(
         Paragraph::new(lines)
