@@ -26,6 +26,7 @@ import kotlinx.coroutines.withContext
 class SyncActivity : ComponentActivity() {
     private val favStore by lazy { FavStore(this) }
     private val syncClient = SyncClient()
+    private var creating = false
 
     private val scanner = registerForActivityResult(ScanContract()) { result ->
         val contents = result.contents
@@ -68,13 +69,22 @@ class SyncActivity : ComponentActivity() {
                 true -> lifecycleScope.launch { favStore.setSyncKey(k); render(); toast("key set") }
             }
         }
-        findViewById<View>(R.id.create).setOnClickListener {
+        findViewById<View>(R.id.create).setOnClickListener { view ->
+            // guard against double-taps: each POST /account mints a NEW account, so
+            // a second tap while the first is in flight would create an orphan.
+            if (creating) {
+                return@setOnClickListener
+            }
+            creating = true
+            view.isEnabled = false
             lifecycleScope.launch {
                 val k = withContext(Dispatchers.IO) { syncClient.createAccount() }
                 when (k) {
                     null -> toast("could not create account")
                     else -> { favStore.setSyncKey(k); render(); toast("account created") }
                 }
+                creating = false
+                view.isEnabled = true
             }
         }
         findViewById<View>(R.id.scan).setOnClickListener {
