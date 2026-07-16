@@ -1,28 +1,134 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:orientation="vertical" android:background="@color/panel" android:padding="20dp">
-    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:text="r4dio sync" android:textColor="@color/bright" android:textSize="18sp" android:textStyle="bold" />
-    <EditText android:id="@+id/key_input" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:hint="paste key r4-..." android:textColor="@color/bright" android:textColorHint="@color/dim"
-        android:layout_marginTop="12dp" android:inputType="textNoSuggestions" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:layout_marginTop="8dp">
-        <Button android:id="@+id/use_key" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="use key" />
-        <Button android:id="@+id/create" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="create new" />
-        <Button android:id="@+id/scan" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="scan qr" />
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg">
+
+    <!-- pinned app-bar with an always-visible DONE close button -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="20dp" android:paddingEnd="14dp"
+        android:background="@color/bg">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:text="r4dio sync"
+            android:textColor="@color/bright" android:textSize="16sp" android:textStyle="bold"
+            android:fontFamily="monospace" />
+        <TextView android:id="@+id/done" android:layout_width="wrap_content" android:layout_height="36dp"
+            android:gravity="center" android:text="✕ DONE"
+            android:paddingStart="14dp" android:paddingEnd="14dp"
+            android:textColor="@color/amber" android:textSize="12sp" android:textStyle="bold"
+            android:fontFamily="monospace" android:background="@drawable/btn_close" />
     </LinearLayout>
-    <TextView android:id="@+id/key_shown" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textColor="@color/amber_hi" android:textIsSelectable="true" android:layout_marginTop="14dp"
-        android:fontFamily="monospace" android:visibility="gone" />
-    <Button android:id="@+id/copy" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="copy" android:visibility="gone" />
-    <ImageView android:id="@+id/qr" android:layout_width="200dp" android:layout_height="200dp"
-        android:layout_gravity="center" android:layout_marginTop="12dp" android:visibility="gone" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:layout_marginTop="14dp">
-        <Button android:id="@+id/logout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="log out" android:visibility="gone" />
-        <Button android:id="@+id/delete" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="delete account" android:visibility="gone" />
-    </LinearLayout>
-    <Button android:id="@+id/excluded_countries" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="hide countries" />
+
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/rule" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="20dp">
+
+            <!-- ===== STATE A — not linked ===== -->
+            <LinearLayout android:id="@+id/state_a" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical">
+
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Sync your favourites, blocked and hidden countries across devices."
+                    android:textColor="@color/dim" android:textSize="13sp" android:lineSpacingExtra="2dp" />
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp" android:text="SYNC KEY"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
+                    android:letterSpacing="0.18" />
+
+                <EditText android:id="@+id/key_input" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:hint="paste key r4-…"
+                    android:textColor="@color/bright" android:textColorHint="@color/dim"
+                    android:fontFamily="monospace" android:textSize="12sp"
+                    android:background="@drawable/field_key" android:padding="14dp"
+                    android:inputType="textNoSuggestions" />
+
+                <TextView android:id="@+id/use_key" android:layout_width="match_parent" android:layout_height="50dp"
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="✓  USE KEY"
+                    android:textColor="@color/on_amber" android:textSize="13sp" android:textStyle="bold"
+                    android:fontFamily="monospace" android:background="@drawable/btn_filled" />
+
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="OR"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
+                    android:letterSpacing="0.18" />
+
+                <TextView android:id="@+id/create" android:layout_width="match_parent" android:layout_height="50dp"
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="+  CREATE NEW"
+                    android:textColor="@color/amber" android:textSize="13sp" android:textStyle="bold"
+                    android:fontFamily="monospace" android:background="@drawable/btn_outline" />
+
+                <TextView android:id="@+id/scan" android:layout_width="match_parent" android:layout_height="50dp"
+                    android:layout_marginTop="10dp" android:gravity="center" android:text="SCAN QR"
+                    android:textColor="@color/amber" android:textSize="13sp" android:textStyle="bold"
+                    android:fontFamily="monospace" android:background="@drawable/btn_outline" />
+            </LinearLayout>
+
+            <!-- ===== STATE B — linked ===== -->
+            <LinearLayout android:id="@+id/state_b" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="⊙ SYNCED" android:gravity="center"
+                    android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+                    android:textColor="@color/amber" android:textSize="12sp" android:textStyle="bold"
+                    android:fontFamily="monospace" android:background="@drawable/pill_synced" />
+
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp" android:text="YOUR SYNC KEY"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
+                    android:letterSpacing="0.18" />
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:layout_marginTop="8dp"
+                    android:background="@drawable/card_panel" android:padding="16dp">
+                    <TextView android:id="@+id/key_shown" android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:textColor="@color/amber_hi" android:textIsSelectable="true"
+                        android:fontFamily="monospace" android:textSize="12sp" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
+                        <TextView android:id="@+id/copy" android:layout_width="wrap_content" android:layout_height="44dp"
+                            android:gravity="center" android:text="⧉ COPY"
+                            android:paddingStart="16dp" android:paddingEnd="16dp"
+                            android:textColor="@color/bright" android:textSize="12sp" android:textStyle="bold"
+                            android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp" android:text="tap to select · copy to clipboard"
+                            android:textColor="@color/dim" android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- QR on a light card with quiet-zone padding so it scans -->
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:gravity="center" android:layout_marginTop="18dp"
+                    android:background="@drawable/card_qr_light" android:padding="16dp">
+                    <ImageView android:id="@+id/qr" android:layout_width="200dp" android:layout_height="200dp" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp" android:text="SCAN ON ANOTHER DEVICE"
+                        android:textColor="#6E5430" android:textSize="10sp" android:fontFamily="monospace"
+                        android:letterSpacing="0.18" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:layout_marginTop="18dp">
+                    <TextView android:id="@+id/logout" android:layout_width="0dp" android:layout_height="50dp"
+                        android:layout_weight="1" android:gravity="center" android:text="⇥ LOG OUT"
+                        android:textColor="@color/bright" android:textSize="13sp" android:textStyle="bold"
+                        android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+                    <TextView android:id="@+id/delete" android:layout_width="0dp" android:layout_height="50dp"
+                        android:layout_weight="1" android:layout_marginStart="10dp" android:gravity="center"
+                        android:text="🗑 DELETE" android:textColor="@color/danger" android:textSize="13sp" android:textStyle="bold"
+                        android:fontFamily="monospace" android:background="@drawable/btn_danger" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- shared: hide countries, always at the bottom -->
+            <TextView android:id="@+id/excluded_countries" android:layout_width="match_parent" android:layout_height="50dp"
+                android:layout_marginTop="18dp" android:gravity="center" android:text="⊘ HIDE COUNTRIES"
+                android:textColor="@color/bright" android:textSize="13sp" android:textStyle="bold"
+                android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+        </LinearLayout>
+    </ScrollView>
 </LinearLayout>

@@ -5,7 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
-import android.widget.Button
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.TextView
@@ -43,19 +43,32 @@ class SyncActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_sync)
+        applyStatusBarInset()
         wire()
         render()
     }
 
+    // pad the root below the status bar so the app-bar (and its DONE button) isn't
+    // drawn under the clock, which made DONE untappable.
+    private fun applyStatusBarInset() {
+        val root = findViewById<View>(android.R.id.content)
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val top = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars()).top
+            v.setPadding(v.paddingLeft, top, v.paddingRight, v.paddingBottom)
+            insets
+        }
+    }
+
     private fun wire() {
-        findViewById<Button>(R.id.use_key).setOnClickListener {
+        findViewById<View>(R.id.done).setOnClickListener { finish() }
+        findViewById<View>(R.id.use_key).setOnClickListener {
             val k = findViewById<EditText>(R.id.key_input).text.toString().trim()
             when (k.startsWith("r4-")) {
                 false -> toast("invalid key")
                 true -> lifecycleScope.launch { favStore.setSyncKey(k); render(); toast("key set") }
             }
         }
-        findViewById<Button>(R.id.create).setOnClickListener {
+        findViewById<View>(R.id.create).setOnClickListener {
             lifecycleScope.launch {
                 val k = withContext(Dispatchers.IO) { syncClient.createAccount() }
                 when (k) {
@@ -64,7 +77,7 @@ class SyncActivity : ComponentActivity() {
                 }
             }
         }
-        findViewById<Button>(R.id.scan).setOnClickListener {
+        findViewById<View>(R.id.scan).setOnClickListener {
             scanner.launch(
                 ScanOptions()
                     .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
@@ -74,7 +87,7 @@ class SyncActivity : ComponentActivity() {
                     .setPrompt("point at the r4dio qr · back to cancel"),
             )
         }
-        findViewById<Button>(R.id.copy).setOnClickListener {
+        findViewById<View>(R.id.copy).setOnClickListener {
             lifecycleScope.launch {
                 val k = favStore.syncKey() ?: return@launch
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -82,22 +95,24 @@ class SyncActivity : ComponentActivity() {
                 toast("copied")
             }
         }
-        findViewById<Button>(R.id.logout).setOnClickListener {
+        findViewById<View>(R.id.logout).setOnClickListener {
             lifecycleScope.launch { favStore.setSyncKey(null); render(); toast("logged out") }
         }
-        findViewById<Button>(R.id.delete).setOnClickListener {
-            lifecycleScope.launch {
-                val k = favStore.syncKey()
-                when (k) {
-                    null -> {}
-                    else -> {
+        findViewById<View>(R.id.delete).setOnClickListener {
+            AlertDialog.Builder(this@SyncActivity)
+                .setTitle("delete account?")
+                .setMessage("this permanently deletes your sync account on the server. your local favourites stay on this device.")
+                .setPositiveButton("delete") { _, _ ->
+                    lifecycleScope.launch {
+                        val k = favStore.syncKey() ?: return@launch
                         withContext(Dispatchers.IO) { syncClient.delete(k) }
                         favStore.setSyncKey(null); render(); toast("account deleted")
                     }
                 }
-            }
+                .setNegativeButton("cancel", null)
+                .show()
         }
-        findViewById<Button>(R.id.excluded_countries).setOnClickListener {
+        findViewById<View>(R.id.excluded_countries).setOnClickListener {
             lifecycleScope.launch {
                 val all = countryChoices()
                 val current = favStore.currentExcluded()
@@ -141,30 +156,23 @@ class SyncActivity : ComponentActivity() {
         lifecycleScope.launch {
             val key = favStore.syncKey()
             val hasKey = key != null
-            findViewById<TextView>(R.id.key_shown).apply {
-                text = key ?: ""
-                visibility = vis(hasKey)
+            // swap whole states rather than toggling each control individually.
+            findViewById<View>(R.id.state_a).visibility = vis(!hasKey)
+            findViewById<View>(R.id.state_b).visibility = vis(hasKey)
+            if (!hasKey) {
+                return@launch
             }
-            findViewById<Button>(R.id.copy).visibility = vis(hasKey)
-            findViewById<Button>(R.id.logout).visibility = vis(hasKey)
-            findViewById<Button>(R.id.delete).visibility = vis(hasKey)
-            val qr = findViewById<ImageView>(R.id.qr)
-            when (hasKey) {
-                false -> qr.visibility = android.view.View.GONE
-                true -> {
-                    // encode with an explicit quiet-zone margin and high error
-                    // correction — without a margin zxing's own scanner fails to
-                    // lock onto the finder patterns even though phone cameras cope.
-                    val hints = mapOf(
-                        EncodeHintType.MARGIN to 2,
-                        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
-                    )
-                    val matrix = MultiFormatWriter().encode(key, BarcodeFormat.QR_CODE, 500, 500, hints)
-                    val bmp = BarcodeEncoder().createBitmap(matrix)
-                    qr.setImageBitmap(bmp)
-                    qr.visibility = android.view.View.VISIBLE
-                }
-            }
+            findViewById<TextView>(R.id.key_shown).text = key
+            // encode with a quiet-zone margin and high error correction — without a
+            // margin zxing's own scanner fails to lock onto the finder patterns even
+            // though phone cameras cope.
+            val hints = mapOf(
+                EncodeHintType.MARGIN to 2,
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H,
+            )
+            val matrix = MultiFormatWriter().encode(key, BarcodeFormat.QR_CODE, 500, 500, hints)
+            val bmp = BarcodeEncoder().createBitmap(matrix)
+            findViewById<ImageView>(R.id.qr).setImageBitmap(bmp)
         }
     }
 
