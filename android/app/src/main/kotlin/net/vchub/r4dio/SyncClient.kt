@@ -17,7 +17,11 @@ data class SyncData(
 
 class SyncClient(
     private val baseUrl: String = "https://r4dio.net",
-    private val client: OkHttpClient = OkHttpClient(),
+    // creating an account is not idempotent — each POST /account mints a new key —
+    // so disable connection-failure retries to avoid minting duplicate accounts.
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
+        .build(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonType = "application/json".toMediaType()
