@@ -44,7 +44,9 @@ fun pickForScope(
 ): Station? =
     when (scope) {
         Scope.ALL -> pickRandom(catalog, userExcluded, rng)
-        Scope.FAVS -> FavLogic.pickFav(favs, rng)
+        // in favs mode, fall back to the full catalog when there are no favourites
+        // yet — otherwise shuffle would return null and playback would just stop.
+        Scope.FAVS -> FavLogic.pickFav(favs, rng) ?: pickRandom(catalog, userExcluded, rng)
     }
 
 class Catalog(private val client: OkHttpClient = OkHttpClient()) {
