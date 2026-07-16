@@ -8,4 +8,7 @@
     <color name="dim">#6E5430</color>
     <color name="bright">#FFF0C0</color>
     <color name="rule">#3A2C17</color>
+    <color name="danger">#D96A55</color>
+    <color name="qr_light">#F4ECD8</color>
+    <color name="on_amber">#241A08</color>
 </resources>
