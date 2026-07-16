@@ -62,6 +62,17 @@ class SyncActivity : ComponentActivity() {
 
     private fun wire() {
         findViewById<View>(R.id.done).setOnClickListener { finish() }
+        findViewById<View>(R.id.feedback).setOnClickListener {
+            val version = runCatching {
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull().orEmpty()
+            val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+                data = android.net.Uri.parse("mailto:support@r4dio.net")
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "r4dio feedback (v$version)")
+            }
+            runCatching { startActivity(intent) }
+                .onFailure { toast("email support@r4dio.net") }
+        }
         findViewById<View>(R.id.use_key).setOnClickListener {
             val k = findViewById<EditText>(R.id.key_input).text.toString().trim()
             when (k.startsWith("r4-")) {
