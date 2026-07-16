@@ -79,8 +79,18 @@ class ShuffleTest {
     }
 
     @Test
-    fun pickForScope_favs_emptyReturnsNull() {
-        assertNull(pickForScope(Scope.FAVS, listOf(st("a", "http://a")), emptyList()))
+    fun pickForScope_favs_emptyFallsBackToCatalog() {
+        // no favourites yet: favs scope must fall back to the full catalog so
+        // shuffle keeps playing instead of stopping.
+        val cat = listOf(st("a", "http://a"))
+        val p = pickForScope(Scope.FAVS, cat, emptyList(), rng = Random(1))
+        assertEquals("a", p?.uuid)
+    }
+
+    @Test
+    fun pickForScope_favs_emptyAndNoCatalogIsNull() {
+        // nothing anywhere to play — still null, no crash.
+        assertNull(pickForScope(Scope.FAVS, emptyList(), emptyList()))
     }
 
     @Test
