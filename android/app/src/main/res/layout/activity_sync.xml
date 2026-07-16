@@ -129,6 +129,12 @@
                 android:layout_marginTop="18dp" android:gravity="center" android:text="⊘ HIDE COUNTRIES"
                 android:textColor="@color/bright" android:textSize="13sp" android:textStyle="bold"
                 android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+
+            <!-- feedback: a plain mailto link, no backend -->
+            <TextView android:id="@+id/feedback" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="24dp" android:gravity="center"
+                android:text="✉ ideas or bugs? support@r4dio.net"
+                android:textColor="@color/dim" android:textSize="12sp" android:fontFamily="monospace" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
