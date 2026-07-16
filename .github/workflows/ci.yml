@@ -78,14 +78,23 @@ jobs:
           echo "version=$next" >> "$GITHUB_OUTPUT"
           echo "last=$last level=$level next=$next"
 
-          # changelog: user-facing feat/fix commits since the last tag, prefixes
-          # stripped. drop chore/ci/style/docs/test/build and release commits.
+          # changelog: turn user-facing feat/fix commits into a human changelog.
+          # commit subjects are written for developers, so we clean them into
+          # release notes automatically — no per-release hand-editing:
+          #   - drop chore/ci/style/docs/test/build and release commits
+          #   - strip the feat/fix(scope): prefix
+          #   - cut the technical tail after " — ", " (", " so ", " to avoid " etc.
+          #     (developers put the "why"/how there; users only need the "what")
+          #   - capitalise the first letter
+          #   - de-duplicate identical lines (a fix split across commits)
           range="v${last}..HEAD"
           git rev-parse -q --verify "v${last}" >/dev/null 2>&1 || range="HEAD"
           notes="$(git log "$range" --no-merges --pretty=%s \
             | grep -E '^(feat|fix)(\([^)]*\))?!?:' \
             | sed -E 's/^(feat|fix)(\([^)]*\))?!?: *//' \
-            | sed 's/^/- /' || true)"
+            | sed -E 's/ (—|-{1,2}|\(| so | to avoid | so that | because | which ).*$//' \
+            | awk '{ $0 = toupper(substr($0,1,1)) substr($0,2); if (!seen[$0]++) print "- " $0 }' \
+            || true)"
           [ -n "$notes" ] || notes="- Maintenance and internal improvements."
           {
             echo "notes<<CHANGELOG_EOF"
