@@ -3357,7 +3357,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radio-audio"
-version = "1.4.5"
+version = "1.4.32"
 dependencies = [
  "anyhow",
  "cpal",
@@ -3370,7 +3370,7 @@ dependencies = [
 
 [[package]]
 name = "radio-core"
-version = "1.4.5"
+version = "1.4.32"
 dependencies = [
  "anyhow",
  "directories",
@@ -3389,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "radio-mini"
-version = "1.4.5"
+version = "1.4.32"
 dependencies = [
  "anyhow",
  "fastrand",
@@ -3404,7 +3404,7 @@ dependencies = [
 
 [[package]]
 name = "radio-tui"
-version = "1.4.5"
+version = "1.4.32"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
