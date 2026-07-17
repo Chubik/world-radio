@@ -167,9 +167,8 @@ fn run_sync() -> anyhow::Result<()> {
 fn union_ids(local: &[String], server: &[String]) -> Vec<String> {
     let mut out = local.to_vec();
     for id in server {
-        match out.contains(id) {
-            true => {}
-            false => out.push(id.clone()),
+        if !out.contains(id) {
+            out.push(id.clone());
         }
     }
     out
@@ -184,12 +183,9 @@ fn merge_on_link(local: SyncData, server: SyncData) -> SyncData {
 }
 
 fn use_key(key: &str) -> anyhow::Result<()> {
-    match sync::is_valid_format(key) {
-        false => {
-            println!("invalid key");
-            return Ok(());
-        }
-        true => {}
+    if !sync::is_valid_format(key) {
+        println!("invalid key");
+        return Ok(());
     }
     sync::store_key(key)?;
     let local = SyncData {
@@ -230,8 +226,16 @@ mod tests {
 
     #[test]
     fn merge_on_link_unions_each_field() {
-        let local = SyncData { favs: vec!["a".into(), "b".into()], blocked: vec![], excluded_countries: vec![] };
-        let server = SyncData { favs: vec!["b".into(), "c".into()], blocked: vec!["x".into()], excluded_countries: vec!["US".into()] };
+        let local = SyncData {
+            favs: vec!["a".into(), "b".into()],
+            blocked: vec![],
+            excluded_countries: vec![],
+        };
+        let server = SyncData {
+            favs: vec!["b".into(), "c".into()],
+            blocked: vec!["x".into()],
+            excluded_countries: vec!["US".into()],
+        };
         let m = merge_on_link(local, server);
         assert_eq!(m.favs, vec!["a".to_string(), "b".into(), "c".into()]);
         assert_eq!(m.blocked, vec!["x".to_string()]);
