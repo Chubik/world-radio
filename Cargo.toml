@@ -3,4 +3,4 @@ resolver = "2"
 members = ["crates/radio-core", "crates/radio-audio", "crates/radio-tui", "crates/radio-mini"]
 
 [workspace.package]
-version = "1.4.5"
+version = "1.4.34"
