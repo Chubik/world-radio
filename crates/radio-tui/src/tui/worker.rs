@@ -218,16 +218,8 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             return;
         }
     };
-    for uuid in &merged.favs {
-        if !catalog.is_favorite(uuid) {
-            catalog.toggle_favorite(uuid);
-        }
-    }
-    for uuid in &merged.blocked {
-        if !catalog.is_blacklisted(uuid) {
-            catalog.toggle_blacklist(uuid);
-        }
-    }
+    catalog.set_favorites(merged.favs.clone());
+    catalog.set_blacklist(merged.blocked.clone());
     catalog.set_excluded_countries(merged.excluded_countries.clone());
     save_all(catalog, paths);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(

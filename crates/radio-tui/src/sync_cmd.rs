@@ -11,6 +11,7 @@ pub enum SyncCmd {
     Status,
     Logout,
     Delete,
+    Use { key: String },
     Run,
 }
 
@@ -20,6 +21,7 @@ pub fn run(cmd: &SyncCmd) -> anyhow::Result<()> {
         SyncCmd::Status => status(),
         SyncCmd::Logout => logout(),
         SyncCmd::Delete => delete(),
+        SyncCmd::Use { key } => use_key(key),
         SyncCmd::Run => run_sync(),
     }
 }
@@ -162,6 +164,50 @@ fn run_sync() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn union_ids(local: &[String], server: &[String]) -> Vec<String> {
+    let mut out = local.to_vec();
+    for id in server {
+        if !out.contains(id) {
+            out.push(id.clone());
+        }
+    }
+    out
+}
+
+fn merge_on_link(local: SyncData, server: SyncData) -> SyncData {
+    SyncData {
+        favs: union_ids(&local.favs, &server.favs),
+        blocked: union_ids(&local.blocked, &server.blocked),
+        excluded_countries: union_ids(&local.excluded_countries, &server.excluded_countries),
+    }
+}
+
+fn use_key(key: &str) -> anyhow::Result<()> {
+    if !sync::is_valid_format(key) {
+        println!("invalid key");
+        return Ok(());
+    }
+    sync::store_key(key)?;
+    let local = SyncData {
+        favs: Favorites::load(&fav_path()).ids().to_vec(),
+        blocked: Favorites::load(&blacklist_path()).ids().to_vec(),
+        excluded_countries: Favorites::load(&excluded_path()).ids().to_vec(),
+    };
+    let server = client().pull(key)?;
+    let merged = merge_on_link(local, server);
+    let stored = client().push(key, &merged)?;
+    favorites_from(stored.favs.clone()).save(&fav_path())?;
+    favorites_from(stored.blocked.clone()).save(&blacklist_path())?;
+    favorites_from(stored.excluded_countries.clone()).save(&excluded_path())?;
+    println!(
+        "linked and merged: {} favourites, {} blocked, {} excluded countries",
+        stored.favs.len(),
+        stored.blocked.len(),
+        stored.excluded_countries.len()
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +222,23 @@ mod tests {
     fn favorites_from_dedups_without_dropping() {
         let f = favorites_from(vec!["a".to_string(), "b".into(), "a".into()]);
         assert_eq!(f.ids(), &["a".to_string(), "b".into()]);
+    }
+
+    #[test]
+    fn merge_on_link_unions_each_field() {
+        let local = SyncData {
+            favs: vec!["a".into(), "b".into()],
+            blocked: vec![],
+            excluded_countries: vec![],
+        };
+        let server = SyncData {
+            favs: vec!["b".into(), "c".into()],
+            blocked: vec!["x".into()],
+            excluded_countries: vec!["US".into()],
+        };
+        let m = merge_on_link(local, server);
+        assert_eq!(m.favs, vec!["a".to_string(), "b".into(), "c".into()]);
+        assert_eq!(m.blocked, vec!["x".to_string()]);
+        assert_eq!(m.excluded_countries, vec!["US".to_string()]);
     }
 }

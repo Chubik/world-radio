@@ -32,6 +32,16 @@ object FavLogic {
 
 object SyncMerge {
     fun mergedFavs(local: Set<String>, remote: List<String>): Set<String> = local + remote
+
+    private fun unionIds(local: List<String>, server: List<String>): List<String> =
+        local + server.filterNot { local.contains(it) }
+
+    fun mergedData(local: SyncData, server: SyncData): SyncData =
+        SyncData(
+            favs = unionIds(local.favs, server.favs),
+            blocked = unionIds(local.blocked, server.blocked),
+            excluded_countries = unionIds(local.excluded_countries, server.excluded_countries),
+        )
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("r4dio")

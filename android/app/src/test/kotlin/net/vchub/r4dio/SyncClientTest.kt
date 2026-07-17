@@ -49,12 +49,12 @@ class SyncClientTest {
     }
 
     @Test
-    fun push_returnsMerged() {
+    fun push_returnsServerStateVerbatim() {
         val server = MockWebServer()
-        server.enqueue(MockResponse().setBody("""{"favs":["a","b","c"],"blocked":[]}"""))
+        server.enqueue(MockResponse().setBody("""{"favs":["c"],"blocked":[]}"""))
         server.start()
         val d = clientFor(server).push("r4-k", SyncData(listOf("c"), emptyList()))
-        assertEquals(SyncData(listOf("a", "b", "c"), emptyList()), d)
+        assertEquals(SyncData(listOf("c"), emptyList()), d)
         server.shutdown()
     }
 
