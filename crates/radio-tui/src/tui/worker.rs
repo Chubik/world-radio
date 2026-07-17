@@ -66,123 +66,147 @@ pub fn spawn(
     msg_tx: Sender<Msg>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        for req in req_rx {
-            match req {
-                WorkerReq::Shutdown => break,
-                WorkerReq::Search(q, filters) => handle_search(&catalog, &q, &filters, &msg_tx),
-                WorkerReq::LoadFacets => handle_load_facets(&catalog, &msg_tx),
-                WorkerReq::Blacklist(uuid) => {
-                    catalog.toggle_blacklist(&uuid);
-                    handle_sync(&mut catalog, &paths, &msg_tx, false);
+        while let Ok(first) = req_rx.recv() {
+            let mut batch = vec![first];
+            while let Ok(more) = req_rx.try_recv() {
+                batch.push(more);
+            }
+            let (others, last_search) = coalesce(batch);
+            let mut shutdown = false;
+            for req in others {
+                if handle_req(req, &mut catalog, &paths, &msg_tx) {
+                    shutdown = true;
+                    break;
                 }
-                WorkerReq::ToggleExcludedCountry(code) => {
-                    catalog.toggle_excluded_country(&code);
-                    save_all(&catalog, &paths);
-                    let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
-                        catalog.excluded_country_ids().to_vec(),
-                    ));
-                }
-                WorkerReq::Recheck(uuid) => {
-                    catalog.clear_health(&uuid);
-                    if let Err(e) = catalog.save_health(&paths.health) {
-                        crate::log_warn!("worker: failed to save health: {e}");
-                    }
-                }
-                WorkerReq::RecheckAll => {
-                    catalog.clear_all_health();
-                    if let Err(e) = catalog.save_health(&paths.health) {
-                        crate::log_warn!("worker: failed to save health: {e}");
-                    }
-                }
-                WorkerReq::ToggleFavorite(uuid) => {
-                    catalog.toggle_favorite(&uuid);
-                    handle_sync(&mut catalog, &paths, &msg_tx, false);
-                }
-                WorkerReq::RecordHistory(uuid) => catalog.record_history(&uuid),
-                WorkerReq::MarkFailed(uuid) => {
-                    catalog.note_play_failure(&uuid);
-                    if let Err(e) = catalog.save_health(&paths.health) {
-                        crate::log_warn!("worker: failed to save health: {e}");
-                    }
-                }
-                WorkerReq::MirrorAnnounce { uuid, name, url } => {
-                    if let Some(key) = radio_core::sync::load_key() {
-                        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
-                        let origin = radio_core::mirror::device_id();
-                        if let Err(e) = client.play(&key, &uuid, &name, &url, &origin) {
-                            crate::log_warn!("worker: mirror announce failed: {e}");
-                        }
-                    }
-                }
-                WorkerReq::ResolveAndPlay(uuid) => {
-                    handle_resolve_and_play(&catalog, &uuid, &msg_tx)
-                }
-                WorkerReq::SaveState => save_all(&catalog, &paths),
-                WorkerReq::SyncCatalog => handle_sync_catalog(&catalog, &msg_tx),
-                WorkerReq::QuickTop => handle_quick_top(&catalog, &msg_tx),
-                WorkerReq::Sync => {
-                    handle_sync(&mut catalog, &paths, &msg_tx, true);
-                }
-                WorkerReq::SyncCreate => {
-                    match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {
-                        Ok(key) => {
-                            if let Err(e) = radio_core::sync::store_key(&key) {
-                                crate::log_warn!("worker: store key failed: {e}");
-                            }
-                            let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
-                            let _ = msg_tx.send(Msg::Notice("account created and linked".into()));
-                            handle_sync(&mut catalog, &paths, &msg_tx, false);
-                        }
-                        Err(e) => {
-                            crate::log_warn!("worker: create account failed: {e}");
-                            let _ = msg_tx.send(Msg::Notice("could not create account".into()));
-                        }
-                    }
-                }
-                WorkerReq::SyncLogout => {
-                    let _ = radio_core::sync::clear_key();
-                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
-                    let _ = msg_tx.send(Msg::Notice("logged out (favourites kept)".into()));
-                }
-                WorkerReq::SyncDelete => {
-                    if let Some(key) = radio_core::sync::load_key() {
-                        let _ = radio_core::sync::SyncClient::new("https://r4dio.net").delete(&key);
-                    }
-                    let _ = radio_core::sync::clear_key();
-                    let _ = msg_tx.send(Msg::SyncKeyChanged(None));
-                    let _ = msg_tx.send(Msg::Notice("account deleted".into()));
-                }
-                WorkerReq::CheckUpdate => {
-                    // a fresh check so pressing U picks up a release published
-                    // after this session started; downloads immediately if newer.
-                    match radio_core::update::fetch_latest() {
-                        Ok(Some(rel)) => {
-                            let _ = msg_tx.send(Msg::UpdateFound(rel));
-                        }
-                        Ok(None) => {
-                            let _ = msg_tx.send(Msg::UpdateUpToDate);
-                        }
-                        Err(e) => {
-                            let _ = msg_tx.send(Msg::Notice(format!("update check failed: {e}")));
-                        }
-                    }
-                }
-                WorkerReq::Update(rel) => match radio_core::update::apply(&rel) {
-                    Ok(()) => {
-                        let _ = msg_tx.send(Msg::UpdateApplied(rel.version.clone()));
-                    }
-                    Err(e) => {
-                        crate::log_warn!("worker: update failed: {e}");
-                        let _ = msg_tx.send(Msg::Notice(format!("update failed: {e}")));
-                    }
-                },
+            }
+            if shutdown {
+                break;
+            }
+            if let Some(search) = last_search {
+                handle_req(search, &mut catalog, &paths, &msg_tx);
             }
         }
         save_all(&catalog, &paths);
     })
 }
 
-#[allow(dead_code)]
+fn handle_req(
+    req: WorkerReq,
+    catalog: &mut Catalog,
+    paths: &WorkerPaths,
+    msg_tx: &Sender<Msg>,
+) -> bool {
+    match req {
+        WorkerReq::Shutdown => return true,
+        WorkerReq::Search(q, filters) => handle_search(catalog, &q, &filters, msg_tx),
+        WorkerReq::LoadFacets => handle_load_facets(catalog, msg_tx),
+        WorkerReq::Blacklist(uuid) => {
+            catalog.toggle_blacklist(&uuid);
+            handle_sync(catalog, paths, msg_tx, false);
+        }
+        WorkerReq::ToggleExcludedCountry(code) => {
+            catalog.toggle_excluded_country(&code);
+            save_all(catalog, paths);
+            let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
+                catalog.excluded_country_ids().to_vec(),
+            ));
+        }
+        WorkerReq::Recheck(uuid) => {
+            catalog.clear_health(&uuid);
+            if let Err(e) = catalog.save_health(&paths.health) {
+                crate::log_warn!("worker: failed to save health: {e}");
+            }
+        }
+        WorkerReq::RecheckAll => {
+            catalog.clear_all_health();
+            if let Err(e) = catalog.save_health(&paths.health) {
+                crate::log_warn!("worker: failed to save health: {e}");
+            }
+        }
+        WorkerReq::ToggleFavorite(uuid) => {
+            catalog.toggle_favorite(&uuid);
+            handle_sync(catalog, paths, msg_tx, false);
+        }
+        WorkerReq::RecordHistory(uuid) => catalog.record_history(&uuid),
+        WorkerReq::MarkFailed(uuid) => {
+            catalog.note_play_failure(&uuid);
+            if let Err(e) = catalog.save_health(&paths.health) {
+                crate::log_warn!("worker: failed to save health: {e}");
+            }
+        }
+        WorkerReq::MirrorAnnounce { uuid, name, url } => {
+            if let Some(key) = radio_core::sync::load_key() {
+                let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+                let origin = radio_core::mirror::device_id();
+                if let Err(e) = client.play(&key, &uuid, &name, &url, &origin) {
+                    crate::log_warn!("worker: mirror announce failed: {e}");
+                }
+            }
+        }
+        WorkerReq::ResolveAndPlay(uuid) => handle_resolve_and_play(catalog, &uuid, msg_tx),
+        WorkerReq::SaveState => save_all(catalog, paths),
+        WorkerReq::SyncCatalog => handle_sync_catalog(catalog, msg_tx),
+        WorkerReq::QuickTop => handle_quick_top(catalog, msg_tx),
+        WorkerReq::Sync => {
+            handle_sync(catalog, paths, msg_tx, true);
+        }
+        WorkerReq::SyncCreate => {
+            match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {
+                Ok(key) => {
+                    if let Err(e) = radio_core::sync::store_key(&key) {
+                        crate::log_warn!("worker: store key failed: {e}");
+                    }
+                    let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
+                    let _ = msg_tx.send(Msg::Notice("account created and linked".into()));
+                    handle_sync(catalog, paths, msg_tx, false);
+                }
+                Err(e) => {
+                    crate::log_warn!("worker: create account failed: {e}");
+                    let _ = msg_tx.send(Msg::Notice("could not create account".into()));
+                }
+            }
+        }
+        WorkerReq::SyncLogout => {
+            let _ = radio_core::sync::clear_key();
+            let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+            let _ = msg_tx.send(Msg::Notice("logged out (favourites kept)".into()));
+        }
+        WorkerReq::SyncDelete => {
+            if let Some(key) = radio_core::sync::load_key() {
+                let _ = radio_core::sync::SyncClient::new("https://r4dio.net").delete(&key);
+            }
+            let _ = radio_core::sync::clear_key();
+            let _ = msg_tx.send(Msg::SyncKeyChanged(None));
+            let _ = msg_tx.send(Msg::Notice("account deleted".into()));
+        }
+        WorkerReq::CheckUpdate => {
+            // a fresh check so pressing U picks up a release published
+            // after this session started; downloads immediately if newer.
+            match radio_core::update::fetch_latest() {
+                Ok(Some(rel)) => {
+                    let _ = msg_tx.send(Msg::UpdateFound(rel));
+                }
+                Ok(None) => {
+                    let _ = msg_tx.send(Msg::UpdateUpToDate);
+                }
+                Err(e) => {
+                    let _ = msg_tx.send(Msg::Notice(format!("update check failed: {e}")));
+                }
+            }
+        }
+        WorkerReq::Update(rel) => match radio_core::update::apply(&rel) {
+            Ok(()) => {
+                let _ = msg_tx.send(Msg::UpdateApplied(rel.version.clone()));
+            }
+            Err(e) => {
+                crate::log_warn!("worker: update failed: {e}");
+                let _ = msg_tx.send(Msg::Notice(format!("update failed: {e}")));
+            }
+        },
+    }
+    false
+}
+
 fn coalesce(pending: Vec<WorkerReq>) -> (Vec<WorkerReq>, Option<WorkerReq>) {
     let mut others = Vec::new();
     let mut last_search = None;
