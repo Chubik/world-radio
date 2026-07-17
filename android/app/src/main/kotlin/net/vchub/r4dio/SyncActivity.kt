@@ -34,11 +34,24 @@ class SyncActivity : ComponentActivity() {
             contents == null -> toast("scan cancelled")
             !contents.startsWith("r4-") -> toast("not an r4dio key")
             else -> lifecycleScope.launch {
-                favStore.setSyncKey(contents)
+                linkAndMerge(contents)
                 render()
                 toast("key imported")
             }
         }
+    }
+
+    private suspend fun linkAndMerge(key: String) {
+        favStore.setSyncKey(key)
+        val local = SyncData(
+            favs = favStore.currentFavUuids().toList(),
+            blocked = favStore.currentBlocked().toList(),
+            excluded_countries = favStore.currentExcluded().toList(),
+        )
+        val server = withContext(Dispatchers.IO) { syncClient.pull(key) } ?: SyncData(emptyList(), emptyList())
+        val merged = SyncMerge.mergedData(local, server)
+        favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
+        withContext(Dispatchers.IO) { syncClient.push(key, merged) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,7 +90,7 @@ class SyncActivity : ComponentActivity() {
             val k = findViewById<EditText>(R.id.key_input).text.toString().trim()
             when (k.startsWith("r4-")) {
                 false -> toast("invalid key")
-                true -> lifecycleScope.launch { favStore.setSyncKey(k); render(); toast("key set") }
+                true -> lifecycleScope.launch { linkAndMerge(k); render(); toast("key set") }
             }
         }
         findViewById<View>(R.id.create).setOnClickListener { view ->
