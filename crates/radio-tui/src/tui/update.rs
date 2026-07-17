@@ -176,7 +176,6 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::ToggleFavoriteSelected => toggle_favorite_selected(model),
         Msg::BlacklistSelected => blacklist_selected(model),
-        Msg::ExcludeCountrySelected => exclude_country_selected(model),
         Msg::ExcludedCountriesChanged(codes) => {
             model.browse.excluded_countries = codes;
             model.browse.pending_online_search = Some(Instant::now());
@@ -507,27 +506,6 @@ fn blacklist_selected(model: &mut Model) -> Vec<Effect> {
         .browse
         .update_row(&uuid, |r| r.state = RowState::Disabled);
     vec![Effect::Blacklist(uuid), Effect::SaveState]
-}
-
-fn exclude_country_selected(model: &mut Model) -> Vec<Effect> {
-    let BrowseFocus::Filters { group: 1, option } = model.browse.focus else {
-        model.notice = Some("focus a country in filters first".to_string());
-        return vec![];
-    };
-    if option == 0 {
-        model.notice = Some("focus a country in filters first".to_string());
-        return vec![];
-    }
-    let code = match model.browse.facets.countries.get(option - 1) {
-        Some((c, _)) => c.clone(),
-        None => return vec![],
-    };
-    model.browse.pending_online_search = Some(Instant::now());
-    let q = model.browse.filters.to_query(&model.browse.query);
-    vec![
-        Effect::ToggleExcludedCountry(code),
-        Effect::Search(q, model.browse.filters.clone()),
-    ]
 }
 
 fn recheck_selected(model: &mut Model) -> Vec<Effect> {
@@ -1618,36 +1596,6 @@ mod tests {
         let effects = update(&mut m, Msg::QuickTopReady { count: 5 });
         assert!(effects.iter().any(|e| matches!(e, Effect::Play(_))));
         assert!(!m.autoplay_first_pending);
-    }
-
-    #[test]
-    fn exclude_country_on_facet_emits_toggle_and_search() {
-        let mut m = model();
-        m.browse.facets.countries = vec![("GB".into(), 47), ("DE".into(), 30)];
-        m.browse.focus = BrowseFocus::Filters {
-            group: 1,
-            option: 2,
-        };
-        let fx = update(&mut m, Msg::ExcludeCountrySelected);
-        let toggled = fx
-            .iter()
-            .any(|e| matches!(e, Effect::ToggleExcludedCountry(c) if c == "DE"));
-        assert!(toggled, "toggles the highlighted country");
-        assert!(fx.iter().map(eff_kind).any(|k| k == "search"));
-        assert!(m.browse.pending_online_search.is_some());
-    }
-
-    #[test]
-    fn exclude_country_ignores_all_option_and_non_country_focus() {
-        let mut m = model();
-        m.browse.facets.countries = vec![("GB".into(), 47)];
-        m.browse.focus = BrowseFocus::Filters {
-            group: 1,
-            option: 0,
-        };
-        assert!(update(&mut m, Msg::ExcludeCountrySelected).is_empty());
-        m.browse.focus = BrowseFocus::Stations;
-        assert!(update(&mut m, Msg::ExcludeCountrySelected).is_empty());
     }
 
     #[test]
