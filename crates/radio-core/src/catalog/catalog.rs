@@ -147,6 +147,14 @@ impl Catalog {
         self.favorites.ids()
     }
 
+    pub fn set_favorites(&mut self, ids: Vec<String>) {
+        self.favorites.set_from(ids);
+    }
+
+    pub fn set_blacklist(&mut self, ids: Vec<String>) {
+        self.blacklist.set_from(ids);
+    }
+
     pub fn record_history(&mut self, uuid: &str) {
         self.history.record(uuid);
     }
