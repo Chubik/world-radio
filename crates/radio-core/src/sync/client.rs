@@ -125,11 +125,11 @@ mod tests {
     }
 
     #[test]
-    fn push_returns_merged() {
+    fn push_returns_server_state_verbatim() {
         let mut server = mockito::Server::new();
         server
             .mock("PUT", "/sync")
-            .with_body(r#"{"favs":["a","b","c"],"blocked":[]}"#)
+            .with_body(r#"{"favs":["c"],"blocked":[]}"#)
             .create();
         let c = SyncClient::new(server.url());
         let d = c
@@ -142,7 +142,7 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(d.favs, vec!["a".to_string(), "b".into(), "c".into()]);
+        assert_eq!(d.favs, vec!["c".to_string()]);
     }
 
     #[test]
