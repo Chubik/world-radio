@@ -24,6 +24,16 @@ impl Favorites {
         true
     }
 
+    pub fn set_from(&mut self, ids: Vec<String>) {
+        self.ids.clear();
+        self.set.clear();
+        for id in ids {
+            if self.set.insert(id.clone()) {
+                self.ids.push(id);
+            }
+        }
+    }
+
     pub fn contains(&self, uuid: &str) -> bool {
         self.set.contains(uuid)
     }
@@ -198,5 +208,15 @@ mod tests {
         h.save(&path).unwrap();
         let loaded = History::load(&path);
         assert_eq!(loaded.ids(), &["u2".to_string(), "u1".to_string()]);
+    }
+
+    #[test]
+    fn set_from_replaces_contents() {
+        let mut f = Favorites::new();
+        f.toggle("old1");
+        f.toggle("old2");
+        f.set_from(vec!["new1".into(), "new2".into(), "new1".into()]);
+        assert_eq!(f.ids(), &["new1".to_string(), "new2".to_string()]);
+        assert!(!f.contains("old1"));
     }
 }
