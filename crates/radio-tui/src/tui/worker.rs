@@ -182,6 +182,19 @@ pub fn spawn(
     })
 }
 
+#[allow(dead_code)]
+fn coalesce(pending: Vec<WorkerReq>) -> (Vec<WorkerReq>, Option<WorkerReq>) {
+    let mut others = Vec::new();
+    let mut last_search = None;
+    for req in pending {
+        match req {
+            WorkerReq::Search(..) => last_search = Some(req),
+            other => others.push(other),
+        }
+    }
+    (others, last_search)
+}
+
 fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
     if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
         crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
@@ -623,5 +636,46 @@ mod tests {
             }
             _ => panic!("expected SearchResults"),
         }
+    }
+
+    fn search_req(name: &str) -> WorkerReq {
+        WorkerReq::Search(
+            SearchQuery {
+                name: Some(name.into()),
+                countrycode: None,
+                language: None,
+                tag: None,
+                codec: None,
+                bitrate_min: None,
+            },
+            crate::tui::model::BrowseFilters::default(),
+        )
+    }
+
+    #[test]
+    fn coalesce_keeps_only_last_search_and_preserves_other_reqs() {
+        let batch = vec![
+            search_req("a"),
+            WorkerReq::SaveState,
+            search_req("b"),
+            WorkerReq::LoadFacets,
+            search_req("c"),
+        ];
+        let (others, last) = coalesce(batch);
+        assert!(matches!(
+            others.as_slice(),
+            [WorkerReq::SaveState, WorkerReq::LoadFacets]
+        ));
+        match last {
+            Some(WorkerReq::Search(q, _)) => assert_eq!(q.name.as_deref(), Some("c")),
+            _ => panic!("expected last search 'c'"),
+        }
+    }
+
+    #[test]
+    fn coalesce_no_search_returns_all_others_and_none() {
+        let (others, last) = coalesce(vec![WorkerReq::SaveState, WorkerReq::LoadFacets]);
+        assert_eq!(others.len(), 2);
+        assert!(last.is_none());
     }
 }
