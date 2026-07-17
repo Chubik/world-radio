@@ -631,12 +631,41 @@ fn group_option_count(model: &Model, group: usize) -> usize {
 
 fn filter_apply(model: &mut Model) -> Vec<Effect> {
     if let BrowseFocus::Filters { group, option } = model.browse.focus {
+        if group == 1 && option > 0 {
+            return cycle_country(model, option);
+        }
         apply_option(model, group, option);
         model.browse.pending_online_search = Some(Instant::now());
         let q = model.browse.filters.to_query(&model.browse.query);
         return vec![Effect::Search(q, model.browse.filters.clone())];
     }
     vec![]
+}
+
+fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
+    let code = match model.browse.facets.countries.get(option - 1) {
+        Some((c, _)) => c.clone(),
+        None => return vec![],
+    };
+    let included = model.browse.filters.group_selected(1, &code);
+    let excluded = model
+        .browse
+        .excluded_countries
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(&code));
+    let mut effects = vec![];
+    match (included, excluded) {
+        (false, false) => model.browse.filters.toggle(1, code.clone()),
+        (true, false) => {
+            model.browse.filters.toggle(1, code.clone());
+            effects.push(Effect::ToggleExcludedCountry(code.clone()));
+        }
+        (_, true) => effects.push(Effect::ToggleExcludedCountry(code.clone())),
+    }
+    model.browse.pending_online_search = Some(Instant::now());
+    let q = model.browse.filters.to_query(&model.browse.query);
+    effects.push(Effect::Search(q, model.browse.filters.clone()));
+    effects
 }
 
 fn apply_option(model: &mut Model, group: usize, option: usize) {
@@ -996,6 +1025,37 @@ mod tests {
             matches!(fx.as_slice(), [Effect::Search(q, _)] if q.countrycode.as_deref() == Some("GB"))
         );
         assert!(m.browse.pending_online_search.is_some());
+    }
+
+    #[test]
+    fn enter_cycles_country_through_include_exclude_neutral() {
+        let mut m = model();
+        m.browse.facets.countries = vec![("GB".into(), 47)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        // neutral -> include: country lands in filters, no exclude toggle
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.browse.filters.countries, vec!["GB".to_string()]);
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(_))));
+        assert!(fx.iter().map(eff_kind).any(|k| k == "search"));
+        // include -> exclude: drops from filters, emits a single exclude toggle
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.browse.filters.countries.is_empty());
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(c) if c == "GB")));
+        // simulate the worker echoing the new excluded set back
+        m.browse.excluded_countries = vec!["GB".into()];
+        // exclude -> neutral: emits the exclude toggle again to un-exclude, no filter add
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.browse.filters.countries.is_empty());
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(c) if c == "GB")));
     }
 
     #[test]
