@@ -420,11 +420,15 @@ fn mirror_play(model: &mut Model, evt: radio_core::mirror::MirrorEvent) -> Vec<E
 }
 
 fn toggle_favorite_selected(model: &mut Model) -> Vec<Effect> {
-    let uuid = match model.browse.selected_row().map(|r| r.uuid.clone()) {
+    let (uuid, was_favorite) = match model.browse.selected_row() {
         None => return vec![],
-        Some(uuid) => uuid,
+        Some(r) => (r.uuid.clone(), r.favorite),
     };
-    model.browse.update_row(&uuid, |r| r.favorite = !r.favorite);
+    let in_favorites = model.browse.filters.status == StatusFilter::Favorites;
+    match in_favorites && was_favorite {
+        true => model.browse.remove_row_step_up(&uuid),
+        false => model.browse.update_row(&uuid, |r| r.favorite = !r.favorite),
+    }
     vec![Effect::ToggleFavorite(uuid), Effect::SaveState]
 }
 
@@ -631,12 +635,41 @@ fn group_option_count(model: &Model, group: usize) -> usize {
 
 fn filter_apply(model: &mut Model) -> Vec<Effect> {
     if let BrowseFocus::Filters { group, option } = model.browse.focus {
+        if group == 1 && option > 0 {
+            return cycle_country(model, option);
+        }
         apply_option(model, group, option);
         model.browse.pending_online_search = Some(Instant::now());
         let q = model.browse.filters.to_query(&model.browse.query);
         return vec![Effect::Search(q, model.browse.filters.clone())];
     }
     vec![]
+}
+
+fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
+    let code = match model.browse.facets.countries.get(option - 1) {
+        Some((c, _)) => c.clone(),
+        None => return vec![],
+    };
+    let included = model.browse.filters.group_selected(1, &code);
+    let excluded = model
+        .browse
+        .excluded_countries
+        .iter()
+        .any(|c| c.eq_ignore_ascii_case(&code));
+    let mut effects = vec![];
+    match (included, excluded) {
+        (false, false) => model.browse.filters.toggle(1, code.clone()),
+        (true, false) => {
+            model.browse.filters.toggle(1, code.clone());
+            effects.push(Effect::ToggleExcludedCountry(code.clone()));
+        }
+        (_, true) => effects.push(Effect::ToggleExcludedCountry(code.clone())),
+    }
+    model.browse.pending_online_search = Some(Instant::now());
+    let q = model.browse.filters.to_query(&model.browse.query);
+    effects.push(Effect::Search(q, model.browse.filters.clone()));
+    effects
 }
 
 fn apply_option(model: &mut Model, group: usize, option: usize) {
@@ -918,6 +951,68 @@ mod tests {
         assert!(m.browse.rows[0].favorite);
     }
 
+    fn fav_row(uuid: &str) -> StationRow {
+        StationRow {
+            favorite: true,
+            ..row(uuid)
+        }
+    }
+
+    #[test]
+    fn unfavourite_in_favorites_scope_drops_row_and_steps_cursor_up() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.browse
+            .set_rows(vec![fav_row("u1"), fav_row("u2"), fav_row("u3")]);
+        m.browse.selected = 1;
+        let fx = update(&mut m, Msg::ToggleFavoriteSelected);
+        let kinds: Vec<_> = fx.iter().map(eff_kind).collect();
+        assert!(kinds.contains(&"toggle"));
+        assert!(kinds.contains(&"savestate"));
+        // the unfavourited row is gone from both the view and the api list
+        assert_eq!(
+            m.browse
+                .rows
+                .iter()
+                .map(|r| r.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u1", "u3"]
+        );
+        assert!(!m.browse.rows_api.iter().any(|r| r.uuid == "u2"));
+        // cursor sits on the row above the removed one, not back at the top
+        assert_eq!(m.browse.selected, 0);
+        assert_eq!(m.browse.selected_row().map(|r| r.uuid.as_str()), Some("u1"));
+    }
+
+    #[test]
+    fn unfavourite_first_row_in_favorites_scope_keeps_cursor_at_top() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.browse.set_rows(vec![fav_row("u1"), fav_row("u2")]);
+        m.browse.selected = 0;
+        update(&mut m, Msg::ToggleFavoriteSelected);
+        assert_eq!(
+            m.browse
+                .rows
+                .iter()
+                .map(|r| r.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u2"]
+        );
+        assert_eq!(m.browse.selected, 0);
+    }
+
+    #[test]
+    fn favourite_outside_favorites_scope_flips_in_place_keeps_row() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::All;
+        m.browse.set_rows(vec![fav_row("u1")]);
+        m.browse.selected = 0;
+        update(&mut m, Msg::ToggleFavoriteSelected);
+        assert_eq!(m.browse.rows.len(), 1);
+        assert!(!m.browse.rows[0].favorite);
+    }
+
     #[test]
     fn audio_status_playing_sets_status() {
         let mut m = model();
@@ -996,6 +1091,37 @@ mod tests {
             matches!(fx.as_slice(), [Effect::Search(q, _)] if q.countrycode.as_deref() == Some("GB"))
         );
         assert!(m.browse.pending_online_search.is_some());
+    }
+
+    #[test]
+    fn enter_cycles_country_through_include_exclude_neutral() {
+        let mut m = model();
+        m.browse.facets.countries = vec![("GB".into(), 47)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        // neutral -> include: country lands in filters, no exclude toggle
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.browse.filters.countries, vec!["GB".to_string()]);
+        assert!(!fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(_))));
+        assert!(fx.iter().map(eff_kind).any(|k| k == "search"));
+        // include -> exclude: drops from filters, emits a single exclude toggle
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.browse.filters.countries.is_empty());
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(c) if c == "GB")));
+        // simulate the worker echoing the new excluded set back
+        m.browse.excluded_countries = vec!["GB".into()];
+        // exclude -> neutral: emits the exclude toggle again to un-exclude, no filter add
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.browse.filters.countries.is_empty());
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::ToggleExcludedCountry(c) if c == "GB")));
     }
 
     #[test]
