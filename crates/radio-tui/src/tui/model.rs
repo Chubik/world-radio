@@ -328,6 +328,16 @@ impl BrowseState {
             f(r);
         }
     }
+
+    pub fn remove_row_step_up(&mut self, uuid: &str) {
+        let pos = self.rows.iter().position(|r| r.uuid == uuid);
+        self.rows.retain(|r| r.uuid != uuid);
+        self.rows_api.retain(|r| r.uuid != uuid);
+        if let Some(pos) = pos {
+            let last = self.rows.len().saturating_sub(1);
+            self.selected = pos.saturating_sub(1).min(last);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
