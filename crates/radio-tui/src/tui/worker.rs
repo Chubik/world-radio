@@ -309,7 +309,7 @@ fn drop_unplayable(msg: Msg, hide: bool) -> Msg {
 }
 
 fn search_all(catalog: &Catalog, q: &SearchQuery) -> (Msg, bool) {
-    if is_query_empty(q) {
+    if !should_search_online(q) {
         let msg = match catalog.search_offline_filtered(q) {
             Ok(stations) => Msg::SearchResults(rows_from(catalog, &stations)),
             Err(e) => Msg::SearchFailed(e.to_string()),
@@ -342,13 +342,8 @@ fn narrow_msg(msg: Msg, filters: &crate::tui::model::BrowseFilters) -> Msg {
     }
 }
 
-fn is_query_empty(q: &SearchQuery) -> bool {
-    q.name.as_deref().map(str::trim).unwrap_or("").is_empty()
-        && q.countrycode.as_deref().unwrap_or("").is_empty()
-        && q.language.as_deref().unwrap_or("").is_empty()
-        && q.tag.as_deref().unwrap_or("").is_empty()
-        && q.codec.as_deref().unwrap_or("").is_empty()
-        && q.bitrate_min.is_none()
+fn should_search_online(q: &SearchQuery) -> bool {
+    !q.name.as_deref().map(str::trim).unwrap_or("").is_empty()
 }
 
 fn online_search(catalog: &Catalog, q: &SearchQuery) -> anyhow::Result<Vec<StationRow>> {
@@ -503,6 +498,28 @@ mod tests {
             geo_lat: None,
             geo_long: None,
         }
+    }
+
+    fn q_with(name: Option<&str>, country: Option<&str>) -> SearchQuery {
+        SearchQuery {
+            name: name.map(str::to_string),
+            countrycode: country.map(str::to_string),
+            language: None,
+            tag: None,
+            codec: None,
+            bitrate_min: None,
+        }
+    }
+
+    #[test]
+    fn online_only_when_there_is_a_text_query() {
+        // a text name warrants hitting the network for fresh stations
+        assert!(should_search_online(&q_with(Some("jazz"), None)));
+        // filters alone (country/tag/codec/bitrate) resolve from the local catalog
+        assert!(!should_search_online(&q_with(None, Some("GB"))));
+        assert!(!should_search_online(&q_with(None, None)));
+        // whitespace name is not a real query
+        assert!(!should_search_online(&q_with(Some("   "), Some("GB"))));
     }
 
     #[test]
