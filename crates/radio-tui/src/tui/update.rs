@@ -420,11 +420,15 @@ fn mirror_play(model: &mut Model, evt: radio_core::mirror::MirrorEvent) -> Vec<E
 }
 
 fn toggle_favorite_selected(model: &mut Model) -> Vec<Effect> {
-    let uuid = match model.browse.selected_row().map(|r| r.uuid.clone()) {
+    let (uuid, was_favorite) = match model.browse.selected_row() {
         None => return vec![],
-        Some(uuid) => uuid,
+        Some(r) => (r.uuid.clone(), r.favorite),
     };
-    model.browse.update_row(&uuid, |r| r.favorite = !r.favorite);
+    let in_favorites = model.browse.filters.status == StatusFilter::Favorites;
+    match in_favorites && was_favorite {
+        true => model.browse.remove_row_step_up(&uuid),
+        false => model.browse.update_row(&uuid, |r| r.favorite = !r.favorite),
+    }
     vec![Effect::ToggleFavorite(uuid), Effect::SaveState]
 }
 
@@ -945,6 +949,68 @@ mod tests {
         assert!(kinds.contains(&"savestate"));
         assert!(!kinds.contains(&"loadfav"));
         assert!(m.browse.rows[0].favorite);
+    }
+
+    fn fav_row(uuid: &str) -> StationRow {
+        StationRow {
+            favorite: true,
+            ..row(uuid)
+        }
+    }
+
+    #[test]
+    fn unfavourite_in_favorites_scope_drops_row_and_steps_cursor_up() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.browse
+            .set_rows(vec![fav_row("u1"), fav_row("u2"), fav_row("u3")]);
+        m.browse.selected = 1;
+        let fx = update(&mut m, Msg::ToggleFavoriteSelected);
+        let kinds: Vec<_> = fx.iter().map(eff_kind).collect();
+        assert!(kinds.contains(&"toggle"));
+        assert!(kinds.contains(&"savestate"));
+        // the unfavourited row is gone from both the view and the api list
+        assert_eq!(
+            m.browse
+                .rows
+                .iter()
+                .map(|r| r.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u1", "u3"]
+        );
+        assert!(!m.browse.rows_api.iter().any(|r| r.uuid == "u2"));
+        // cursor sits on the row above the removed one, not back at the top
+        assert_eq!(m.browse.selected, 0);
+        assert_eq!(m.browse.selected_row().map(|r| r.uuid.as_str()), Some("u1"));
+    }
+
+    #[test]
+    fn unfavourite_first_row_in_favorites_scope_keeps_cursor_at_top() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.browse.set_rows(vec![fav_row("u1"), fav_row("u2")]);
+        m.browse.selected = 0;
+        update(&mut m, Msg::ToggleFavoriteSelected);
+        assert_eq!(
+            m.browse
+                .rows
+                .iter()
+                .map(|r| r.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["u2"]
+        );
+        assert_eq!(m.browse.selected, 0);
+    }
+
+    #[test]
+    fn favourite_outside_favorites_scope_flips_in_place_keeps_row() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::All;
+        m.browse.set_rows(vec![fav_row("u1")]);
+        m.browse.selected = 0;
+        update(&mut m, Msg::ToggleFavoriteSelected);
+        assert_eq!(m.browse.rows.len(), 1);
+        assert!(!m.browse.rows[0].favorite);
     }
 
     #[test]
