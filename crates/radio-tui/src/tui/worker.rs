@@ -303,32 +303,51 @@ fn handle_search(
     msg_tx: &Sender<Msg>,
 ) {
     use crate::tui::model::StatusFilter;
-    let mut offline = false;
-    let result = match filters.status {
-        StatusFilter::All => {
-            let (msg, off) = search_all(catalog, q);
-            offline = off;
-            narrow_msg(msg, filters)
-        }
-        StatusFilter::Favorites => Msg::SearchResults(narrow(
-            resolve(catalog, catalog.favorite_ids(), true),
-            filters,
-        )),
-        StatusFilter::Recent => Msg::SearchResults(narrow(
-            resolve(catalog, catalog.history_ids(), false),
-            filters,
-        )),
-        StatusFilter::Blocked => Msg::SearchResults(narrow(
-            resolve(catalog, catalog.blacklist_ids(), false),
-            filters,
-        )),
-        StatusFilter::Dead => Msg::SearchResults(narrow(
-            resolve_visible(catalog, &catalog.hidden_ids()),
-            filters,
-        )),
+    let StatusFilter::All = filters.status else {
+        let result = match filters.status {
+            StatusFilter::Favorites => Msg::SearchResults(narrow(
+                resolve(catalog, catalog.favorite_ids(), true),
+                filters,
+            )),
+            StatusFilter::Recent => Msg::SearchResults(narrow(
+                resolve(catalog, catalog.history_ids(), false),
+                filters,
+            )),
+            StatusFilter::Blocked => Msg::SearchResults(narrow(
+                resolve(catalog, catalog.blacklist_ids(), false),
+                filters,
+            )),
+            StatusFilter::Dead => Msg::SearchResults(narrow(
+                resolve_visible(catalog, &catalog.hidden_ids()),
+                filters,
+            )),
+            StatusFilter::All => unreachable!(),
+        };
+        let _ = msg_tx.send(Msg::SetOffline(false));
+        let _ = msg_tx.send(drop_unplayable(result, filters.hide_unplayable));
+        return;
     };
-    let _ = msg_tx.send(Msg::SetOffline(offline));
-    let _ = msg_tx.send(drop_unplayable(result, filters.hide_unplayable));
+    let _ = msg_tx.send(Msg::SetOffline(false));
+    // local first — instant, never blocks
+    let (local, _) = search_local(catalog, q);
+    let _ = msg_tx.send(drop_unplayable(
+        narrow_msg(local, filters),
+        filters.hide_unplayable,
+    ));
+    if should_search_online(q) {
+        match online_search_bounded(catalog, q) {
+            Ok(rows) => {
+                let _ = msg_tx.send(drop_unplayable(
+                    narrow_msg(Msg::SearchResults(rows), filters),
+                    filters.hide_unplayable,
+                ));
+            }
+            Err(e) => {
+                crate::log_warn!("worker: online search failed ({e}), keeping local results");
+                let _ = msg_tx.send(Msg::SetOffline(true));
+            }
+        }
+    }
 }
 
 fn drop_unplayable(msg: Msg, hide: bool) -> Msg {
@@ -345,25 +364,12 @@ fn drop_unplayable(msg: Msg, hide: bool) -> Msg {
     }
 }
 
-fn search_all(catalog: &Catalog, q: &SearchQuery) -> (Msg, bool) {
-    if !should_search_online(q) {
-        let msg = match catalog.search_offline_filtered(q) {
-            Ok(stations) => Msg::SearchResults(rows_from(catalog, &stations)),
-            Err(e) => Msg::SearchFailed(e.to_string()),
-        };
-        return (msg, false);
-    }
-    match online_search(catalog, q) {
-        Ok(rows) => (Msg::SearchResults(rows), false),
-        Err(e) => {
-            crate::log_warn!("worker: online search failed ({e}), falling back to offline");
-            let msg = match catalog.search_offline_filtered(q) {
-                Ok(stations) => Msg::SearchResults(rows_from(catalog, &stations)),
-                Err(e) => Msg::SearchFailed(e.to_string()),
-            };
-            (msg, true)
-        }
-    }
+fn search_local(catalog: &Catalog, q: &SearchQuery) -> (Msg, bool) {
+    let msg = match catalog.search_offline_filtered(q) {
+        Ok(stations) => Msg::SearchResults(rows_from(catalog, &stations)),
+        Err(e) => Msg::SearchFailed(e.to_string()),
+    };
+    (msg, false)
 }
 
 fn narrow(rows: Vec<StationRow>, filters: &crate::tui::model::BrowseFilters) -> Vec<StationRow> {
@@ -383,8 +389,8 @@ fn should_search_online(q: &SearchQuery) -> bool {
     !q.name.as_deref().map(str::trim).unwrap_or("").is_empty()
 }
 
-fn online_search(catalog: &Catalog, q: &SearchQuery) -> anyhow::Result<Vec<StationRow>> {
-    let rb = api::resolve();
+fn online_search_bounded(catalog: &Catalog, q: &SearchQuery) -> anyhow::Result<Vec<StationRow>> {
+    let rb = api::resolve_with_timeout(4);
     let stations = rb.search(q)?;
     catalog.ingest(&stations)?;
     let filtered = catalog.search_offline_filtered(q)?;
