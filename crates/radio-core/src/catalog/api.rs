@@ -39,6 +39,19 @@ impl RadioBrowser {
         }
     }
 
+    pub fn with_base_url_timeout(base_url: impl Into<String>, secs: u64) -> Self {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("world-radio/1.1")
+            .connect_timeout(std::time::Duration::from_secs(secs))
+            .timeout(std::time::Duration::from_secs(secs))
+            .build()
+            .expect("client build");
+        Self {
+            base_url: base_url.into(),
+            client,
+        }
+    }
+
     pub fn search(&self, q: &SearchQuery) -> anyhow::Result<Vec<Station>> {
         let url = format!("{}/json/stations/search", self.base_url);
         let params = q.to_params();
@@ -89,6 +102,13 @@ pub fn resolve() -> RadioBrowser {
         Some(ip) => RadioBrowser::with_mirror_ip(ip),
         None => RadioBrowser::with_base_url(FALLBACK_BASE),
     }
+}
+
+pub fn resolve_with_timeout(secs: u64) -> RadioBrowser {
+    // interactive search: skip the per-mirror liveness probe (it can add K*3s
+    // before the request even starts) and go straight to the base url so the
+    // whole call is bounded by `secs`.
+    RadioBrowser::with_base_url_timeout(FALLBACK_BASE, secs)
 }
 
 fn mirror_ips() -> Vec<IpAddr> {

@@ -199,11 +199,10 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     };
     out_cfg.save(&data.join("config.toml"));
     let restore_result = restore_terminal(&mut terminal);
-    let _ = req_tx.send(WorkerReq::SaveState);
+    // state is saved on every mutation, so exit does not wait for the worker;
+    // signal shutdown best-effort and return immediately.
     let _ = req_tx.send(WorkerReq::Shutdown);
-    if let Err(e) = worker_handle.join() {
-        eprintln!("worker thread panicked: {e:?}");
-    }
+    drop(worker_handle);
     loop_result.and(restore_result)
 }
 

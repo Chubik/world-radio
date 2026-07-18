@@ -39,7 +39,6 @@ pub enum Msg {
     Notice(String),
     ToggleFavoriteSelected,
     BlacklistSelected,
-    ExcludeCountrySelected,
     ExcludedCountriesChanged(Vec<String>),
     RecheckSelected,
     AudioStatus(Status),
