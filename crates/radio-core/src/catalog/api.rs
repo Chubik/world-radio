@@ -42,26 +42,12 @@ impl RadioBrowser {
     pub fn with_base_url_timeout(base_url: impl Into<String>, secs: u64) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("world-radio/1.1")
-            .connect_timeout(std::time::Duration::from_secs(5))
+            .connect_timeout(std::time::Duration::from_secs(secs))
             .timeout(std::time::Duration::from_secs(secs))
             .build()
             .expect("client build");
         Self {
             base_url: base_url.into(),
-            client,
-        }
-    }
-
-    pub fn with_mirror_ip_timeout(ip: IpAddr, secs: u64) -> Self {
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("world-radio/1.1")
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(secs))
-            .resolve(MIRROR_HOST, SocketAddr::new(ip, 443))
-            .build()
-            .expect("client build");
-        Self {
-            base_url: FALLBACK_BASE.to_string(),
             client,
         }
     }
@@ -119,12 +105,10 @@ pub fn resolve() -> RadioBrowser {
 }
 
 pub fn resolve_with_timeout(secs: u64) -> RadioBrowser {
-    let probe = std::time::Duration::from_secs(3);
-    let ips = mirror_ips();
-    match pick_alive_ip(&ips, |ip| is_mirror_alive(*ip, probe)) {
-        Some(ip) => RadioBrowser::with_mirror_ip_timeout(ip, secs),
-        None => RadioBrowser::with_base_url_timeout(FALLBACK_BASE, secs),
-    }
+    // interactive search: skip the per-mirror liveness probe (it can add K*3s
+    // before the request even starts) and go straight to the base url so the
+    // whole call is bounded by `secs`.
+    RadioBrowser::with_base_url_timeout(FALLBACK_BASE, secs)
 }
 
 fn mirror_ips() -> Vec<IpAddr> {
