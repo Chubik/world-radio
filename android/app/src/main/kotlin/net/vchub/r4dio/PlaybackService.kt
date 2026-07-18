@@ -33,6 +33,33 @@ const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 
+private class ShufflePlayer(
+    delegate: androidx.media3.common.Player,
+    private val onShuffle: () -> Unit,
+) : androidx.media3.common.ForwardingPlayer(delegate) {
+
+    private val extraCommands = intArrayOf(
+        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+    )
+
+    override fun getAvailableCommands(): androidx.media3.common.Player.Commands {
+        val builder = super.getAvailableCommands().buildUpon()
+        extraCommands.forEach { builder.add(it) }
+        return builder.build()
+    }
+
+    override fun isCommandAvailable(command: Int): Boolean =
+        command in extraCommands || super.isCommandAvailable(command)
+
+    override fun seekToNext() = onShuffle()
+    override fun seekToNextMediaItem() = onShuffle()
+    override fun seekToPrevious() = onShuffle()
+    override fun seekToPreviousMediaItem() = onShuffle()
+}
+
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var exo: ExoPlayer? = null
