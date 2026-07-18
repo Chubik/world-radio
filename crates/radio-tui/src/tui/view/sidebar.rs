@@ -44,7 +44,7 @@ enum OptState {
     Normal,
     /// filter is narrowed to this value ("show only")
     ShowOnly,
-    /// this country is hidden ("x hide")
+    /// this country is excluded (hidden everywhere)
     Hidden,
 }
 
@@ -118,10 +118,11 @@ fn build_active_group_lines(
             ratatui::text::Span::styled("  (⌫ clear)", Style::default().fg(pal.dim)),
         ]),
         (1, false) => Line::from(vec![
-            ratatui::text::Span::styled("type to find · ", Style::default().fg(pal.dim)),
-            ratatui::text::Span::styled("↵ show only", Style::default().fg(pal.accent)),
-            ratatui::text::Span::styled(" · x ", Style::default().fg(pal.dim)),
-            ratatui::text::Span::styled("hide", Style::default().fg(pal.hot)),
+            ratatui::text::Span::styled("type to find · ↵ ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled("show only", Style::default().fg(pal.accent)),
+            ratatui::text::Span::styled(" → ", Style::default().fg(pal.dim)),
+            ratatui::text::Span::styled("exclude", Style::default().fg(pal.hot)),
+            ratatui::text::Span::styled(" → off", Style::default().fg(pal.dim)),
         ]),
         (2, false) => Line::styled(
             "type to find · ↵ show only · ← → group",
