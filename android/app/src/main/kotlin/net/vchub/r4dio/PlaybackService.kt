@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
+const val CMD_TOGGLE = "net.vchub.r4dio.TOGGLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
@@ -77,6 +78,7 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
+    private val toggleCommand = SessionCommand(CMD_TOGGLE, android.os.Bundle.EMPTY)
     private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
@@ -357,6 +359,7 @@ class PlaybackService : MediaSessionService() {
             val sessionCommands =
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(shuffleCommand)
+                    .add(toggleCommand)
                     .add(starCommand)
                     .add(scopeCommand)
                     .add(stopCommand)
@@ -381,6 +384,16 @@ class PlaybackService : MediaSessionService() {
             when (customCommand.customAction) {
                 CMD_SHUFFLE -> {
                     shuffle()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_TOGGLE -> {
+                    val player = exo
+                    when {
+                        player == null -> shuffle()
+                        player.mediaItemCount == 0 -> shuffle()
+                        player.isPlaying -> player.pause()
+                        else -> player.play()
+                    }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_STOP -> {
