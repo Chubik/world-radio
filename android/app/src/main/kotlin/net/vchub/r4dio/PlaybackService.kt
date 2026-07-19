@@ -152,8 +152,6 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_WIDGET_SHUFFLE -> shuffle()
-            ACTION_WIDGET_TOGGLE -> exo?.let { if (it.isPlaying) it.pause() else it.play() }
             ACTION_SYNC_NOW -> syncNow()
         }
         return super.onStartCommand(intent, flags, startId)
