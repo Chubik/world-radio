@@ -134,7 +134,8 @@ class PlaybackService : MediaSessionService() {
             }
         })
         exo = player
-        session = MediaSession.Builder(this, player)
+        val sessionPlayer = ShufflePlayer(player) { shuffle() }
+        session = MediaSession.Builder(this, sessionPlayer)
             .setCallback(Callback())
             .build()
         val provider = androidx.media3.session.DefaultMediaNotificationProvider.Builder(this).build()
@@ -363,10 +364,6 @@ class PlaybackService : MediaSessionService() {
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                     .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
