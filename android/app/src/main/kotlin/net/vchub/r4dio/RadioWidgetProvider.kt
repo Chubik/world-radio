@@ -6,7 +6,10 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.widget.RemoteViews
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
@@ -40,12 +43,39 @@ class RadioWidgetProvider : AppWidgetProvider() {
         val future = MediaController.Builder(context.applicationContext, token).buildAsync()
         future.addListener({
             val controller = runCatching { future.get() }.getOrNull()
-            controller?.sendCustomCommand(
+            if (controller == null) {
+                pending.finish()
+                return@addListener
+            }
+            val handler = Handler(Looper.getMainLooper())
+            var released = false
+            var listener: Player.Listener? = null
+            val releaseOnce = {
+                if (!released) {
+                    released = true
+                    handler.removeCallbacksAndMessages(null)
+                    listener?.let { controller.removeListener(it) }
+                    controller.release()
+                    pending.finish()
+                }
+            }
+            controller.sendCustomCommand(
                 SessionCommand(cmd, android.os.Bundle.EMPTY),
                 android.os.Bundle.EMPTY,
             )
-            controller?.release()
-            pending.finish()
+            val l = object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) {
+                        releaseOnce()
+                    }
+                }
+            }
+            listener = l
+            controller.addListener(l)
+            if (controller.isPlaying) {
+                releaseOnce()
+            }
+            handler.postDelayed({ releaseOnce() }, 15000)
         }, MoreExecutors.directExecutor())
     }
 
