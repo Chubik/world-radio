@@ -116,7 +116,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.catalog_count = Some(count);
             model.catalog_loading = false;
             model.browse.pending_online_search = Some(Instant::now());
-            autoplay_random_if_pending(model)
+            let mut effects = autoplay_random_if_pending(model);
+            let q = model.browse.filters.to_query(&model.browse.query);
+            effects.push(Effect::Search(q, model.browse.filters.clone()));
+            effects
         }
         Msg::CatalogSyncFailed => {
             model.catalog_loading = false;
@@ -127,7 +130,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
                 model.catalog_count = Some(count);
             }
             model.catalog_loading = false;
-            autoplay_random_if_pending(model)
+            let mut effects = autoplay_random_if_pending(model);
+            let q = model.browse.filters.to_query(&model.browse.query);
+            effects.push(Effect::Search(q, model.browse.filters.clone()));
+            effects
         }
         Msg::SearchFailed(e) => {
             model.browse.loading = false;
@@ -1596,6 +1602,38 @@ mod tests {
         let effects = update(&mut m, Msg::QuickTopReady { count: 5 });
         assert!(effects.iter().any(|e| matches!(e, Effect::Play(_))));
         assert!(!m.autoplay_first_pending);
+    }
+
+    #[test]
+    fn catalog_synced_reissues_search_with_current_filter() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = "club".to_string();
+        m.browse.filters.status = StatusFilter::Favorites;
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Search(q, f)
+                    if q.name.as_deref() == Some("club") && f.status == StatusFilter::Favorites
+            )),
+            "CatalogSynced must re-issue Search with the current query+filter"
+        );
+    }
+
+    #[test]
+    fn quick_top_ready_reissues_search_with_current_filter() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = "club".to_string();
+        m.browse.filters.status = StatusFilter::Favorites;
+        let effects = update(&mut m, Msg::QuickTopReady { count: 5 });
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Search(q, f)
+                    if q.name.as_deref() == Some("club") && f.status == StatusFilter::Favorites
+            )),
+            "QuickTopReady must re-issue Search with the current query+filter"
+        );
     }
 
     #[test]
