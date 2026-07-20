@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
 const val CMD_TOGGLE = "net.vchub.r4dio.TOGGLE"
@@ -291,10 +292,16 @@ class PlaybackService : MediaSessionService() {
 
     private fun shuffle() {
         scope.launch {
-            val sc = favStore.currentScope()
-            val favs = favStore.currentCachedFavs()
+            val sc = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentScope() } }.getOrDefault(Scope.ALL)
+            }
+            val favs = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentCachedFavs() } }.getOrDefault(emptyList<Station>())
+            }
+            val userExcluded = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentExcluded() } }.getOrDefault(emptySet<String>())
+            }
             val cat = withReadyCatalog()
-            val userExcluded = favStore.currentExcluded()
             val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
                 null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
