@@ -455,27 +455,12 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-fn seed_rows_by_popularity(catalog: &Catalog) -> Vec<StationRow> {
-    let fav_ids: Vec<String> = catalog.favorite_ids().to_vec();
-    match catalog.list_by_popularity(&fav_ids, 200) {
-        Ok(stations) => rows_from(catalog, &stations),
-        Err(e) => {
-            crate::log_warn!("worker: list_by_popularity failed: {e}");
-            Vec::new()
-        }
-    }
-}
-
 fn handle_sync_catalog(catalog: &Catalog, msg_tx: &Sender<Msg>) {
     let rb = api::resolve();
     match rb.fetch_all() {
         Ok(stations) => match catalog.replace_catalog(&stations) {
             Ok(count) => {
                 let _ = catalog.set_last_sync(now_secs());
-                let rows = seed_rows_by_popularity(catalog);
-                if !rows.is_empty() {
-                    let _ = msg_tx.send(Msg::SearchResults(rows));
-                }
                 let _ = msg_tx.send(Msg::CatalogSynced { count });
             }
             Err(e) => {
@@ -498,11 +483,7 @@ fn handle_quick_top(catalog: &Catalog, msg_tx: &Sender<Msg>) {
                 crate::log_warn!("worker: quick-top ingest failed: {e}");
                 return;
             }
-            let rows = seed_rows_by_popularity(catalog);
-            let count = rows.len();
-            if !rows.is_empty() {
-                let _ = msg_tx.send(Msg::SearchResults(rows));
-            }
+            let count = stations.len();
             let _ = msg_tx.send(Msg::QuickTopReady { count });
         }
         Err(e) => {
