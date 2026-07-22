@@ -337,6 +337,9 @@ fn run_effects(
             Effect::LoadFacets => {
                 let _ = req_tx.send(WorkerReq::LoadFacets);
             }
+            Effect::PopularSeed => {
+                let _ = req_tx.send(WorkerReq::PopularSeed);
+            }
             Effect::Play(url) => engine.play(&url),
             Effect::StopAudio => engine.stop(),
             Effect::SetCrossfade(on) => engine.set_crossfade(on),
