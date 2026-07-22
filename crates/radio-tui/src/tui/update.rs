@@ -1,6 +1,6 @@
 use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
-    BrowseFocus, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
+    BrowseFocus, BrowseState, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
 use radio_audio::Status;
 use std::time::{Duration, Instant};
@@ -117,8 +117,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.catalog_loading = false;
             model.browse.pending_online_search = Some(Instant::now());
             let mut effects = autoplay_random_if_pending(model);
-            let q = model.browse.filters.to_query(&model.browse.query);
-            effects.push(Effect::Search(q, model.browse.filters.clone()));
+            effects.push(catalog_refresh_effect(&model.browse));
             effects
         }
         Msg::CatalogSyncFailed => {
@@ -131,8 +130,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
             model.catalog_loading = false;
             let mut effects = autoplay_random_if_pending(model);
-            let q = model.browse.filters.to_query(&model.browse.query);
-            effects.push(Effect::Search(q, model.browse.filters.clone()));
+            effects.push(catalog_refresh_effect(&model.browse));
             effects
         }
         Msg::SearchFailed(e) => {
@@ -713,6 +711,19 @@ fn filter_clear(model: &mut Model, all: bool) -> Vec<Effect> {
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
     vec![Effect::Search(q, model.browse.filters.clone())]
+}
+
+fn catalog_refresh_effect(browse: &BrowseState) -> Effect {
+    let filter_active = !browse.query.trim().is_empty()
+        || browse.filters.status != StatusFilter::All
+        || !browse.filters.is_empty();
+    match filter_active {
+        true => Effect::Search(
+            browse.filters.to_query(&browse.query),
+            browse.filters.clone(),
+        ),
+        false => Effect::PopularSeed,
+    }
 }
 
 fn emit_search(model: &mut Model) -> Vec<Effect> {
@@ -1633,6 +1644,48 @@ mod tests {
                     if q.name.as_deref() == Some("club") && f.status == StatusFilter::Favorites
             )),
             "QuickTopReady must re-issue Search with the current query+filter"
+        );
+    }
+
+    #[test]
+    fn catalog_synced_empty_filter_uses_popular_seed() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = String::new();
+        m.browse.filters.status = StatusFilter::All;
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::PopularSeed)),
+            "empty filter must restore the popular seed, not an alphabetical Search"
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::Search(_, _))),
+            "empty filter must NOT emit a Search"
+        );
+    }
+
+    #[test]
+    fn catalog_synced_status_favorites_still_searches() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = String::new();
+        m.browse.filters.status = StatusFilter::Favorites;
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::Search(_, f) if f.status == StatusFilter::Favorites)),
+            "an active status filter must still re-Search"
+        );
+    }
+
+    #[test]
+    fn quick_top_ready_empty_filter_uses_popular_seed() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = String::new();
+        m.browse.filters.status = StatusFilter::All;
+        let effects = update(&mut m, Msg::QuickTopReady { count: 5 });
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::PopularSeed)),
+            "empty filter must restore the popular seed on quick-top too"
         );
     }
 
