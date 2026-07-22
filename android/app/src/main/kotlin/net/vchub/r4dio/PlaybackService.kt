@@ -25,13 +25,42 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 const val CMD_SHUFFLE = "net.vchub.r4dio.SHUFFLE"
+const val CMD_TOGGLE = "net.vchub.r4dio.TOGGLE"
 const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
+
+private class ShufflePlayer(
+    delegate: androidx.media3.common.Player,
+    private val onShuffle: () -> Unit,
+) : androidx.media3.common.ForwardingPlayer(delegate) {
+
+    private val extraCommands = intArrayOf(
+        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS,
+        androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+    )
+
+    override fun getAvailableCommands(): androidx.media3.common.Player.Commands {
+        val builder = super.getAvailableCommands().buildUpon()
+        extraCommands.forEach { builder.add(it) }
+        return builder.build()
+    }
+
+    override fun isCommandAvailable(command: Int): Boolean =
+        command in extraCommands || super.isCommandAvailable(command)
+
+    override fun seekToNext() = onShuffle()
+    override fun seekToNextMediaItem() = onShuffle()
+    override fun seekToPrevious() = onShuffle()
+    override fun seekToPreviousMediaItem() = onShuffle()
+}
 
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -50,6 +79,7 @@ class PlaybackService : MediaSessionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val shuffleCommand = SessionCommand(CMD_SHUFFLE, android.os.Bundle.EMPTY)
+    private val toggleCommand = SessionCommand(CMD_TOGGLE, android.os.Bundle.EMPTY)
     private val starCommand = SessionCommand(CMD_STAR, android.os.Bundle.EMPTY)
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
@@ -107,7 +137,8 @@ class PlaybackService : MediaSessionService() {
             }
         })
         exo = player
-        session = MediaSession.Builder(this, player)
+        val sessionPlayer = ShufflePlayer(player) { shuffle() }
+        session = MediaSession.Builder(this, sessionPlayer)
             .setCallback(Callback())
             .build()
         val provider = androidx.media3.session.DefaultMediaNotificationProvider.Builder(this).build()
@@ -122,8 +153,6 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_WIDGET_SHUFFLE -> shuffle()
-            ACTION_WIDGET_TOGGLE -> exo?.let { if (it.isPlaying) it.pause() else it.play() }
             ACTION_SYNC_NOW -> syncNow()
         }
         return super.onStartCommand(intent, flags, startId)
@@ -263,10 +292,16 @@ class PlaybackService : MediaSessionService() {
 
     private fun shuffle() {
         scope.launch {
-            val sc = favStore.currentScope()
-            val favs = favStore.currentCachedFavs()
+            val sc = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentScope() } }.getOrDefault(Scope.ALL)
+            }
+            val favs = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentCachedFavs() } }.getOrDefault(emptyList<Station>())
+            }
+            val userExcluded = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentExcluded() } }.getOrDefault(emptySet<String>())
+            }
             val cat = withReadyCatalog()
-            val userExcluded = favStore.currentExcluded()
             val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
                 null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
@@ -329,6 +364,7 @@ class PlaybackService : MediaSessionService() {
             val sessionCommands =
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .add(shuffleCommand)
+                    .add(toggleCommand)
                     .add(starCommand)
                     .add(scopeCommand)
                     .add(stopCommand)
@@ -336,10 +372,6 @@ class PlaybackService : MediaSessionService() {
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS)
-                    .remove(androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                     .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
@@ -357,6 +389,16 @@ class PlaybackService : MediaSessionService() {
             when (customCommand.customAction) {
                 CMD_SHUFFLE -> {
                     shuffle()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_TOGGLE -> {
+                    val player = exo
+                    when {
+                        player == null -> shuffle()
+                        player.mediaItemCount == 0 -> shuffle()
+                        player.isPlaying -> player.pause()
+                        else -> player.play()
+                    }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 CMD_STOP -> {
