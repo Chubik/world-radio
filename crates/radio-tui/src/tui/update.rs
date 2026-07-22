@@ -716,6 +716,7 @@ fn filter_clear(model: &mut Model, all: bool) -> Vec<Effect> {
 fn catalog_refresh_effect(browse: &BrowseState) -> Effect {
     let filter_active = !browse.query.trim().is_empty()
         || browse.filters.status != StatusFilter::All
+        || browse.filters.hide_unplayable
         || !browse.filters.is_empty();
     match filter_active {
         true => Effect::Search(
@@ -1674,6 +1675,23 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, Effect::Search(_, f) if f.status == StatusFilter::Favorites)),
             "an active status filter must still re-Search"
+        );
+    }
+
+    #[test]
+    fn catalog_synced_hide_unplayable_still_searches() {
+        let mut m = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode());
+        m.browse.query = String::new();
+        m.browse.filters.status = StatusFilter::All;
+        m.browse.filters.hide_unplayable = true;
+        let effects = update(&mut m, Msg::CatalogSynced { count: 10 });
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Search(_, _))),
+            "hide_unplayable alone must re-Search so drop_unplayable is applied"
+        );
+        assert!(
+            !effects.iter().any(|e| matches!(e, Effect::PopularSeed)),
+            "hide_unplayable alone must NOT use the raw popular seed"
         );
     }
 
