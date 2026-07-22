@@ -23,6 +23,7 @@ pub enum WorkerReq {
     SaveState,
     SyncCatalog,
     QuickTop,
+    PopularSeed,
     Sync,
     SyncCreate,
     SyncLogout,
@@ -147,6 +148,7 @@ fn handle_req(
         WorkerReq::SaveState => save_all(catalog, paths),
         WorkerReq::SyncCatalog => handle_sync_catalog(catalog, msg_tx),
         WorkerReq::QuickTop => handle_quick_top(catalog, msg_tx),
+        WorkerReq::PopularSeed => handle_popular_seed(catalog, msg_tx),
         WorkerReq::Sync => {
             handle_sync(catalog, paths, msg_tx, true);
         }
@@ -471,6 +473,27 @@ fn handle_sync_catalog(catalog: &Catalog, msg_tx: &Sender<Msg>) {
         Err(e) => {
             crate::log_warn!("worker: fetch_all failed: {e}");
             let _ = msg_tx.send(Msg::CatalogSyncFailed);
+        }
+    }
+}
+
+fn handle_popular_seed(catalog: &Catalog, msg_tx: &Sender<Msg>) {
+    let fav_ids = catalog.favorite_ids().to_vec();
+    match catalog.list_by_popularity(&fav_ids, 200) {
+        Ok(stations) => {
+            let rows: Vec<StationRow> = stations
+                .iter()
+                .map(|s| {
+                    let uuid = &s.stationuuid;
+                    station_to_row(s, catalog.is_favorite(uuid), catalog.is_hidden(uuid))
+                })
+                .collect();
+            if !rows.is_empty() {
+                let _ = msg_tx.send(Msg::SearchResults(rows));
+            }
+        }
+        Err(e) => {
+            crate::log_warn!("worker: popular seed failed: {e}");
         }
     }
 }

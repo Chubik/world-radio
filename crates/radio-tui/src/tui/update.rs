@@ -1654,6 +1654,7 @@ mod tests {
         match e {
             Effect::Search(_, _) => "search",
             Effect::LoadFacets => "loadfacets",
+            Effect::PopularSeed => "popularseed",
             Effect::Play(_) => "play",
             Effect::StopAudio => "stop",
             Effect::SetCrossfade(_) => "setcrossfade",

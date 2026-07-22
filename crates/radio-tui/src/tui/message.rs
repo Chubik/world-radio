@@ -74,6 +74,7 @@ pub enum Msg {
 pub enum Effect {
     Search(SearchQuery, crate::tui::model::BrowseFilters),
     LoadFacets,
+    PopularSeed,
     Play(String),
     StopAudio,
     SetCrossfade(bool),
