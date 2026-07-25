@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
     private var playerListener: Player.Listener? = null
     private var fav = false
     private var scope = "all"
+    private var favCount = 0
+    private var released = false
 
     private val requestPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -69,18 +71,24 @@ class MainActivity : ComponentActivity() {
     private fun connect() {
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         val sessionListener = object : MediaController.Listener {
-            override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+            override fun onExtrasChanged(session: MediaController, extras: Bundle) {
+                if (released) {
+                    return
+                }
                 readExtras(extras)
                 render()
             }
         }
         val future = MediaController.Builder(this, token).setListener(sessionListener).buildAsync()
         controllerFuture = future
+        // the future can resolve after onDestroy (rotation right after launch): without the
+        // guard we would attach a player listener to a controller this activity no longer owns.
         future.addListener({
             val c = runCatching { future.get() }.getOrNull()
-            when (c == null) {
-                true -> render()
-                false -> onConnected(c)
+            when {
+                released -> {}
+                c == null -> render()
+                else -> onConnected(c)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -104,7 +112,11 @@ class MainActivity : ComponentActivity() {
     private fun readExtras(extras: Bundle) {
         fav = extras.getBoolean(EXTRA_FAV, false)
         scope = extras.getString(EXTRA_SCOPE, "all") ?: "all"
+        favCount = extras.getInt(EXTRA_FAV_COUNT, 0)
     }
+
+    /** favs scope with nothing starred: shuffle has nothing to pick, so warn instead. */
+    private fun isWarn(): Boolean = scope == "favs" && favCount == 0
 
     private fun render() {
         val c = controller
@@ -151,7 +163,10 @@ class MainActivity : ComponentActivity() {
         val pill = findViewById<TextView>(R.id.scope_pill)
         when (scope) {
             "favs" -> {
-                pill.text = getString(R.string.home_scope_favs)
+                pill.text = when (favCount) {
+                    0 -> getString(R.string.home_scope_favs)
+                    else -> getString(R.string.home_scope_favs_n, favCount)
+                }
                 pill.setBackgroundResource(R.drawable.bg_pill_on)
                 pill.setTextColor(getColor(R.color.amber_hi))
             }
@@ -177,15 +192,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // the redline's warn state (scope=favs && 0 favourites) needs a favourites count,
-    // which the service does not publish in the session extras (only fav/scope
-    // booleans) — skipped until that count is available, see task report.
     private fun renderHero() {
         val ring = findViewById<View>(R.id.hero_ring)
         val sub = findViewById<TextView>(R.id.hero_sub)
-        ring.setBackgroundResource(R.drawable.bg_hero_ring)
-        sub.text = getString(if (scope == "favs") R.string.home_shuffle_sub_favs else R.string.home_shuffle_sub_all)
-        sub.setTextColor(getColor(R.color.dim))
+        val glyph = findViewById<ImageView>(R.id.hero_glyph)
+        val label = findViewById<TextView>(R.id.hero_label)
+        val tone = if (isWarn()) R.color.danger else R.color.amber_hi
+        glyph.setColorFilter(getColor(tone))
+        label.setTextColor(getColor(tone))
+        when {
+            isWarn() -> {
+                ring.setBackgroundResource(R.drawable.bg_hero_ring_warn)
+                sub.text = getString(R.string.home_warn_no_favs)
+                sub.setTextColor(getColor(R.color.danger))
+            }
+            else -> {
+                ring.setBackgroundResource(R.drawable.bg_hero_ring)
+                val sc = if (scope == "favs") R.string.home_shuffle_sub_favs else R.string.home_shuffle_sub_all
+                sub.text = getString(sc)
+                sub.setTextColor(getColor(R.color.dim))
+            }
+        }
     }
 
     private fun renderPlayButton(isPlaying: Boolean) {
@@ -230,6 +257,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        released = true
         playerListener?.let { controller?.removeListener(it) }
         playerListener = null
         controller = null

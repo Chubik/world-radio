@@ -36,6 +36,7 @@ const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
+const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -126,6 +127,7 @@ class PlaybackService : MediaSessionService() {
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
+            putInt(EXTRA_FAV_COUNT, favs.size)
         }
         session?.setSessionExtras(extras)
     }

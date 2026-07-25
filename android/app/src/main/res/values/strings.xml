@@ -10,6 +10,7 @@
     <string name="home_warn_no_favs">NO FAVOURITES YET — STAR ONE FIRST</string>
     <string name="home_scope_all">ALL STATIONS</string>
     <string name="home_scope_favs">FAVOURITES ONLY</string>
+    <string name="home_scope_favs_n">FAVOURITES ONLY · %1$d</string>
     <string name="home_fav_yes">★ FAVOURITE</string>
     <string name="home_fav_no">☆ not saved</string>
     <string name="home_play">PLAY</string>
