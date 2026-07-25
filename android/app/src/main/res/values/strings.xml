@@ -20,4 +20,5 @@
     <string name="home_stop">STOP</string>
     <string name="home_sync">SYNC</string>
     <string name="home_sync_sub">link desktop ↔ phone</string>
+    <string name="home_idle">— idle —</string>
 </resources>
