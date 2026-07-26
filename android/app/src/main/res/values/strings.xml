@@ -1,3 +1,25 @@
 <resources>
     <string name="app_name">r4dio</string>
+    <string name="home_now_playing">NOW PLAYING</string>
+    <string name="home_paused">PAUSED</string>
+    <string name="home_live">LIVE</string>
+    <string name="home_off_air">OFF AIR</string>
+    <string name="home_shuffle_label">TAP ANYWHERE — SHUFFLE</string>
+    <string name="home_shuffle_sub_all">random station · eyes-free</string>
+    <string name="home_shuffle_sub_favs">random favourite · eyes-free</string>
+    <string name="home_warn_no_favs">NO FAVOURITES YET — STAR ONE FIRST</string>
+    <string name="home_scope_all">ALL STATIONS</string>
+    <string name="home_scope_favs">FAVOURITES ONLY</string>
+    <string name="home_scope_favs_n">FAVOURITES ONLY · %1$d</string>
+    <string name="home_fav_yes">★ FAVOURITE</string>
+    <string name="home_fav_no">☆ not saved</string>
+    <string name="home_play">PLAY</string>
+    <string name="home_pause">PAUSE</string>
+    <string name="home_star">STAR</string>
+    <string name="home_starred">STARRED</string>
+    <string name="home_scope">scope</string>
+    <string name="home_stop">STOP</string>
+    <string name="home_sync">SYNC</string>
+    <string name="home_sync_sub">link desktop ↔ phone</string>
+    <string name="home_idle">— idle —</string>
 </resources>
