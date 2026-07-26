@@ -9,14 +9,14 @@
         android:paddingStart="20dp" android:paddingEnd="14dp"
         android:background="@color/bg">
         <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:text="r4dio sync"
-            android:textColor="@color/bright" android:textSize="16sp" android:textStyle="bold"
-            android:fontFamily="monospace" />
+            android:layout_weight="1" android:text="@string/sync_title"
+            android:textColor="@color/bright" android:textSize="16sp"
+            android:fontFamily="@font/ibm_plex_mono" android:fontWeight="700" />
         <TextView android:id="@+id/done" android:layout_width="wrap_content" android:layout_height="36dp"
-            android:gravity="center" android:text="✕ DONE"
+            android:gravity="center" android:text="@string/sync_done"
             android:paddingStart="14dp" android:paddingEnd="14dp"
-            android:textColor="@color/amber" android:textSize="12sp" android:textStyle="bold"
-            android:fontFamily="monospace" android:background="@drawable/btn_close" />
+            android:textColor="@color/amber" android:textSize="12sp"
+            android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_close" />
     </LinearLayout>
 
     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/rule" />
@@ -30,40 +30,41 @@
                 android:layout_height="wrap_content" android:orientation="vertical">
 
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="Sync your favourites, blocked and hidden countries across devices."
-                    android:textColor="@color/dim" android:textSize="13sp" android:lineSpacingExtra="2dp" />
+                    android:text="@string/sync_lede"
+                    android:textColor="@color/dim" android:textSize="13sp" android:lineSpacingExtra="2dp"
+                    android:fontFamily="@font/ibm_plex_sans" android:fontWeight="400" />
 
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp" android:text="SYNC KEY"
-                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
-                    android:letterSpacing="0.18" />
+                    android:layout_marginTop="18dp" android:text="@string/sync_key_label"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="@font/ibm_plex_mono"
+                    android:fontWeight="400" android:letterSpacing="0.18" />
 
                 <EditText android:id="@+id/key_input" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:hint="paste key r4-…"
+                    android:layout_marginTop="8dp" android:hint="@string/sync_key_hint"
                     android:textColor="@color/bright" android:textColorHint="@color/dim"
-                    android:fontFamily="monospace" android:textSize="12sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="400" android:textSize="12sp"
                     android:background="@drawable/field_key" android:padding="14dp"
                     android:inputType="textNoSuggestions" />
 
                 <TextView android:id="@+id/use_key" android:layout_width="match_parent" android:layout_height="50dp"
-                    android:layout_marginTop="18dp" android:gravity="center" android:text="✓  USE KEY"
-                    android:textColor="@color/on_amber" android:textSize="13sp" android:textStyle="bold"
-                    android:fontFamily="monospace" android:background="@drawable/btn_filled" />
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="@string/sync_use_key"
+                    android:textColor="@color/on_amber" android:textSize="13sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_filled" />
 
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp" android:gravity="center" android:text="OR"
-                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
-                    android:letterSpacing="0.18" />
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="@string/sync_or"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="@font/ibm_plex_mono"
+                    android:fontWeight="400" android:letterSpacing="0.18" />
 
                 <TextView android:id="@+id/create" android:layout_width="match_parent" android:layout_height="50dp"
-                    android:layout_marginTop="18dp" android:gravity="center" android:text="+  CREATE NEW"
-                    android:textColor="@color/amber" android:textSize="13sp" android:textStyle="bold"
-                    android:fontFamily="monospace" android:background="@drawable/btn_outline" />
+                    android:layout_marginTop="18dp" android:gravity="center" android:text="@string/sync_create"
+                    android:textColor="@color/amber" android:textSize="13sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_outline" />
 
                 <TextView android:id="@+id/scan" android:layout_width="match_parent" android:layout_height="50dp"
-                    android:layout_marginTop="10dp" android:gravity="center" android:text="SCAN QR"
-                    android:textColor="@color/amber" android:textSize="13sp" android:textStyle="bold"
-                    android:fontFamily="monospace" android:background="@drawable/btn_outline" />
+                    android:layout_marginTop="10dp" android:gravity="center" android:text="@string/sync_scan"
+                    android:textColor="@color/amber" android:textSize="13sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_outline" />
             </LinearLayout>
 
             <!-- ===== STATE B — linked ===== -->
@@ -71,32 +72,33 @@
                 android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
 
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="⊙ SYNCED" android:gravity="center"
+                    android:text="@string/sync_synced" android:gravity="center"
                     android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="6dp" android:paddingBottom="6dp"
-                    android:textColor="@color/amber" android:textSize="12sp" android:textStyle="bold"
-                    android:fontFamily="monospace" android:background="@drawable/pill_synced" />
+                    android:textColor="@color/olive" android:textSize="12sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/pill_synced" />
 
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp" android:text="YOUR SYNC KEY"
-                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="monospace"
-                    android:letterSpacing="0.18" />
+                    android:layout_marginTop="18dp" android:text="@string/sync_your_key"
+                    android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="@font/ibm_plex_mono"
+                    android:fontWeight="400" android:letterSpacing="0.18" />
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="vertical" android:layout_marginTop="8dp"
                     android:background="@drawable/card_panel" android:padding="16dp">
                     <TextView android:id="@+id/key_shown" android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:textColor="@color/amber_hi" android:textIsSelectable="true"
-                        android:fontFamily="monospace" android:textSize="12sp" />
+                        android:fontFamily="@font/ibm_plex_mono" android:fontWeight="400" android:textSize="12sp" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="12dp">
                         <TextView android:id="@+id/copy" android:layout_width="wrap_content" android:layout_height="44dp"
-                            android:gravity="center" android:text="⧉ COPY"
+                            android:gravity="center" android:text="@string/sync_copy"
                             android:paddingStart="16dp" android:paddingEnd="16dp"
-                            android:textColor="@color/bright" android:textSize="12sp" android:textStyle="bold"
-                            android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+                            android:textColor="@color/bright" android:textSize="12sp"
+                            android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp" android:text="tap to select · copy to clipboard"
-                            android:textColor="@color/dim" android:textSize="11sp" />
+                            android:layout_marginStart="12dp" android:text="@string/sync_copy_hint"
+                            android:textColor="@color/dim" android:textSize="11sp"
+                            android:fontFamily="@font/ibm_plex_sans" android:fontWeight="400" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -106,35 +108,35 @@
                     android:background="@drawable/card_qr_light" android:padding="16dp">
                     <ImageView android:id="@+id/qr" android:layout_width="200dp" android:layout_height="200dp" />
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp" android:text="SCAN ON ANOTHER DEVICE"
-                        android:textColor="#6E5430" android:textSize="10sp" android:fontFamily="monospace"
-                        android:letterSpacing="0.18" />
+                        android:layout_marginTop="10dp" android:text="@string/sync_qr_caption"
+                        android:textColor="#6E5430" android:textSize="10sp" android:fontFamily="@font/ibm_plex_mono"
+                        android:fontWeight="400" android:letterSpacing="0.18" />
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:orientation="horizontal" android:layout_marginTop="18dp">
                     <TextView android:id="@+id/logout" android:layout_width="0dp" android:layout_height="50dp"
-                        android:layout_weight="1" android:gravity="center" android:text="⇥ LOG OUT"
-                        android:textColor="@color/bright" android:textSize="13sp" android:textStyle="bold"
-                        android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+                        android:layout_weight="1" android:gravity="center" android:text="@string/sync_logout"
+                        android:textColor="@color/bright" android:textSize="13sp"
+                        android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
                     <TextView android:id="@+id/delete" android:layout_width="0dp" android:layout_height="50dp"
                         android:layout_weight="1" android:layout_marginStart="10dp" android:gravity="center"
-                        android:text="🗑 DELETE" android:textColor="@color/danger" android:textSize="13sp" android:textStyle="bold"
-                        android:fontFamily="monospace" android:background="@drawable/btn_danger" />
+                        android:text="@string/sync_delete" android:textColor="@color/danger" android:textSize="13sp"
+                        android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_danger" />
                 </LinearLayout>
             </LinearLayout>
 
             <!-- shared: hide countries, always at the bottom -->
             <TextView android:id="@+id/excluded_countries" android:layout_width="match_parent" android:layout_height="50dp"
-                android:layout_marginTop="18dp" android:gravity="center" android:text="⊘ HIDE COUNTRIES"
-                android:textColor="@color/bright" android:textSize="13sp" android:textStyle="bold"
-                android:fontFamily="monospace" android:background="@drawable/btn_ghost" />
+                android:layout_marginTop="18dp" android:gravity="center" android:text="@string/sync_hide_countries"
+                android:textColor="@color/bright" android:textSize="13sp"
+                android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
 
             <!-- feedback: a plain mailto link, no backend -->
             <TextView android:id="@+id/feedback" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="24dp" android:gravity="center"
-                android:text="✉ ideas or bugs? support@r4dio.net"
-                android:textColor="@color/dim" android:textSize="12sp" android:fontFamily="monospace" />
+                android:text="@string/sync_feedback"
+                android:textColor="@color/dim" android:textSize="12sp" android:fontFamily="@font/ibm_plex_sans" android:fontWeight="400" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>
