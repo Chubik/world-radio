@@ -156,7 +156,13 @@ class MainActivity : ComponentActivity() {
 
         val (country, codec) = parseArtist(metadata?.artist?.toString())
         findViewById<TextView>(R.id.ctx_country).text = country.orEmpty()
-        findViewById<TextView>(R.id.ctx_codec).text = codec.orEmpty()
+        // the separator lives on the codec so an absent country never leaves a dangling dot
+        val codecText = when {
+            codec.isNullOrBlank() -> ""
+            country.isNullOrBlank() -> codec
+            else -> "· $codec"
+        }
+        findViewById<TextView>(R.id.ctx_codec).text = codecText
     }
 
     private fun renderScope() {
@@ -180,13 +186,16 @@ class MainActivity : ComponentActivity() {
 
     private fun renderFav() {
         val ctxFav = findViewById<TextView>(R.id.ctx_fav)
+        val hasContext = findViewById<TextView>(R.id.ctx_country).text.isNotBlank() ||
+            findViewById<TextView>(R.id.ctx_codec).text.isNotBlank()
+        val prefix = if (hasContext) "· " else ""
         when (fav) {
             true -> {
-                ctxFav.text = getString(R.string.home_fav_yes)
+                ctxFav.text = prefix + getString(R.string.home_fav_yes)
                 ctxFav.setTextColor(getColor(R.color.amber))
             }
             false -> {
-                ctxFav.text = getString(R.string.home_fav_no)
+                ctxFav.text = prefix + getString(R.string.home_fav_no)
                 ctxFav.setTextColor(getColor(R.color.mute))
             }
         }
