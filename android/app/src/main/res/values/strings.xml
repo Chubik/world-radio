@@ -22,4 +22,22 @@
     <string name="home_sync">SYNC</string>
     <string name="home_sync_sub">link desktop ↔ phone</string>
     <string name="home_idle">— idle —</string>
+    <string name="sync_title">r4dio sync</string>
+    <string name="sync_done">✕ DONE</string>
+    <string name="sync_lede">Sync your favourites, blocked and hidden countries across devices.</string>
+    <string name="sync_key_label">SYNC KEY</string>
+    <string name="sync_key_hint">paste key r4-…</string>
+    <string name="sync_use_key">USE KEY</string>
+    <string name="sync_or">OR</string>
+    <string name="sync_create">CREATE NEW</string>
+    <string name="sync_scan">SCAN QR</string>
+    <string name="sync_synced">⊙ SYNCED</string>
+    <string name="sync_your_key">YOUR SYNC KEY</string>
+    <string name="sync_copy">COPY</string>
+    <string name="sync_copy_hint">tap to select · copy to clipboard</string>
+    <string name="sync_qr_caption">SCAN ON ANOTHER DEVICE</string>
+    <string name="sync_logout">LOG OUT</string>
+    <string name="sync_delete">DELETE</string>
+    <string name="sync_hide_countries">HIDE COUNTRIES</string>
+    <string name="sync_feedback">ideas or bugs? support@r4dio.net</string>
 </resources>
