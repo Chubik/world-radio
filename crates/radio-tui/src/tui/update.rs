@@ -259,7 +259,7 @@ fn audio_status(model: &mut Model, s: Status) -> Vec<Effect> {
             model.status = s;
             vec![]
         }
-        Status::Error(_) => {
+        Status::Error(_) | Status::StreamError { .. } => {
             model.now.title = None;
             model.status = s;
             auto_skip(model)

@@ -273,7 +273,11 @@ fn spawn_decode(
             &ready_tx,
         ) {
             if !abort_thread.load(Ordering::Relaxed) {
-                let _ = status_tx.send(Status::Error(e.to_string()));
+                let kind = radio_core::audio::command::classify_failure(&e);
+                let _ = status_tx.send(Status::StreamError {
+                    message: e.to_string(),
+                    kind,
+                });
             }
         }
     });

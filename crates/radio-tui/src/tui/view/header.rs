@@ -131,7 +131,9 @@ fn status_label(model: &Model, pal: &Palette) -> Span<'static> {
         ),
         Status::Buffering => Span::styled("◐ BUFFERING", Style::default().fg(pal.info)),
         Status::Retrying(n) => Span::styled(format!("◐ RETRY {n}"), Style::default().fg(pal.info)),
-        Status::Error(_) => Span::styled("✗ ERROR", Style::default().fg(pal.err)),
+        Status::Error(_) | Status::StreamError { .. } => {
+            Span::styled("✗ ERROR", Style::default().fg(pal.err))
+        }
         Status::Idle => Span::styled("■ IDLE", Style::default().fg(pal.dim)),
     }
 }
