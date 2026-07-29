@@ -34,19 +34,22 @@ pub enum Status {
 /// recoverable, mass-hiding live stations is not.
 pub fn classify_failure(err: &anyhow::Error) -> FailureKind {
     let text = format!("{err:#}").to_ascii_lowercase();
-    const NETWORK: [&str; 4] = [
+    const NETWORK: [&str; 5] = [
         "timed out",
         "network is unreachable",
         "no route to host",
         "network is down",
+        // mid-stream TCP reset (router restart, wifi hiccup, ISP NAT timeout) — a
+        // healthy station's connection can be reset by the local path, so this is
+        // never proof the origin is dead.
+        "connection reset",
     ];
-    const STREAM: [&str; 6] = [
+    const STREAM: [&str; 4] = [
         "http status",
         "connection refused",
         "dns error",
-        "connection reset",
+        // matches symphonia's `Error::Unsupported` display ("unsupported feature: ...")
         "unsupported",
-        "format",
     ];
     if NETWORK.iter().any(|n| text.contains(n)) {
         return FailureKind::NetworkDown;
@@ -126,6 +129,27 @@ mod tests {
     fn classifies_unknown_error_as_network_down() {
         // unknown causes must default to the safe direction: do not blame the station
         let e = anyhow::anyhow!("something we have never seen");
+        assert_eq!(classify_failure(&e), FailureKind::NetworkDown);
+    }
+
+    #[test]
+    fn classifies_connection_reset_as_network_down() {
+        // a mid-stream reset (router restart, wifi hiccup, ISP NAT timeout) is a
+        // local-network symptom, not proof the origin died — must under-hide.
+        let e = anyhow::anyhow!("connection reset by peer");
+        assert_eq!(classify_failure(&e), FailureKind::NetworkDown);
+    }
+
+    #[test]
+    fn classifies_symphonia_unsupported_feature_as_stream_dead() {
+        let e = anyhow::anyhow!("unsupported feature: mp3 layer 0");
+        assert_eq!(classify_failure(&e), FailureKind::StreamDead);
+    }
+
+    #[test]
+    fn classifies_network_error_mentioning_format_as_network_down() {
+        // the bare word "format" must never win over a genuine network cause
+        let e = anyhow::anyhow!("network is unreachable while negotiating stream format");
         assert_eq!(classify_failure(&e), FailureKind::NetworkDown);
     }
 
