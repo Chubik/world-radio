@@ -357,7 +357,7 @@ mod tests {
         cat.note_play_failure("u1");
         cat.save_health(&path).unwrap();
         let reloaded = Health::load(&path);
-        assert!(!reloaded.is_hidden("u1"));
+        assert!(reloaded.is_hidden("u1"));
     }
 
     #[test]

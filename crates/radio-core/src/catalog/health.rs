@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-const HIDE_THRESHOLD: u32 = 3;
+const HIDE_THRESHOLD: u32 = 1;
 
 #[derive(Debug, Default)]
 pub struct Health {
@@ -65,30 +65,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hides_after_threshold_failures() {
-        let mut h = Health::new();
-        for _ in 0..HIDE_THRESHOLD {
-            h.record_failure("u1");
-        }
-        assert!(h.is_hidden("u1"));
-    }
-
-    #[test]
-    fn below_threshold_not_hidden() {
-        let mut h = Health::new();
-        h.record_failure("u1");
-        assert!(!h.is_hidden("u1"));
-    }
-
-    #[test]
     fn success_resets_failures() {
         let mut h = Health::new();
-        h.record_failure("u1");
         h.record_failure("u1");
         h.record_success("u1");
         assert!(!h.is_hidden("u1"));
         h.record_failure("u1");
-        assert!(!h.is_hidden("u1"));
+        assert!(h.is_hidden("u1"));
     }
 
     #[test]
@@ -97,7 +80,6 @@ mod tests {
         for _ in 0..HIDE_THRESHOLD {
             h.record_failure("dead");
         }
-        h.record_failure("weak");
         let ids = h.hidden_ids();
         assert_eq!(ids, vec!["dead".to_string()]);
     }
@@ -130,11 +112,29 @@ mod tests {
         let path = dir.path().join("health.json");
         let mut h = Health::new();
         h.record_failure("u1");
-        h.record_failure("u1");
         h.save(&path).unwrap();
-        let mut loaded = Health::load(&path);
-        assert!(!loaded.is_hidden("u1"));
-        loaded.record_failure("u1");
+        let loaded = Health::load(&path);
         assert!(loaded.is_hidden("u1"));
+    }
+
+    #[test]
+    fn one_failure_hides() {
+        let mut h = Health::new();
+        h.record_failure("u1");
+        assert!(h.is_hidden("u1"));
+    }
+
+    #[test]
+    fn success_clears_a_failure() {
+        let mut h = Health::new();
+        h.record_failure("u1");
+        h.record_success("u1");
+        assert!(!h.is_hidden("u1"));
+    }
+
+    #[test]
+    fn untouched_station_is_not_hidden() {
+        let h = Health::new();
+        assert!(!h.is_hidden("u1"));
     }
 }

@@ -2,7 +2,7 @@ use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
     BrowseFocus, BrowseState, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
-use radio_audio::Status;
+use radio_audio::{FailureKind, Status};
 use std::time::{Duration, Instant};
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
@@ -259,10 +259,16 @@ fn audio_status(model: &mut Model, s: Status) -> Vec<Effect> {
             model.status = s;
             vec![]
         }
-        Status::Error(_) | Status::StreamError { .. } => {
+        Status::Error(_) => {
             model.now.title = None;
             model.status = s;
-            auto_skip(model)
+            auto_skip(model, FailureKind::StreamDead)
+        }
+        Status::StreamError { kind, .. } => {
+            let kind = *kind;
+            model.now.title = None;
+            model.status = s;
+            auto_skip(model, kind)
         }
         _ => {
             model.now.title = None;
@@ -272,13 +278,18 @@ fn audio_status(model: &mut Model, s: Status) -> Vec<Effect> {
     }
 }
 
-fn auto_skip(model: &mut Model) -> Vec<Effect> {
+fn auto_skip(model: &mut Model, kind: FailureKind) -> Vec<Effect> {
     let mut effects = Vec::new();
+    // a long streak is far more likely to be a broken local network than many
+    // simultaneously dead stations, so stop blaming stations once it trips
+    let blame_station = kind == FailureKind::StreamDead && model.auto_skip_count < AUTO_SKIP_MAX;
     if let Some(uuid) = model.now.uuid.clone() {
         model
             .browse
             .update_row(&uuid, |r| r.state = RowState::Disabled);
-        effects.push(Effect::MarkFailed(uuid));
+        if blame_station {
+            effects.push(Effect::MarkFailed(uuid));
+        }
     }
     if model.auto_skip_count >= AUTO_SKIP_MAX {
         return effects;
@@ -807,6 +818,14 @@ mod tests {
         }
     }
 
+    fn model_with_one_row(uuid: &str) -> Model {
+        let mut m = model();
+        m.browse.rows = vec![row(uuid)];
+        m.browse.selected = 0;
+        m.now.uuid = Some(uuid.into());
+        m
+    }
+
     #[test]
     fn quit_sets_should_quit() {
         let mut m = model();
@@ -1277,6 +1296,48 @@ mod tests {
         let fx = update(&mut m, Msg::AudioStatus(Status::Error("boom".into())));
         assert!(!fx.iter().map(eff_kind).any(|k| k == "play"));
         assert!(matches!(m.status, Status::Error(_)));
+    }
+
+    #[test]
+    fn network_failure_does_not_mark_the_station() {
+        let mut m = model_with_one_row("u1");
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "operation timed out".into(),
+                kind: FailureKind::NetworkDown,
+            }),
+        );
+        assert!(!fx.iter().any(|e| matches!(e, Effect::MarkFailed(_))));
+    }
+
+    #[test]
+    fn stream_failure_marks_the_station() {
+        let mut m = model_with_one_row("u1");
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "http status 404".into(),
+                kind: FailureKind::StreamDead,
+            }),
+        );
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::MarkFailed(u) if u == "u1")));
+    }
+
+    #[test]
+    fn long_failure_streak_stops_marking_stations() {
+        let mut m = model_with_one_row("u1");
+        m.auto_skip_count = AUTO_SKIP_MAX;
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "http status 404".into(),
+                kind: FailureKind::StreamDead,
+            }),
+        );
+        assert!(!fx.iter().any(|e| matches!(e, Effect::MarkFailed(_))));
     }
 
     #[test]
