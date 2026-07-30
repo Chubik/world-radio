@@ -82,7 +82,7 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
     let data = paths::ensure_data_dir()?;
     let cache = Cache::open(&data.join("stations.db"))?;
     let health = Health::load(&data.join("station_health.json"));
-    let catalog = Catalog::load(
+    let mut catalog = Catalog::load(
         cache,
         health,
         &data.join("favorites.json"),

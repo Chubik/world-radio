@@ -299,7 +299,7 @@ fn matches_filters(row: &StationRow, f: &crate::tui::model::BrowseFilters) -> bo
 }
 
 fn handle_search(
-    catalog: &Catalog,
+    catalog: &mut Catalog,
     q: &SearchQuery,
     filters: &crate::tui::model::BrowseFilters,
     msg_tx: &Sender<Msg>,
@@ -391,7 +391,10 @@ fn should_search_online(q: &SearchQuery) -> bool {
     !q.name.as_deref().map(str::trim).unwrap_or("").is_empty()
 }
 
-fn online_search_bounded(catalog: &Catalog, q: &SearchQuery) -> anyhow::Result<Vec<StationRow>> {
+fn online_search_bounded(
+    catalog: &mut Catalog,
+    q: &SearchQuery,
+) -> anyhow::Result<Vec<StationRow>> {
     let rb = api::resolve_with_timeout(4);
     let stations = rb.search(q)?;
     catalog.ingest(&stations)?;
@@ -498,7 +501,7 @@ fn handle_popular_seed(catalog: &Catalog, msg_tx: &Sender<Msg>) {
     }
 }
 
-fn handle_quick_top(catalog: &Catalog, msg_tx: &Sender<Msg>) {
+fn handle_quick_top(catalog: &mut Catalog, msg_tx: &Sender<Msg>) {
     let rb = api::resolve();
     match rb.fetch_top(200) {
         Ok(stations) => {
@@ -544,6 +547,8 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 
