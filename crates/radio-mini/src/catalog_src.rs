@@ -55,12 +55,14 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 
     fn catalog() -> Catalog {
         let cache = Cache::open_in_memory().unwrap();
-        let cat = Catalog::new(cache, Health::new());
+        let mut cat = Catalog::new(cache, Health::new());
         cat.ingest(&[station("u1", "http://one"), station("u2", "http://two")])
             .unwrap();
         cat

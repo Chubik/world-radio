@@ -22,7 +22,10 @@ impl Catalog {
         }
     }
 
-    pub fn ingest(&self, stations: &[Station]) -> anyhow::Result<()> {
+    pub fn ingest(&mut self, stations: &[Station]) -> anyhow::Result<()> {
+        for s in stations.iter().filter(|s| s.lastcheckok == 0) {
+            self.health.record_failure(&s.stationuuid);
+        }
         self.cache.upsert(stations)
     }
 
@@ -204,6 +207,58 @@ impl Catalog {
 mod tests {
     use super::*;
 
+    fn catalog_in_memory() -> Catalog {
+        Catalog::new(Cache::open_in_memory().unwrap(), Health::new())
+    }
+
+    fn station(uuid: &str) -> Station {
+        Station {
+            stationuuid: uuid.into(),
+            name: uuid.into(),
+            url_resolved: String::new(),
+            countrycode: String::new(),
+            language: String::new(),
+            tags: String::new(),
+            codec: String::new(),
+            bitrate: 0,
+            votes: 0,
+            geo_lat: None,
+            geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
+        }
+    }
+
+    #[test]
+    fn ingest_hides_a_station_the_server_reports_dead() {
+        let mut cat = catalog_in_memory();
+        let mut s = station("u1");
+        s.lastcheckok = 0;
+        cat.ingest(&[s]).unwrap();
+        assert!(cat.is_hidden("u1"));
+    }
+
+    #[test]
+    fn ingest_keeps_a_station_the_server_reports_alive() {
+        let mut cat = catalog_in_memory();
+        let mut s = station("u1");
+        s.lastcheckok = 1;
+        cat.ingest(&[s]).unwrap();
+        assert!(!cat.is_hidden("u1"));
+    }
+
+    #[test]
+    fn a_stale_server_ok_does_not_revive_a_station_the_user_found_dead() {
+        let mut cat = catalog_in_memory();
+        cat.note_play_failure("u1");
+        assert!(cat.is_hidden("u1"));
+        let mut s = station("u1");
+        s.lastcheckok = 1;
+        cat.ingest(&[s]).unwrap();
+        // the user's own experience outranks the server's stale verdict
+        assert!(cat.is_hidden("u1"));
+    }
+
     #[test]
     fn offline_search_excludes_hidden_stations() {
         let cache = Cache::open_in_memory().unwrap();
@@ -221,6 +276,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
                 Station {
                     stationuuid: "u2".into(),
@@ -234,6 +291,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
             ])
             .unwrap();
@@ -265,6 +324,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
                 Station {
                     stationuuid: "u2".into(),
@@ -278,6 +339,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
             ])
             .unwrap();
@@ -308,6 +371,8 @@ mod tests {
                 votes: 0,
                 geo_lat: None,
                 geo_long: None,
+                lastcheckok: 1,
+                lastchecktime_iso8601: String::new(),
             }])
             .unwrap();
         let cat = Catalog::new(cache, Health::new());
@@ -336,6 +401,8 @@ mod tests {
                 votes: 0,
                 geo_lat: None,
                 geo_long: None,
+                lastcheckok: 1,
+                lastchecktime_iso8601: String::new(),
             }])
             .unwrap();
         let mut health = Health::new();
@@ -423,6 +490,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
                 Station {
                     stationuuid: "u2".into(),
@@ -436,6 +505,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
             ])
             .unwrap();
@@ -473,6 +544,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
                 Station {
                     stationuuid: "u2".into(),
@@ -486,6 +559,8 @@ mod tests {
                     votes: 0,
                     geo_lat: None,
                     geo_long: None,
+                    lastcheckok: 1,
+                    lastchecktime_iso8601: String::new(),
                 },
             ])
             .unwrap();
@@ -499,7 +574,7 @@ mod tests {
     #[test]
     fn station_by_uuid_resolves_ingested_station_and_none_for_missing() {
         let cache = Cache::open_in_memory().unwrap();
-        let cat = Catalog::new(cache, Health::new());
+        let mut cat = Catalog::new(cache, Health::new());
         cat.ingest(&[Station {
             stationuuid: "u1".into(),
             name: "Jazz".into(),
@@ -512,6 +587,8 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }])
         .unwrap();
 
