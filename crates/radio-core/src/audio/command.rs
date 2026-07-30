@@ -44,12 +44,18 @@ pub fn classify_failure(err: &anyhow::Error) -> FailureKind {
         // never proof the origin is dead.
         "connection reset",
     ];
-    const STREAM: [&str; 4] = [
+    const STREAM: [&str; 6] = [
         "http status",
         "connection refused",
         "dns error",
         // matches symphonia's `Error::Unsupported` display ("unsupported feature: ...")
         "unsupported",
+        // matches symphonia's `Error::DecodeError` display ("malformed stream: {msg}"),
+        // e.g. a bad mp3 header — codec-specific, no network path produces this text.
+        "malformed stream",
+        // exact text symphonia's `read_buf_exact` uses for a short header read
+        // (io/buf_reader.rs) — a truncated/garbage stream, not a network symptom.
+        "buffer underrun",
     ];
     if NETWORK.iter().any(|n| text.contains(n)) {
         return FailureKind::NetworkDown;
@@ -151,6 +157,21 @@ mod tests {
         // the bare word "format" must never win over a genuine network cause
         let e = anyhow::anyhow!("network is unreachable while negotiating stream format");
         assert_eq!(classify_failure(&e), FailureKind::NetworkDown);
+    }
+
+    #[test]
+    fn classifies_truncated_header_probe_failure_as_stream_dead() {
+        // the exact string slot.rs produces when probe() bottoms out reading a
+        // fixed-size header short: symphonia's read_buf_exact UnexpectedEof.
+        let e = anyhow::anyhow!("probe failed: buffer underrun");
+        assert_eq!(classify_failure(&e), FailureKind::StreamDead);
+    }
+
+    #[test]
+    fn classifies_malformed_stream_probe_failure_as_stream_dead() {
+        // the exact wrapping slot.rs produces around a symphonia DecodeError.
+        let e = anyhow::anyhow!("probe failed: malformed stream: invalid header");
+        assert_eq!(classify_failure(&e), FailureKind::StreamDead);
     }
 
     #[test]
