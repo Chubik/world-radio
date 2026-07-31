@@ -24,9 +24,15 @@ pub fn should_sync(last: Option<i64>, now: i64, ttl_secs: i64) -> bool {
     }
 }
 
+/// the periodic in-session check. same TTL rule as startup — named separately so
+/// the two callers can diverge later without surprising each other.
+pub fn should_refresh(last: Option<i64>, now: i64, ttl_secs: i64) -> bool {
+    should_sync(last, now, ttl_secs)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::should_sync;
+    use super::{should_refresh, should_sync};
     const DAY: i64 = 86_400;
     #[test]
     fn syncs_when_empty() {
@@ -39,5 +45,21 @@ mod tests {
     #[test]
     fn syncs_when_stale() {
         assert!(should_sync(Some(1_000_000 - 25 * 3600), 1_000_000, DAY));
+    }
+
+    #[test]
+    fn periodic_refresh_waits_for_the_ttl() {
+        // an hour into a session that synced 10 minutes ago: not yet
+        assert!(!should_refresh(Some(1_000_000 - 600), 1_000_000, DAY));
+    }
+
+    #[test]
+    fn periodic_refresh_fires_once_the_ttl_expired() {
+        assert!(should_refresh(Some(1_000_000 - 25 * 3600), 1_000_000, DAY));
+    }
+
+    #[test]
+    fn periodic_refresh_fires_when_nothing_was_ever_synced() {
+        assert!(should_refresh(None, 1_000_000, DAY));
     }
 }
