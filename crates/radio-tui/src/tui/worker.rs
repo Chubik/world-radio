@@ -2,7 +2,13 @@ use crate::tui::message::Msg;
 use crate::tui::model::{RowState, StationRow};
 use radio_core::catalog::{api, Catalog, SearchQuery, Station};
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::time::Duration;
+
+// wall-clock hour between checks; the TTL inside should_refresh is what
+// actually decides, this only bounds how often we ask
+const REFRESH_CHECK_SECS: i64 = 3600;
+const CATALOG_TTL_SECS: i64 = 86_400;
 
 pub enum WorkerReq {
     Search(SearchQuery, crate::tui::model::BrowseFilters),
@@ -67,7 +73,17 @@ pub fn spawn(
     msg_tx: Sender<Msg>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        while let Ok(first) = req_rx.recv() {
+        let mut last_check = now_secs();
+        loop {
+            let first = match req_rx.recv_timeout(Duration::from_secs(60)) {
+                Ok(req) => req,
+                Err(RecvTimeoutError::Timeout) => {
+                    // periodic housekeeping; no request to process this round
+                    maybe_refresh(&mut catalog, &msg_tx, &mut last_check);
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            };
             let mut batch = vec![first];
             while let Ok(more) = req_rx.try_recv() {
                 batch.push(more);
@@ -458,6 +474,18 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn maybe_refresh(catalog: &mut Catalog, msg_tx: &Sender<Msg>, last_check: &mut i64) {
+    let now = now_secs();
+    if now - *last_check < REFRESH_CHECK_SECS {
+        return;
+    }
+    *last_check = now;
+    let last_sync = catalog.last_sync().ok().flatten();
+    if radio_core::catalog::should_refresh(last_sync, now, CATALOG_TTL_SECS) {
+        handle_sync_catalog(catalog, msg_tx);
+    }
 }
 
 fn handle_sync_catalog(catalog: &Catalog, msg_tx: &Sender<Msg>) {
