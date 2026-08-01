@@ -494,6 +494,10 @@ fn row_to_station(r: &rusqlite::Row) -> rusqlite::Result<Station> {
         votes: r.get(8)?,
         geo_lat: r.get(9)?,
         geo_long: r.get(10)?,
+        // not persisted: the server's verdict is only consumed at ingest time,
+        // a row read back from our own cache is never treated as reported-dead.
+        lastcheckok: 1,
+        lastchecktime_iso8601: String::new(),
     })
 }
 
@@ -514,6 +518,8 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 
@@ -750,6 +756,8 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 
@@ -766,6 +774,8 @@ mod tests {
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 

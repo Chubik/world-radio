@@ -2,7 +2,7 @@ use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
     BrowseFocus, BrowseState, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
-use radio_audio::Status;
+use radio_audio::{FailureKind, Status};
 use std::time::{Duration, Instant};
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
@@ -256,13 +256,24 @@ fn audio_status(model: &mut Model, s: Status) -> Vec<Effect> {
         Status::Playing { title, .. } => {
             model.now.title = title.clone();
             model.auto_skip_count = 0;
+            model.health_guard_count = 0;
+            let effects = match model.now.uuid.clone() {
+                Some(uuid) => vec![Effect::MarkSuccess(uuid)],
+                None => vec![],
+            };
             model.status = s;
-            vec![]
+            effects
         }
         Status::Error(_) => {
             model.now.title = None;
             model.status = s;
-            auto_skip(model)
+            auto_skip(model, FailureKind::StreamDead)
+        }
+        Status::StreamError { kind, .. } => {
+            let kind = *kind;
+            model.now.title = None;
+            model.status = s;
+            auto_skip(model, kind)
         }
         _ => {
             model.now.title = None;
@@ -272,13 +283,22 @@ fn audio_status(model: &mut Model, s: Status) -> Vec<Effect> {
     }
 }
 
-fn auto_skip(model: &mut Model) -> Vec<Effect> {
+fn auto_skip(model: &mut Model, kind: FailureKind) -> Vec<Effect> {
     let mut effects = Vec::new();
+    // a long streak is far more likely to be a broken local network than many
+    // simultaneously dead stations, so stop blaming stations once it trips.
+    // health_guard_count is deliberately NOT reset by manual play — only a real
+    // successful playback clears it — so a frustrated user retrying by hand on a
+    // broken network cannot refill this budget with keypresses.
+    let blame_station = kind == FailureKind::StreamDead && model.health_guard_count < AUTO_SKIP_MAX;
     if let Some(uuid) = model.now.uuid.clone() {
         model
             .browse
             .update_row(&uuid, |r| r.state = RowState::Disabled);
-        effects.push(Effect::MarkFailed(uuid));
+        if blame_station {
+            model.health_guard_count += 1;
+            effects.push(Effect::MarkFailed(uuid));
+        }
     }
     if model.auto_skip_count >= AUTO_SKIP_MAX {
         return effects;
@@ -807,6 +827,14 @@ mod tests {
         }
     }
 
+    fn model_with_one_row(uuid: &str) -> Model {
+        let mut m = model();
+        m.browse.rows = vec![row(uuid)];
+        m.browse.selected = 0;
+        m.now.uuid = Some(uuid.into());
+        m
+    }
+
     #[test]
     fn quit_sets_should_quit() {
         let mut m = model();
@@ -1280,6 +1308,48 @@ mod tests {
     }
 
     #[test]
+    fn network_failure_does_not_mark_the_station() {
+        let mut m = model_with_one_row("u1");
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "operation timed out".into(),
+                kind: FailureKind::NetworkDown,
+            }),
+        );
+        assert!(!fx.iter().any(|e| matches!(e, Effect::MarkFailed(_))));
+    }
+
+    #[test]
+    fn stream_failure_marks_the_station() {
+        let mut m = model_with_one_row("u1");
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "http status 404".into(),
+                kind: FailureKind::StreamDead,
+            }),
+        );
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::MarkFailed(u) if u == "u1")));
+    }
+
+    #[test]
+    fn long_failure_streak_stops_marking_stations() {
+        let mut m = model_with_one_row("u1");
+        m.health_guard_count = AUTO_SKIP_MAX;
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "http status 404".into(),
+                kind: FailureKind::StreamDead,
+            }),
+        );
+        assert!(!fx.iter().any(|e| matches!(e, Effect::MarkFailed(_))));
+    }
+
+    #[test]
     fn playing_resets_auto_skip_count() {
         let mut m = model();
         m.auto_skip_count = 3;
@@ -1295,6 +1365,25 @@ mod tests {
     }
 
     #[test]
+    fn playing_marks_the_current_station_as_successful() {
+        // a successful playback is the only thing that should ever un-hide a
+        // station; without this effect note_play_success has no production caller
+        // and every recorded failure is permanent at HIDE_THRESHOLD == 1.
+        let mut m = model_with_one_row("u1");
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::Playing {
+                sample_rate: 44100,
+                channels: 2,
+                title: None,
+            }),
+        );
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::MarkSuccess(u) if u == "u1")));
+    }
+
+    #[test]
     fn manual_play_resets_auto_skip_count() {
         let mut m = model();
         m.browse.rows = vec![row("u1")];
@@ -1302,6 +1391,61 @@ mod tests {
         m.auto_skip_count = 4;
         update(&mut m, Msg::PlaySelected);
         assert_eq!(m.auto_skip_count, 0);
+    }
+
+    #[test]
+    fn manual_play_does_not_reset_the_health_guard() {
+        // auto_skip_count is restored by every manual Enter, so a frustrated user on
+        // a broken network could otherwise hide dozens of stations. The health guard
+        // must be a separate counter that only clears on an actual successful play.
+        let mut m = model();
+        m.browse.rows = vec![row("u1")];
+        m.browse.selected = 0;
+        m.health_guard_count = AUTO_SKIP_MAX;
+        update(&mut m, Msg::PlaySelected);
+        assert_eq!(m.health_guard_count, AUTO_SKIP_MAX);
+    }
+
+    #[test]
+    fn shuffle_play_does_not_reset_the_health_guard() {
+        let mut m = model();
+        m.browse.rows = vec![row("u1")];
+        m.health_guard_count = AUTO_SKIP_MAX;
+        update(&mut m, Msg::Shuffle);
+        assert_eq!(m.health_guard_count, AUTO_SKIP_MAX);
+    }
+
+    #[test]
+    fn health_guard_stops_marking_stations_across_a_streak_survived_by_manual_replay() {
+        // the streak was accumulated across several auto-skips, THEN the user hit
+        // Enter (which resets auto_skip_count but must not reset the health guard),
+        // and the network is still broken: the guard must still suppress MarkFailed.
+        let mut m = model_with_one_row("u1");
+        m.health_guard_count = AUTO_SKIP_MAX;
+        m.auto_skip_count = 0; // as if just reset by a manual PlaySelected
+        let fx = update(
+            &mut m,
+            Msg::AudioStatus(Status::StreamError {
+                message: "http status 404".into(),
+                kind: FailureKind::StreamDead,
+            }),
+        );
+        assert!(!fx.iter().any(|e| matches!(e, Effect::MarkFailed(_))));
+    }
+
+    #[test]
+    fn successful_play_clears_the_health_guard() {
+        let mut m = model_with_one_row("u1");
+        m.health_guard_count = AUTO_SKIP_MAX;
+        update(
+            &mut m,
+            Msg::AudioStatus(Status::Playing {
+                sample_rate: 44100,
+                channels: 2,
+                title: None,
+            }),
+        );
+        assert_eq!(m.health_guard_count, 0);
     }
 
     #[test]
@@ -1736,6 +1880,7 @@ mod tests {
             Effect::RecheckAll => "recheckall",
             Effect::RecordHistory(_) => "history",
             Effect::MarkFailed(_) => "markfailed",
+            Effect::MarkSuccess(_) => "marksuccess",
             Effect::MirrorAnnounce { .. } => "mirrorannounce",
             Effect::SaveState => "savestate",
             Effect::Sync => "sync",
