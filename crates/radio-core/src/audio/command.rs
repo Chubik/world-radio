@@ -34,6 +34,15 @@ pub enum Status {
 /// recoverable, mass-hiding live stations is not.
 pub fn classify_failure(err: &anyhow::Error) -> FailureKind {
     let text = format!("{err:#}").to_ascii_lowercase();
+    // symphonia's probe() itself (not a codec) raises this exact Unsupported text
+    // when the body parses as something with no known container format at all —
+    // e.g. HTTP 200 + HTML from a captive portal, hotel/airport wifi splash, or ISP
+    // DNS hijack. That is the single most common "my network is broken" case, and
+    // it must never be confused with a genuinely unsupported CODEC (which instead
+    // names the codec, e.g. "unsupported feature: mp3 layer 0", and stays below).
+    if text.contains("no suitable format reader found") {
+        return FailureKind::NetworkDown;
+    }
     const NETWORK: [&str; 5] = [
         "timed out",
         "network is unreachable",
@@ -171,6 +180,30 @@ mod tests {
     fn classifies_malformed_stream_probe_failure_as_stream_dead() {
         // the exact wrapping slot.rs produces around a symphonia DecodeError.
         let e = anyhow::anyhow!("probe failed: malformed stream: invalid header");
+        assert_eq!(classify_failure(&e), FailureKind::StreamDead);
+    }
+
+    #[test]
+    fn classifies_captive_portal_no_format_reader_as_network_down() {
+        // verified against symphonia-core 0.6.0: probe.rs:597 calls
+        // unsupported_error("core (probe): no suitable format reader found"),
+        // whose Display prefixes "unsupported feature: " — this exact text is what
+        // slot.rs's "probe failed: {e}" wrap produces when the body parses as
+        // HTTP 200 + HTML (captive portal, hotel/airport wifi splash, ISP DNS
+        // hijack). Not a codec failure — must never be blamed on the station.
+        let e = anyhow::anyhow!(
+            "probe failed: unsupported feature: core (probe): no suitable format reader found"
+        );
+        assert_eq!(classify_failure(&e), FailureKind::NetworkDown);
+    }
+
+    #[test]
+    fn classifies_codec_level_unsupported_feature_as_stream_dead() {
+        // a genuinely unsupported codec from make_audio_decoder ("decoder init
+        // failed: unsupported feature: <codec>") is a real dead-stream signal and
+        // must stay StreamDead even though the probe's no-format-reader case (above)
+        // now returns NetworkDown.
+        let e = anyhow::anyhow!("decoder init failed: unsupported feature: mp3 layer 0");
         assert_eq!(classify_failure(&e), FailureKind::StreamDead);
     }
 
