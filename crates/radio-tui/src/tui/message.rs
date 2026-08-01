@@ -90,6 +90,7 @@ pub enum Effect {
     Restart,
     RecordHistory(String),
     MarkFailed(String),
+    MarkSuccess(String),
     MirrorAnnounce {
         uuid: String,
         name: String,

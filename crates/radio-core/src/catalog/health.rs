@@ -13,7 +13,8 @@ impl Health {
     }
 
     pub fn record_failure(&mut self, uuid: &str) {
-        *self.fails.entry(uuid.to_string()).or_insert(0) += 1;
+        let entry = self.fails.entry(uuid.to_string()).or_insert(0);
+        *entry = entry.saturating_add(1);
     }
 
     pub fn record_success(&mut self, uuid: &str) {
@@ -136,5 +137,13 @@ mod tests {
     fn untouched_station_is_not_hidden() {
         let h = Health::new();
         assert!(!h.is_hidden("u1"));
+    }
+
+    #[test]
+    fn record_failure_saturates_instead_of_overflowing() {
+        let mut h = Health::new();
+        h.fails.insert("u1".to_string(), u32::MAX);
+        h.record_failure("u1");
+        assert_eq!(h.fails.get("u1").copied(), Some(u32::MAX));
     }
 }
