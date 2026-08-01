@@ -20,6 +20,7 @@ pub enum WorkerReq {
     RecheckAll,
     RecordHistory(String),
     MarkFailed(String),
+    MarkSuccess(String),
     MirrorAnnounce {
         uuid: String,
         name: String,
@@ -115,7 +116,7 @@ fn handle_req(
 ) -> bool {
     match req {
         WorkerReq::Shutdown => return true,
-        WorkerReq::Search(q, filters) => handle_search(catalog, &q, &filters, msg_tx),
+        WorkerReq::Search(q, filters) => handle_search(catalog, &q, &filters, paths, msg_tx),
         WorkerReq::LoadFacets => handle_load_facets(catalog, msg_tx),
         WorkerReq::Blacklist(uuid) => {
             catalog.toggle_blacklist(&uuid);
@@ -151,6 +152,12 @@ fn handle_req(
                 crate::log_warn!("worker: failed to save health: {e}");
             }
         }
+        WorkerReq::MarkSuccess(uuid) => {
+            catalog.note_play_success(&uuid);
+            if let Err(e) = catalog.save_health(&paths.health) {
+                crate::log_warn!("worker: failed to save health: {e}");
+            }
+        }
         WorkerReq::MirrorAnnounce { uuid, name, url } => {
             if let Some(key) = radio_core::sync::load_key() {
                 let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
@@ -163,7 +170,7 @@ fn handle_req(
         WorkerReq::ResolveAndPlay(uuid) => handle_resolve_and_play(catalog, &uuid, msg_tx),
         WorkerReq::SaveState => save_all(catalog, paths),
         WorkerReq::SyncCatalog => handle_sync_catalog(catalog, msg_tx),
-        WorkerReq::QuickTop => handle_quick_top(catalog, msg_tx),
+        WorkerReq::QuickTop => handle_quick_top(catalog, paths, msg_tx),
         WorkerReq::PopularSeed => handle_popular_seed(catalog, msg_tx),
         WorkerReq::Sync => {
             handle_sync(catalog, paths, msg_tx, true);
@@ -318,6 +325,7 @@ fn handle_search(
     catalog: &mut Catalog,
     q: &SearchQuery,
     filters: &crate::tui::model::BrowseFilters,
+    paths: &WorkerPaths,
     msg_tx: &Sender<Msg>,
 ) {
     use crate::tui::model::StatusFilter;
@@ -353,7 +361,7 @@ fn handle_search(
         filters.hide_unplayable,
     ));
     if should_search_online(q) {
-        match online_search_bounded(catalog, q) {
+        match online_search_bounded(catalog, q, &paths.health) {
             Ok(rows) => {
                 let _ = msg_tx.send(drop_unplayable(
                     narrow_msg(Msg::SearchResults(rows), filters),
@@ -407,13 +415,26 @@ fn should_search_online(q: &SearchQuery) -> bool {
     !q.name.as_deref().map(str::trim).unwrap_or("").is_empty()
 }
 
+/// ingest carries dead-on-arrival health writes in-memory only; persist them here
+/// rather than relying on the incidental save_all at worker shutdown, since a
+/// search or quick-top ingest can happen any time in a long session.
+fn ingest_and_persist(
+    catalog: &mut Catalog,
+    stations: &[Station],
+    health_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    catalog.ingest(stations)?;
+    catalog.save_health(health_path)
+}
+
 fn online_search_bounded(
     catalog: &mut Catalog,
     q: &SearchQuery,
+    health_path: &std::path::Path,
 ) -> anyhow::Result<Vec<StationRow>> {
     let rb = api::resolve_with_timeout(4);
     let stations = rb.search(q)?;
-    catalog.ingest(&stations)?;
+    ingest_and_persist(catalog, &stations, health_path)?;
     let filtered = catalog.search_offline_filtered(q)?;
     Ok(rows_from(catalog, &filtered))
 }
@@ -529,11 +550,11 @@ fn handle_popular_seed(catalog: &Catalog, msg_tx: &Sender<Msg>) {
     }
 }
 
-fn handle_quick_top(catalog: &mut Catalog, msg_tx: &Sender<Msg>) {
+fn handle_quick_top(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>) {
     let rb = api::resolve();
     match rb.fetch_top(200) {
         Ok(stations) => {
-            if let Err(e) = catalog.ingest(&stations) {
+            if let Err(e) = ingest_and_persist(catalog, &stations, &paths.health) {
                 crate::log_warn!("worker: quick-top ingest failed: {e}");
                 return;
             }
@@ -744,5 +765,22 @@ mod tests {
         let (others, last) = coalesce(vec![WorkerReq::SaveState, WorkerReq::LoadFacets]);
         assert_eq!(others.len(), 2);
         assert!(last.is_none());
+    }
+
+    #[test]
+    fn ingest_and_persist_saves_health_deterministically() {
+        // ingest-time health writes (a server-reported dead station) must not rely
+        // on the incidental save_all at worker shutdown — a search or quick-top
+        // ingest can happen anywhere in a long session, and search_cli exits right
+        // after ingesting, losing the write entirely without this.
+        use radio_core::catalog::{Cache, Catalog, Health};
+        let dir = tempfile::tempdir().unwrap();
+        let health_path = dir.path().join("station_health.json");
+        let mut catalog = Catalog::new(Cache::open_in_memory().unwrap(), Health::new());
+        let mut dead = station("dead1");
+        dead.lastcheckok = 0;
+        ingest_and_persist(&mut catalog, &[dead], &health_path).unwrap();
+        let reloaded = Health::load(&health_path);
+        assert!(reloaded.is_hidden("dead1"));
     }
 }

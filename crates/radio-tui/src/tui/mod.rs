@@ -388,6 +388,9 @@ fn run_effects(
             Effect::MarkFailed(uuid) => {
                 let _ = req_tx.send(WorkerReq::MarkFailed(uuid));
             }
+            Effect::MarkSuccess(uuid) => {
+                let _ = req_tx.send(WorkerReq::MarkSuccess(uuid));
+            }
             Effect::MirrorAnnounce { uuid, name, url } => {
                 let _ = req_tx.send(WorkerReq::MirrorAnnounce { uuid, name, url });
             }
