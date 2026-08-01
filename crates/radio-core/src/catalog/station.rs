@@ -22,6 +22,16 @@ pub struct Station {
     pub geo_lat: Option<f64>,
     #[serde(default)]
     pub geo_long: Option<f64>,
+    /// the server's own last liveness probe: 1 = ok. stale in practice, so this
+    /// is a cheap secondary filter, never a substitute for the user's experience.
+    #[serde(default = "default_checkok")]
+    pub lastcheckok: u8,
+    #[serde(default)]
+    pub lastchecktime_iso8601: String,
+}
+
+fn default_checkok() -> u8 {
+    1
 }
 
 pub fn codec_is_unstable(codec: &str) -> bool {

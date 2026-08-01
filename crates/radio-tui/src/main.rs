@@ -82,7 +82,7 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
     let data = paths::ensure_data_dir()?;
     let cache = Cache::open(&data.join("stations.db"))?;
     let health = Health::load(&data.join("station_health.json"));
-    let catalog = Catalog::load(
+    let mut catalog = Catalog::load(
         cache,
         health,
         &data.join("favorites.json"),
@@ -112,7 +112,10 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
 
     let rb = api::resolve();
     let stations = rb.search(&query)?;
+    // the process exits right after this function returns, so the health write
+    // from ingest must happen now rather than riding on an incidental save later.
     catalog.ingest(&stations)?;
+    catalog.save_health(&data.join("station_health.json"))?;
     for s in &stations {
         println!(
             "{:<40} {:>3} {:>4}kbps {}",

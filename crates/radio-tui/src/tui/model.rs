@@ -363,6 +363,9 @@ pub struct Model {
     pub should_quit: bool,
     pub overlay: Overlay,
     pub auto_skip_count: u32,
+    /// separate from auto_skip_count: survives manual play so a frustrated user
+    /// retrying by hand on a broken network cannot refill the health-write budget.
+    pub health_guard_count: u32,
     pub fft_divisor: f32,
     pub crossfade: bool,
     pub spectrum_style: SpectrumStyle,
@@ -395,6 +398,7 @@ impl Model {
             should_quit: false,
             overlay: Overlay::None,
             auto_skip_count: 0,
+            health_guard_count: 0,
             fft_divisor: 12.0,
             crossfade: true,
             spectrum_style: SpectrumStyle::Bars,

@@ -110,6 +110,7 @@ impl MiniState {
             Status::Playing { .. } => Phase::Playing,
             Status::Buffering | Status::Retrying(_) => Phase::Buffering,
             Status::Error(_) => Phase::Error,
+            Status::StreamError { .. } => Phase::Error,
             Status::Idle => Phase::Idle,
         };
     }
