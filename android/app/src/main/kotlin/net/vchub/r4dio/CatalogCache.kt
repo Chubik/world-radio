@@ -30,22 +30,28 @@ class CatalogCache(private val dir: File) {
     }
 
     fun write(stations: List<Station>) {
+        val tmp = File(dir, "$CACHE_FILE.tmp")
         runCatching {
             val raw = json.encodeToString(
                 ListSerializer(FavStation.serializer()),
                 stations.map { FavStation.of(it) },
             )
             // write-then-rename so a process killed mid-write never leaves a
-            // half-file where a reader can see it
-            val tmp = File(dir, "$CACHE_FILE.tmp")
+            // half-file where a reader can see it. if rename fails (e.g. because
+            // the destination exists), delete the destination first and retry.
+            // this ensures the write is still atomic: the temp file is either
+            // successfully renamed to replace the destination, or not consumed at all.
             tmp.writeText(raw)
-            when (tmp.renameTo(file)) {
-                true -> {}
-                false -> {
-                    file.writeText(raw)
-                    tmp.delete()
-                }
+            val renamed = tmp.renameTo(file) || (file.delete() && tmp.renameTo(file))
+            when {
+                !renamed -> Log.w("r4dio", "catalog cache write failed: could not rename temp file")
             }
-        }.onFailure { Log.w("r4dio", "catalog cache write failed: ${it.message}") }
+        }.onFailure {
+            Log.w("r4dio", "catalog cache write failed: ${it.message}")
+        }.also {
+            // ensure the temp file is always cleaned up, even if an exception was thrown
+            // or if both rename attempts failed
+            tmp.delete()
+        }
     }
 }
