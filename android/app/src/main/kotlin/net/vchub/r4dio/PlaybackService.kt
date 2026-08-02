@@ -39,6 +39,7 @@ const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
 const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
 const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
 const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
+const val EXTRA_CATALOG_LOADED = "net.vchub.r4dio.EXTRA_CATALOG_LOADED"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -130,6 +131,11 @@ class PlaybackService : MediaSessionService() {
         // count what the user could actually reach, so the screen can tell
         // "your filters hid everything" apart from "the catalogue is empty"
         val playable = stations.count { allowedStation(it, hidden) }
+        // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
+        // ordering, so playableCount can be 0 just because the catalogue has not
+        // landed yet. this flag is the unfiltered total's own presence, never a
+        // filtered-vs-unfiltered difference, so it tells the two cases apart safely.
+        val catalogLoaded = stations.isNotEmpty()
         session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
@@ -137,6 +143,7 @@ class PlaybackService : MediaSessionService() {
             putInt(EXTRA_FAV_COUNT, favs.size)
             putInt(EXTRA_HIDDEN_COUNT, hidden.size)
             putInt(EXTRA_PLAYABLE_COUNT, playable)
+            putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
         }
         session?.setSessionExtras(extras)
     }
