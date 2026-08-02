@@ -37,6 +37,8 @@ const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
 const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
+const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
+const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -124,11 +126,17 @@ class PlaybackService : MediaSessionService() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
+        val hidden = favStore.currentExcluded()
+        // count what the user could actually reach, so the screen can tell
+        // "your filters hid everything" apart from "the catalogue is empty"
+        val playable = stations.count { allowedStation(it, hidden) }
         session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
             putInt(EXTRA_FAV_COUNT, favs.size)
+            putInt(EXTRA_HIDDEN_COUNT, hidden.size)
+            putInt(EXTRA_PLAYABLE_COUNT, playable)
         }
         session?.setSessionExtras(extras)
     }
