@@ -17,6 +17,12 @@ class CatalogCache(private val dir: File) {
     private val file get() = File(dir, CACHE_FILE)
 
     fun read(): List<Station> {
+        val bak = File(dir, "$CACHE_FILE.bak")
+        // if the cache is missing but a backup exists, the backup is the only
+        // surviving copy (from a failed write). promote it to the cache location.
+        if (!file.exists() && bak.exists()) {
+            bak.renameTo(file)
+        }
         if (!file.exists()) {
             return emptyList()
         }
@@ -39,7 +45,8 @@ class CatalogCache(private val dir: File) {
             )
             // write-then-rename so a process killed mid-write never leaves a
             // half-file where a reader can see it. preserve the previous cache
-            // across the whole operation so if anything fails, the old cache survives.
+            // across the whole operation: on failure, the backup survives and
+            // read() will recover it. only delete the backup once a cache file exists.
             tmp.writeText(raw)
             bak.delete()
             // move the current cache aside before trying to replace it. if this
@@ -63,11 +70,13 @@ class CatalogCache(private val dir: File) {
         }.onFailure {
             Log.w("r4dio", "catalog cache write failed: ${it.message}")
         }.also {
-            // ensure temp and backup files are always cleaned up, even if an exception
-            // was thrown or if the rename failed. the real cache is either the new
-            // content or the restored previous content.
+            // clean up temp file unconditionally (it is never the only copy).
+            // only delete backup if cache file exists, because if it does not exist,
+            // the backup may be the only surviving copy from a failed restore.
             tmp.delete()
-            bak.delete()
+            if (file.exists()) {
+                bak.delete()
+            }
         }
     }
 }
