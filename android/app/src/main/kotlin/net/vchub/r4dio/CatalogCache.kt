@@ -31,27 +31,43 @@ class CatalogCache(private val dir: File) {
 
     fun write(stations: List<Station>) {
         val tmp = File(dir, "$CACHE_FILE.tmp")
+        val bak = File(dir, "$CACHE_FILE.bak")
         runCatching {
             val raw = json.encodeToString(
                 ListSerializer(FavStation.serializer()),
                 stations.map { FavStation.of(it) },
             )
             // write-then-rename so a process killed mid-write never leaves a
-            // half-file where a reader can see it. if rename fails (e.g. because
-            // the destination exists), delete the destination first and retry.
-            // this ensures the write is still atomic: the temp file is either
-            // successfully renamed to replace the destination, or not consumed at all.
+            // half-file where a reader can see it. preserve the previous cache
+            // across the whole operation so if anything fails, the old cache survives.
             tmp.writeText(raw)
-            val renamed = tmp.renameTo(file) || (file.delete() && tmp.renameTo(file))
+            bak.delete()
+            // move the current cache aside before trying to replace it. if this
+            // succeeds, we have a backup to restore. if it fails, there was no
+            // cache yet, which is fine.
+            val hadPreviousCache = file.renameTo(bak)
+            // now try to put the new cache in place. if this fails, restore the backup.
+            val renamed = tmp.renameTo(file)
             when {
-                !renamed -> Log.w("r4dio", "catalog cache write failed: could not rename temp file")
+                renamed -> Unit  // success: new cache is in place, backup will be cleaned
+                hadPreviousCache -> {
+                    // new cache failed to land, restore the backup
+                    bak.renameTo(file)
+                    Log.w("r4dio", "catalog cache write failed: could not complete rename, previous cache preserved")
+                }
+                else -> {
+                    // new cache failed and there was no previous cache to restore
+                    Log.w("r4dio", "catalog cache write failed: could not rename temp file")
+                }
             }
         }.onFailure {
             Log.w("r4dio", "catalog cache write failed: ${it.message}")
         }.also {
-            // ensure the temp file is always cleaned up, even if an exception was thrown
-            // or if both rename attempts failed
+            // ensure temp and backup files are always cleaned up, even if an exception
+            // was thrown or if the rename failed. the real cache is either the new
+            // content or the restored previous content.
             tmp.delete()
+            bak.delete()
         }
     }
 }
