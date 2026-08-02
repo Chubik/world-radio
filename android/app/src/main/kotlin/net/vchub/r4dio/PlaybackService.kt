@@ -213,14 +213,25 @@ class PlaybackService : MediaSessionService() {
             val cached = catalogCache.read()
             when (cached.isEmpty()) {
                 true -> {
-                    fetchAndStore(userExcluded)?.let { startFrom(it, userExcluded) }
+                    val fetched = fetchAndStore(userExcluded)
                     catalogAttempted = true
+                    when (fetched) {
+                        // empty cache and an empty fetch: startFrom is never reached,
+                        // so nothing else republishes the extras with the now-true
+                        // catalogAttempted — without this the screen can stay on
+                        // whatever syncNow() published first, permanently stale.
+                        null -> scope.launch { refreshCustomLayout() }
+                        else -> startFrom(fetched, userExcluded)
+                    }
                 }
                 false -> {
                     stations = cached
                     Log.i("r4dio", "loaded ${cached.size} stations from cache")
-                    startFrom(cached, userExcluded)
+                    // set before startFrom so its null branch's refresh — scheduled on
+                    // Main, not run inline — is guaranteed to observe true, not a stale
+                    // false read from before this attempt resolved.
                     catalogAttempted = true
+                    startFrom(cached, userExcluded)
                     refreshIfStale(userExcluded)
                 }
             }
@@ -228,8 +239,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun startFrom(list: List<Station>, userExcluded: Set<String>) {
-        val pick = pickRandom(list, userExcluded) ?: return
-        main.post { playPick(pick) }
+        val pick = pickRandom(list, userExcluded)
+        when (pick) {
+            // catalogue loaded but the user's filters left nothing playable: the
+            // screen is still on its initial idle state, so it needs the fresh
+            // counts to show the warn instead of silently doing nothing.
+            null -> scope.launch { refreshCustomLayout() }
+            else -> main.post { playPick(pick) }
+        }
     }
 
     /** returns the fetched list, or null when the network gave us nothing. */
@@ -385,7 +402,13 @@ class PlaybackService : MediaSessionService() {
             val cat = withReadyCatalog()
             val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
-                null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
+                // same case as startFrom's null branch: nothing playable for this
+                // scope, and the user is looking at a screen that will not update
+                // itself otherwise — refresh so the warn (if any) can show.
+                null -> {
+                    Log.i("r4dio", "shuffle: nothing to play for scope $sc")
+                    refreshCustomLayout()
+                }
                 else -> playPick(pick)
             }
         }
