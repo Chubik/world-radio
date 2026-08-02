@@ -40,12 +40,15 @@ class CatalogCacheTest {
         assertEquals(emptyList<Station>(), CatalogCache(tmp.root).read())
     }
 
+    private fun tempSurvivors(): List<String> =
+        tmp.root.list().orEmpty().filter { it.endsWith(".tmp") }
+
     @Test
     fun write_leaves_no_temp_file_behind() {
         val cache = CatalogCache(tmp.root)
         cache.write(listOf(station("a")))
         assertTrue(File(tmp.root, "catalog.json").exists())
-        assertFalse(File(tmp.root, "catalog.json.tmp").exists())
+        assertEquals(emptyList<String>(), tempSurvivors())
     }
 
     @Test
@@ -110,57 +113,115 @@ class CatalogCacheTest {
         val cache = CatalogCache(tmp.root)
         cache.write(listOf(station("a")))
         cache.write(listOf(station("b")))
-        assertFalse(File(tmp.root, "catalog.json.tmp").exists())
+        assertEquals(emptyList<String>(), tempSurvivors())
     }
 
     @Test
-    fun when_write_fails_previous_cache_remains_readable() {
+    fun successful_write_reports_true() {
+        assertTrue(CatalogCache(tmp.root).write(listOf(station("a"))))
+    }
+
+    @Test
+    fun failed_write_reports_false_and_leaves_previous_cache_intact() {
         val cache = CatalogCache(tmp.root)
         val original = listOf(station("original"))
         cache.write(original)
 
-        // make the directory unwritable to force the write to fail on all operations
-        // (including temp file creation, rename, etc.)
         tmp.root.setWritable(false)
+        try {
+            assertFalse(cache.write(listOf(station("new"))))
+        } finally {
+            tmp.root.setWritable(true)
+        }
 
-        // try to write new content; this will fail because the directory is unwritable
-        cache.write(listOf(station("new")))
-
-        // restore permissions so we can read the cache
-        tmp.root.setWritable(true)
-
-        // the PREVIOUS cache must still be readable, not destroyed or truncated.
-        // this test verifies that write() does not truncate the existing file in place.
         assertEquals(original, cache.read())
+        assertEquals(emptyList<String>(), tempSurvivors())
     }
 
     @Test
-    fun no_backup_file_remains_after_successful_write() {
+    fun failed_rename_reports_false_and_leaves_no_temp_file() {
         val cache = CatalogCache(tmp.root)
         cache.write(listOf(station("a")))
-        assertFalse(File(tmp.root, "catalog.json.bak").exists())
-        assertFalse(File(tmp.root, "catalog.json.tmp").exists())
+        // a directory in the way of the rename makes the rename fail after the
+        // temp file has already been created and filled.
+        val blocker = File(tmp.root, "catalog.json")
+        blocker.delete()
+        blocker.mkdir()
+        File(blocker, "keep").writeText("x")
+
+        assertFalse(cache.write(listOf(station("b"))))
+        assertEquals(emptyList<String>(), tempSurvivors())
     }
 
     @Test
-    fun read_recovers_backup_when_cache_file_missing() {
-        // this test verifies that read() recovers from a backup that survived a
-        // failed write. this is the user-visible outcome when restore-rename fails:
-        // cache file is missing but backup exists, and read() promotes the backup.
-        val original = listOf(station("x"), station("y"))
-        val bakFile = File(tmp.root, "catalog.json.bak")
-
-        // manually create the failed-write state: backup exists, cache does not
+    fun concurrent_writes_never_leave_the_catalogue_empty_or_partial() {
         val cache = CatalogCache(tmp.root)
-        cache.write(original)
-        File(tmp.root, "catalog.json").renameTo(bakFile)
+        val first = (1..500).map { station("a$it") }
+        val second = (1..500).map { station("b$it") }
+        cache.write(first)
 
-        // read() should find the missing cache, discover the backup, promote it,
-        // and return the content
-        assertEquals(original, cache.read())
+        repeat(20) {
+            val start = java.util.concurrent.CountDownLatch(1)
+            val done = java.util.concurrent.CountDownLatch(2)
+            listOf(first, second).forEach { list ->
+                Thread {
+                    start.await()
+                    cache.write(list)
+                    done.countDown()
+                }.start()
+            }
+            start.countDown()
+            done.await()
 
-        // after promoting, the cache should be in place and backup gone
-        assertTrue(File(tmp.root, "catalog.json").exists())
-        assertFalse(bakFile.exists())
+            val read = cache.read()
+            assertTrue("catalogue was $read", read == first || read == second)
+            assertEquals(emptyList<String>(), tempSurvivors())
+        }
+    }
+
+    @Test
+    fun read_concurrent_with_writes_never_returns_an_empty_catalogue() {
+        val cache = CatalogCache(tmp.root)
+        val first = (1..500).map { station("a$it") }
+        val second = (1..500).map { station("b$it") }
+        cache.write(first)
+
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val writer = Thread {
+            while (!stop.get()) {
+                cache.write(second)
+                cache.write(first)
+            }
+        }
+        writer.start()
+        try {
+            repeat(200) {
+                val read = cache.read()
+                assertTrue("catalogue was ${read.size} stations", read == first || read == second)
+            }
+        } finally {
+            stop.set(true)
+            writer.join()
+        }
+    }
+
+    @Test
+    fun leftover_backup_from_an_older_version_is_not_resurrected() {
+        // older builds moved the cache aside to catalog.json.bak. such a file is
+        // stale by definition now and must never come back as the catalogue.
+        val cache = CatalogCache(tmp.root)
+        cache.write(listOf(station("current")))
+        // a well-formed stale backup produced in a separate directory, planted
+        // exactly as an older build would have left it behind on upgrade.
+        val other = tmp.newFolder()
+        CatalogCache(other).write(listOf(station("stale")))
+        File(other, "catalog.json").copyTo(File(tmp.root, "catalog.json.bak"))
+
+        assertEquals(listOf(station("current")), cache.read())
+
+        // with the current cache gone the stale backup must NOT stand in for it.
+        File(tmp.root, "catalog.json").delete()
+        File(other, "catalog.json").copyTo(File(tmp.root, "catalog.json.bak"), overwrite = true)
+        assertEquals(emptyList<Station>(), cache.read())
     }
 }

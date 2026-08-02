@@ -216,7 +216,12 @@ class PlaybackService : MediaSessionService() {
             return null
         }
         stations = fetched
-        catalogCache.write(fetched)
+        // only stamp the sync time when the catalogue really landed on disk,
+        // otherwise a fresh timestamp would suppress the retry we need.
+        if (!catalogCache.write(fetched)) {
+            Log.w("r4dio", "catalog cached in memory only, not stamping sync time")
+            return fetched
+        }
         runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
         Log.i("r4dio", "fetched ${fetched.size} stations")
         return fetched

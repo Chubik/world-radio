@@ -23,17 +23,18 @@ class CatalogCache(private val dir: File) {
     private val json = Json { ignoreUnknownKeys = true }
     private val file get() = File(dir, CACHE_FILE)
 
-    fun read(): List<Station> {
-        val bak = File(dir, "$CACHE_FILE.bak")
-        // if the cache is missing but a backup exists, the backup is the only
-        // surviving copy (from a failed write). promote it to the cache location.
-        if (!file.exists() && bak.exists()) {
-            bak.renameTo(file)
-        }
+    // the service holds a single instance, so an instance lock serialises every
+    // production reader and writer against each other.
+    private val lock = Any()
+
+    fun read(): List<Station> = synchronized(lock) {
+        // a leftover .bak can only come from a version of the app that used a
+        // move-aside write. it is never the only copy now, so just clear it.
+        File(dir, "$CACHE_FILE.bak").delete()
         if (!file.exists()) {
             return emptyList()
         }
-        return runCatching {
+        runCatching {
             json.decodeFromString(ListSerializer(FavStation.serializer()), file.readText())
                 .map { it.toStation() }
         }.getOrElse {
@@ -42,48 +43,31 @@ class CatalogCache(private val dir: File) {
         }
     }
 
-    fun write(stations: List<Station>) {
-        val tmp = File(dir, "$CACHE_FILE.tmp")
-        val bak = File(dir, "$CACHE_FILE.bak")
+    /** returns true only when the new content is on disk under [CACHE_FILE]. */
+    fun write(stations: List<Station>): Boolean = synchronized(lock) {
+        var tmp: File? = null
         runCatching {
             val raw = json.encodeToString(
                 ListSerializer(FavStation.serializer()),
                 stations.map { FavStation.of(it) },
             )
-            // write-then-rename so a process killed mid-write never leaves a
-            // half-file where a reader can see it. preserve the previous cache
-            // across the whole operation: on failure, the backup survives and
-            // read() will recover it. only delete the backup once a cache file exists.
-            tmp.writeText(raw)
-            bak.delete()
-            // move the current cache aside before trying to replace it. if this
-            // succeeds, we have a backup to restore. if it fails, there was no
-            // cache yet, which is fine.
-            val hadPreviousCache = file.renameTo(bak)
-            // now try to put the new cache in place. if this fails, restore the backup.
-            val renamed = tmp.renameTo(file)
-            when {
-                renamed -> Unit  // success: new cache is in place, backup will be cleaned
-                hadPreviousCache -> {
-                    // new cache failed to land, restore the backup
-                    bak.renameTo(file)
-                    Log.w("r4dio", "catalog cache write failed: could not complete rename, previous cache preserved")
-                }
-                else -> {
-                    // new cache failed and there was no previous cache to restore
-                    Log.w("r4dio", "catalog cache write failed: could not rename temp file")
-                }
+            // a unique temp file plus one rename: concurrent writers can never
+            // share a temp path, and rename within a directory is atomic, so the
+            // cache file is never absent and a reader never sees a half-file.
+            val t = File.createTempFile("catalog", ".tmp", dir)
+            tmp = t
+            t.writeText(raw)
+            val renamed = t.renameTo(file)
+            if (!renamed) {
+                Log.w("r4dio", "catalog cache write failed: could not rename temp file")
             }
-        }.onFailure {
+            renamed
+        }.getOrElse {
             Log.w("r4dio", "catalog cache write failed: ${it.message}")
+            false
         }.also {
-            // clean up temp file unconditionally (it is never the only copy).
-            // only delete backup if cache file exists, because if it does not exist,
-            // the backup may be the only surviving copy from a failed restore.
-            tmp.delete()
-            if (file.exists()) {
-                bak.delete()
-            }
+            // the temp file is never the only copy, so dropping it is always safe.
+            tmp?.delete()
         }
     }
 }
