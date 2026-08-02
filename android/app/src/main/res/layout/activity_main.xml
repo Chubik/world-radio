@@ -58,6 +58,12 @@
 
             <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
 
+            <TextView android:id="@+id/hidden_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/amber_hi" android:textSize="9.5sp"
+                android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                android:background="@drawable/bg_pill_on" />
+
             <TextView android:id="@+id/scope_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="@string/home_scope_all" android:textColor="@color/dim" android:textSize="9.5sp"
                 android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
