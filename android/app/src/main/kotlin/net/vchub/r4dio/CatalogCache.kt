@@ -7,6 +7,13 @@ import java.io.File
 
 private const val CACHE_FILE = "catalog.json"
 
+const val CATALOG_TTL_SECS = 86_400L
+
+// syncedAt of 0 means "never synced", which is always stale — the subtraction
+// handles that without a special case.
+fun catalogIsStale(syncedAt: Long, now: Long, ttlSecs: Long = CATALOG_TTL_SECS): Boolean =
+    now - syncedAt >= ttlSecs
+
 /**
  * the station catalogue on disk. deliberately a plain file rather than datastore:
  * datastore keeps its whole contents in memory and rewrites the file on every
