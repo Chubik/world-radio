@@ -20,8 +20,10 @@ fun showsHiddenPill(hiddenCount: Int, scope: String): Boolean =
  * [catalogLoaded] guards against the cold-start race: the catalogue read/fetch and
  * the sync round-trip run on independent concurrency domains with no ordering, so
  * playableCount can read 0 for a split second on app launch simply because the
- * catalogue has not landed yet, not because the filters emptied it. Only warn once
- * a catalogue actually exists to be emptied.
+ * catalogue load has not resolved yet, not because the filters emptied it. This
+ * must track whether a load was *attempted*, not whether it left any stations —
+ * the filters-emptied-the-fetch case is a resolved attempt with zero stations,
+ * and still needs to warn.
  */
 fun isAllHiddenWarn(playableCount: Int, hiddenCount: Int, scope: String, catalogLoaded: Boolean): Boolean =
     catalogLoaded && playableCount == 0 && hiddenCount > 0 && scope != "favs"

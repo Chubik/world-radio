@@ -61,11 +61,6 @@ class HomeStateTest {
         assertFalse(isAllHiddenWarn(playableCount = 0, hiddenCount = 3, scope = "all", catalogLoaded = false))
     }
 
-    @Test
-    fun no_warn_when_catalogue_not_loaded_even_with_many_hidden_countries() {
-        assertFalse(isAllHiddenWarn(playableCount = 0, hiddenCount = 40, scope = "all", catalogLoaded = false))
-    }
-
     // once the catalogue lands the same inputs must flip the warn on: this is not
     // a permanently disabled check, only deferred until there is something to judge
     @Test
@@ -74,8 +69,21 @@ class HomeStateTest {
         assertTrue(isAllHiddenWarn(playableCount = 0, hiddenCount = 3, scope = "all", catalogLoaded = true))
     }
 
+    // the actual bug this guard exists for: the user's filters were aggressive enough
+    // that the fetch itself returned nothing allowed (Catalog.takeAllowed filters before
+    // PlaybackService ever sees the result), so the load resolved with zero stations.
+    // that is still a load that happened, not a load that hasn't happened yet, and the
+    // warn must fire. fails under a `stations.isNotEmpty()`-style signal, which would
+    // wrongly read this state as "not loaded" and suppress the warn forever.
     @Test
-    fun no_warn_when_catalogue_not_loaded_and_no_countries_hidden() {
-        assertFalse(isAllHiddenWarn(playableCount = 0, hiddenCount = 0, scope = "all", catalogLoaded = false))
+    fun warn_when_the_filters_emptied_the_fetch_itself() {
+        assertTrue(isAllHiddenWarn(playableCount = 0, hiddenCount = 30, scope = "all", catalogLoaded = true))
+    }
+
+    // playableCount is counted from the loaded station list, so a non-zero count can
+    // never coexist with "not loaded" — documents that this combination is unreachable.
+    @Test
+    fun no_warn_when_playable_without_a_loaded_catalogue_is_impossible_in_practice() {
+        assertFalse(isAllHiddenWarn(playableCount = 5, hiddenCount = 3, scope = "all", catalogLoaded = false))
     }
 }
