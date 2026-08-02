@@ -65,6 +65,23 @@ class CatalogCacheTest {
     }
 
     @Test
+    fun write_does_not_refuse_an_empty_list_so_callers_must_guard_before_calling() {
+        // CatalogCache has no opinion about what "empty" means — it will happily
+        // clobber a full, good catalogue with nothing if a caller passes it an
+        // empty list (e.g. a failed network fetch). this is why PlaybackService's
+        // fetchAndStore/withReadyCatalog check fetched.isEmpty() BEFORE calling
+        // write(); the guard lives at the call site because it cannot live here.
+        val cache = CatalogCache(tmp.root)
+        val goodCatalogue = (1..1000).map { station("s$it") }
+        cache.write(goodCatalogue)
+        assertEquals(1000, cache.read().size)
+
+        cache.write(emptyList())
+
+        assertEquals(emptyList<Station>(), cache.read())
+    }
+
+    @Test
     fun empty_file_reads_as_empty() {
         File(tmp.root, "catalog.json").writeText("")
         assertEquals(emptyList<Station>(), CatalogCache(tmp.root).read())

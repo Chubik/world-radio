@@ -364,13 +364,9 @@ class PlaybackService : MediaSessionService() {
             return cached
         }
         val userExcluded = withContext(Dispatchers.IO) { favStore.currentExcluded() }
-        val fetched = withContext(Dispatchers.IO) {
-            catalog.fetchStations(userExcluded = userExcluded)
-        }
-        stations = fetched
-        withContext(Dispatchers.IO) { catalogCache.write(fetched) }
-        Log.i("r4dio", "fetched ${fetched.size} stations for shuffle")
-        return fetched
+        // delegate to fetchAndStore so there is one place that guards against an
+        // empty fetch clobbering the cache, not two independently-maintained ones.
+        return withContext(Dispatchers.IO) { fetchAndStore(userExcluded) } ?: emptyList()
     }
 
     private fun playPick(pick: Station) {
