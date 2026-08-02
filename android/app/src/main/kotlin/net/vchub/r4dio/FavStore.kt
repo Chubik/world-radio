@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -57,6 +58,7 @@ class FavStore(context: Context) {
     private val keyBlocked = stringSetPreferencesKey("blocked_uuids")
     private val keyExcludedCountries = stringSetPreferencesKey("excluded_countries")
     private val keyDeviceId = stringPreferencesKey("device_id")
+    private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
@@ -134,6 +136,12 @@ class FavStore(context: Context) {
         val id = "dev-%08x".format(kotlin.random.Random.nextInt())
         store.edit { it[keyDeviceId] = id }
         return id
+    }
+
+    suspend fun catalogSyncedAt(): Long = store.data.first()[keyCatalogSyncedAt] ?: 0L
+
+    suspend fun setCatalogSyncedAt(epochSecs: Long) {
+        store.edit { it[keyCatalogSyncedAt] = epochSecs }
     }
 
     suspend fun applyMerged(favs: Set<String>, blocked: Set<String>, excluded: Set<String>) {

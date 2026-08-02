@@ -69,6 +69,7 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var exo: ExoPlayer? = null
     private val catalog = Catalog()
+    private val catalogCache by lazy { CatalogCache(filesDir) }
     @Volatile private var stations: List<Station> = emptyList()
     @Volatile private var current: Station? = null
     @Volatile private var mirrorSeq: Long = 0
@@ -188,14 +189,49 @@ class PlaybackService : MediaSessionService() {
 
     private fun loadStations() {
         thread {
-            val fetched = catalog.fetchStations()
-            stations = fetched
-            Log.i("r4dio", "loaded ${fetched.size} stations")
             val userExcluded = runBlocking { favStore.currentExcluded() }
-            val pick = pickRandom(fetched, userExcluded) ?: return@thread
-            main.post { playPick(pick) }
+            val cached = catalogCache.read()
+            when (cached.isEmpty()) {
+                true -> fetchAndStore(userExcluded)?.let { startFrom(it, userExcluded) }
+                false -> {
+                    stations = cached
+                    Log.i("r4dio", "loaded ${cached.size} stations from cache")
+                    startFrom(cached, userExcluded)
+                    refreshIfStale(userExcluded)
+                }
+            }
         }
     }
+
+    private fun startFrom(list: List<Station>, userExcluded: Set<String>) {
+        val pick = pickRandom(list, userExcluded) ?: return
+        main.post { playPick(pick) }
+    }
+
+    /** returns the fetched list, or null when the network gave us nothing. */
+    private fun fetchAndStore(userExcluded: Set<String>): List<Station>? {
+        val fetched = catalog.fetchStations(userExcluded = userExcluded)
+        if (fetched.isEmpty()) {
+            Log.w("r4dio", "catalog fetch returned nothing")
+            return null
+        }
+        stations = fetched
+        catalogCache.write(fetched)
+        runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+        Log.i("r4dio", "fetched ${fetched.size} stations")
+        return fetched
+    }
+
+    // a stale cache still plays; the refresh only replaces it if it succeeds.
+    private fun refreshIfStale(userExcluded: Set<String>) {
+        val syncedAt = runBlocking { favStore.catalogSyncedAt() }
+        if (!catalogIsStale(syncedAt, nowSecs())) {
+            return
+        }
+        thread { fetchAndStore(userExcluded) }
+    }
+
+    private fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
     private fun launchSyncActivity() {
         // android 16 blocks a background service from starting an activity even
@@ -322,10 +358,17 @@ class PlaybackService : MediaSessionService() {
     private suspend fun withReadyCatalog(): List<Station> {
         val cur = stations
         if (cur.isNotEmpty()) return cur
+        val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+        if (cached.isNotEmpty()) {
+            stations = cached
+            return cached
+        }
+        val userExcluded = withContext(Dispatchers.IO) { favStore.currentExcluded() }
         val fetched = withContext(Dispatchers.IO) {
-            catalog.fetchStations()
+            catalog.fetchStations(userExcluded = userExcluded)
         }
         stations = fetched
+        withContext(Dispatchers.IO) { catalogCache.write(fetched) }
         Log.i("r4dio", "fetched ${fetched.size} stations for shuffle")
         return fetched
     }
