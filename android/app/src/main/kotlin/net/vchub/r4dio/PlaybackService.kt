@@ -74,6 +74,11 @@ class PlaybackService : MediaSessionService() {
     private val catalog = Catalog()
     private val catalogCache by lazy { CatalogCache(filesDir) }
     @Volatile private var stations: List<Station> = emptyList()
+    // true once a load has been attempted and resolved, on either branch — including
+    // the branch where the user's filters emptied the fetch and `stations` stays
+    // empty. distinct from `stations.isNotEmpty()`, which would wrongly read as
+    // "not loaded" in that case and permanently suppress the all-hidden warn.
+    @Volatile private var catalogAttempted = false
     @Volatile private var current: Station? = null
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
@@ -133,9 +138,9 @@ class PlaybackService : MediaSessionService() {
         val playable = stations.count { allowedStation(it, hidden) }
         // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
         // ordering, so playableCount can be 0 just because the catalogue has not
-        // landed yet. this flag is the unfiltered total's own presence, never a
+        // landed yet. this flag is attempted-ness, not station presence, never a
         // filtered-vs-unfiltered difference, so it tells the two cases apart safely.
-        val catalogLoaded = stations.isNotEmpty()
+        val catalogLoaded = catalogAttempted
         session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
@@ -207,11 +212,15 @@ class PlaybackService : MediaSessionService() {
             val userExcluded = runBlocking { favStore.currentExcluded() }
             val cached = catalogCache.read()
             when (cached.isEmpty()) {
-                true -> fetchAndStore(userExcluded)?.let { startFrom(it, userExcluded) }
+                true -> {
+                    fetchAndStore(userExcluded)?.let { startFrom(it, userExcluded) }
+                    catalogAttempted = true
+                }
                 false -> {
                     stations = cached
                     Log.i("r4dio", "loaded ${cached.size} stations from cache")
                     startFrom(cached, userExcluded)
+                    catalogAttempted = true
                     refreshIfStale(userExcluded)
                 }
             }
@@ -393,7 +402,9 @@ class PlaybackService : MediaSessionService() {
         val userExcluded = withContext(Dispatchers.IO) { favStore.currentExcluded() }
         // delegate to fetchAndStore so there is one place that guards against an
         // empty fetch clobbering the cache, not two independently-maintained ones.
-        return withContext(Dispatchers.IO) { fetchAndStore(userExcluded) } ?: emptyList()
+        val fetched = withContext(Dispatchers.IO) { fetchAndStore(userExcluded) }
+        catalogAttempted = true
+        return fetched ?: emptyList()
     }
 
     private fun playPick(pick: Station) {
