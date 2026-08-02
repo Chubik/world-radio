@@ -277,15 +277,22 @@ class PlaybackService : MediaSessionService() {
 
     private fun syncNow() {
         scope.launch {
-            val key = favStore.syncKey() ?: return@launch
-            val local = SyncData(
-                favs = favStore.currentFavUuids().toList(),
-                blocked = favStore.currentBlocked().toList(),
-                excluded_countries = favStore.currentExcluded().toList(),
-            )
-            val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
-            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
-            refreshCustomLayout()
+            val key = favStore.syncKey()
+            when (key) {
+                // no linked device: nothing to merge, but local settings may have
+                // changed, so the screen still needs the fresh counts
+                null -> refreshCustomLayout()
+                else -> {
+                    val local = SyncData(
+                        favs = favStore.currentFavUuids().toList(),
+                        blocked = favStore.currentBlocked().toList(),
+                        excluded_countries = favStore.currentExcluded().toList(),
+                    )
+                    val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+                    favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
+                    refreshCustomLayout()
+                }
+            }
         }
     }
 
