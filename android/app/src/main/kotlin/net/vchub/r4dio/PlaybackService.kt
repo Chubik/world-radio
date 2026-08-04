@@ -79,6 +79,10 @@ class PlaybackService : MediaSessionService() {
     // empty. distinct from `stations.isNotEmpty()`, which would wrongly read as
     // "not loaded" in that case and permanently suppress the all-hidden warn.
     @Volatile private var catalogAttempted = false
+    // collapses concurrent refreshIfStale() callers (cold-start loadStations() and
+    // syncNow(), which both can run in the first seconds of a service) into a single
+    // network fetch instead of one each.
+    private val refreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var current: Station? = null
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
@@ -274,7 +278,27 @@ class PlaybackService : MediaSessionService() {
         if (!catalogIsStale(syncedAt, nowSecs())) {
             return
         }
-        thread { fetchAndStore(userExcluded) }
+        // cold start can reach this from both loadStations() and syncNow() within the
+        // same second; without this guard they would both pass the staleness check
+        // and fire two network fetches for one actual staleness event.
+        if (!refreshInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                val fetched = fetchAndStore(userExcluded)
+                // a successful refetch can change playableCount — including 0 to
+                // non-zero, which is exactly the hidden-countries recovery case — so
+                // the screen needs to learn about it instead of waiting for the next
+                // event that happens to call refreshCustomLayout() on its own.
+                when (fetched) {
+                    null -> {}
+                    else -> scope.launch { refreshCustomLayout() }
+                }
+            } finally {
+                refreshInFlight.set(false)
+            }
+        }
     }
 
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000
@@ -312,9 +336,14 @@ class PlaybackService : MediaSessionService() {
         scope.launch {
             val key = favStore.syncKey()
             when (key) {
-                // no linked device: nothing to merge, but local settings may have
-                // changed, so the screen still needs the fresh counts
-                null -> refreshCustomLayout()
+                // no linked device: nothing to merge, but local settings (including the
+                // excluded-country set) may have just changed via setExcluded(), which
+                // is the common case since most installs have no linked device — so
+                // still act on a stamp reset before refreshing the extras.
+                null -> {
+                    refreshIfStale(favStore.currentExcluded())
+                    refreshCustomLayout()
+                }
                 else -> {
                     val local = SyncData(
                         favs = favStore.currentFavUuids().toList(),
@@ -322,7 +351,18 @@ class PlaybackService : MediaSessionService() {
                         excluded_countries = favStore.currentExcluded().toList(),
                     )
                     val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
-                    favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
+                    favStore.applyMerged(
+                        merged.favs.toSet(),
+                        merged.blocked.toSet(),
+                        merged.excluded_countries.toSet(),
+                    )
+                    // setExcluded()/applyMerged() already reset the sync stamp when the
+                    // excluded set actually changed — this is what acts on that reset
+                    // within the running service, since refreshIfStale() is otherwise
+                    // only reached once, from loadStations()'s cache-hit branch at
+                    // startup. always safe to call: it is itself TTL-gated, so it is a
+                    // no-op unless a reset (or real TTL expiry) actually happened.
+                    refreshIfStale(favStore.currentExcluded())
                     refreshCustomLayout()
                 }
             }
