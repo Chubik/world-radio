@@ -162,7 +162,12 @@ class PlaybackService : MediaSessionService() {
         val player = ExoPlayer.Builder(this).build()
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                current?.let { RadioWidgetProvider.refresh(this@PlaybackService, it.name, isPlaying) }
+                // no coroutine scope in this listener callback; favourite state is
+                // refreshed separately by refreshCustomLayout() elsewhere.
+                current?.let {
+                    val meta = widgetMetaLabel(it.country, it.codec, it.bitrate)
+                    RadioWidgetProvider.refresh(this@PlaybackService, it.name, meta, isPlaying, false)
+                }
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -423,7 +428,9 @@ class PlaybackService : MediaSessionService() {
             }
             else -> {
                 current = station
-                RadioWidgetProvider.refresh(this, evt.name, false)
+                // mirror events carry no country/codec/bitrate, so meta has nothing to show.
+                val isFav = runBlocking { favStore.currentFavUuids() }.contains(station.uuid)
+                RadioWidgetProvider.refresh(this, evt.name, "", false, isFav)
             }
         }
     }
@@ -473,7 +480,10 @@ class PlaybackService : MediaSessionService() {
     private fun playPick(pick: Station) {
         val player = exo ?: return
         current = pick
-        RadioWidgetProvider.refresh(this, pick.name, true)
+        // no coroutine scope available in this function to read favourites; Task 5's
+        // shared refresh helper is expected to correct this to the real fav state.
+        val meta = widgetMetaLabel(pick.country, pick.codec, pick.bitrate)
+        RadioWidgetProvider.refresh(this, pick.name, meta, true, false)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
