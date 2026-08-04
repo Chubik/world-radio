@@ -36,6 +36,9 @@ class MainActivity : ComponentActivity() {
     private var fav = false
     private var scope = "all"
     private var favCount = 0
+    private var hiddenCount = 0
+    private var playableCount = 0
+    private var catalogLoaded = false
     private var released = false
 
     private val requestPermission =
@@ -113,16 +116,24 @@ class MainActivity : ComponentActivity() {
         fav = extras.getBoolean(EXTRA_FAV, false)
         scope = extras.getString(EXTRA_SCOPE, "all") ?: "all"
         favCount = extras.getInt(EXTRA_FAV_COUNT, 0)
+        hiddenCount = extras.getInt(EXTRA_HIDDEN_COUNT, 0)
+        playableCount = extras.getInt(EXTRA_PLAYABLE_COUNT, 0)
+        catalogLoaded = extras.getBoolean(EXTRA_CATALOG_LOADED, false)
     }
 
-    /** favs scope with nothing starred: shuffle has nothing to pick, so warn instead. */
-    private fun isWarn(): Boolean = scope == "favs" && favCount == 0
+    /** the two reasons shuffle has nothing to pick, each with its own message. */
+    private fun warnMessage(): Int? = when {
+        scope == "favs" && favCount == 0 -> R.string.home_warn_no_favs
+        isAllHiddenWarn(playableCount, hiddenCount, scope, catalogLoaded) -> R.string.home_warn_all_hidden
+        else -> null
+    }
 
     private fun render() {
         val c = controller
         renderPlayback(c?.isPlaying ?: false)
         renderStation(c)
         renderScope()
+        renderHidden()
         renderFav()
         renderHero()
         renderPlayButton(c?.isPlaying ?: false)
@@ -184,6 +195,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun renderHidden() {
+        val pill = findViewById<TextView>(R.id.hidden_pill)
+        when (showsHiddenPill(hiddenCount, scope)) {
+            true -> {
+                pill.text = getString(R.string.home_hidden_n, hiddenCount)
+                pill.visibility = View.VISIBLE
+            }
+            false -> pill.visibility = View.GONE
+        }
+    }
+
     private fun renderFav() {
         val ctxFav = findViewById<TextView>(R.id.ctx_fav)
         val hasContext = findViewById<TextView>(R.id.ctx_country).text.isNotBlank() ||
@@ -206,20 +228,21 @@ class MainActivity : ComponentActivity() {
         val sub = findViewById<TextView>(R.id.hero_sub)
         val glyph = findViewById<ImageView>(R.id.hero_glyph)
         val label = findViewById<TextView>(R.id.hero_label)
-        val tone = if (isWarn()) R.color.danger else R.color.amber_hi
+        val warn = warnMessage()
+        val tone = if (warn != null) R.color.danger else R.color.amber_hi
         glyph.setColorFilter(getColor(tone))
         label.setTextColor(getColor(tone))
-        when {
-            isWarn() -> {
-                ring.setBackgroundResource(R.drawable.bg_hero_ring_warn)
-                sub.text = getString(R.string.home_warn_no_favs)
-                sub.setTextColor(getColor(R.color.danger))
-            }
-            else -> {
+        when (warn) {
+            null -> {
                 ring.setBackgroundResource(R.drawable.bg_hero_ring)
                 val sc = if (scope == "favs") R.string.home_shuffle_sub_favs else R.string.home_shuffle_sub_all
                 sub.text = getString(sc)
                 sub.setTextColor(getColor(R.color.dim))
+            }
+            else -> {
+                ring.setBackgroundResource(R.drawable.bg_hero_ring_warn)
+                sub.text = getString(warn)
+                sub.setTextColor(getColor(R.color.danger))
             }
         }
     }
