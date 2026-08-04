@@ -98,5 +98,6 @@
         android:padding="11dp"
         android:background="@drawable/widget_btn_primary"
         android:src="@drawable/ic_play"
+        android:tint="@color/on_amber"
         android:contentDescription="@string/widget_cd_toggle" />
 </LinearLayout>
