@@ -158,10 +158,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     // one place that knows what the widget needs, so the five call sites cannot drift.
-    // runBlocking is safe here: DataStore reads dispatch on Dispatchers.IO internally,
-    // so blocking the caller's thread (main or a coroutine worker) never waits on itself.
-    private fun refreshWidget(station: Station?, isPlaying: Boolean) {
-        val favs = runBlocking { favStore.currentFavUuids() }
+    private fun refreshWidget(station: Station?, isPlaying: Boolean, favs: Set<String>) {
         RadioWidgetProvider.refresh(
             context = this,
             station = station?.name.orEmpty(),
@@ -170,6 +167,15 @@ class PlaybackService : MediaSessionService() {
             isFav = station?.uuid?.let { favs.contains(it) } ?: false,
         )
     }
+
+    // for the three call sites with no coroutine context in hand (ExoPlayer listener,
+    // playPick, the mirror-event branch). runBlocking does not deadlock here: it
+    // installs its own event loop, so the DataStore read resumes on the blocked thread
+    // rather than waiting on Main. keep this read cheap — DataStore's data flow has no
+    // flowOn, so it runs on the caller's thread, and after the first read it is served
+    // from memory cache.
+    private fun refreshWidget(station: Station?, isPlaying: Boolean) =
+        refreshWidget(station, isPlaying, runBlocking { favStore.currentFavUuids() })
 
     override fun onCreate() {
         super.onCreate()
@@ -578,7 +584,7 @@ class PlaybackService : MediaSessionService() {
                         else -> scope.launch {
                             favStore.toggleFav(st)
                             refreshCustomLayout()
-                            refreshWidget(current, exo?.isPlaying == true)
+                            refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
                             syncNow()
                         }
                     }
@@ -593,7 +599,7 @@ class PlaybackService : MediaSessionService() {
                         }
                         favStore.setScope(next)
                         refreshCustomLayout()
-                        refreshWidget(current, exo?.isPlaying == true)
+                        refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
                         shuffle()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
