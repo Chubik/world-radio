@@ -157,17 +157,26 @@ class PlaybackService : MediaSessionService() {
         session?.setSessionExtras(extras)
     }
 
+    // one place that knows what the widget needs, so the five call sites cannot drift.
+    // runBlocking is safe here: DataStore reads dispatch on Dispatchers.IO internally,
+    // so blocking the caller's thread (main or a coroutine worker) never waits on itself.
+    private fun refreshWidget(station: Station?, isPlaying: Boolean) {
+        val favs = runBlocking { favStore.currentFavUuids() }
+        RadioWidgetProvider.refresh(
+            context = this,
+            station = station?.name.orEmpty(),
+            meta = station?.let { widgetMetaLabel(it.country, it.codec, it.bitrate) }.orEmpty(),
+            isPlaying = isPlaying,
+            isFav = station?.uuid?.let { favs.contains(it) } ?: false,
+        )
+    }
+
     override fun onCreate() {
         super.onCreate()
         val player = ExoPlayer.Builder(this).build()
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                // no coroutine scope in this listener callback; favourite state is
-                // refreshed separately by refreshCustomLayout() elsewhere.
-                current?.let {
-                    val meta = widgetMetaLabel(it.country, it.codec, it.bitrate)
-                    RadioWidgetProvider.refresh(this@PlaybackService, it.name, meta, isPlaying, false)
-                }
+                refreshWidget(current, isPlaying)
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -428,9 +437,9 @@ class PlaybackService : MediaSessionService() {
             }
             else -> {
                 current = station
-                // mirror events carry no country/codec/bitrate, so meta has nothing to show.
-                val isFav = runBlocking { favStore.currentFavUuids() }.contains(station.uuid)
-                RadioWidgetProvider.refresh(this, evt.name, "", false, isFav)
+                // mirror events carry no country/codec/bitrate, so meta has nothing to
+                // show — refreshWidget's widgetMetaLabel call resolves to "" on its own.
+                refreshWidget(station, false)
             }
         }
     }
@@ -480,10 +489,7 @@ class PlaybackService : MediaSessionService() {
     private fun playPick(pick: Station) {
         val player = exo ?: return
         current = pick
-        // no coroutine scope available in this function to read favourites; Task 5's
-        // shared refresh helper is expected to correct this to the real fav state.
-        val meta = widgetMetaLabel(pick.country, pick.codec, pick.bitrate)
-        RadioWidgetProvider.refresh(this, pick.name, meta, true, false)
+        refreshWidget(pick, true)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
@@ -572,6 +578,7 @@ class PlaybackService : MediaSessionService() {
                         else -> scope.launch {
                             favStore.toggleFav(st)
                             refreshCustomLayout()
+                            refreshWidget(current, exo?.isPlaying == true)
                             syncNow()
                         }
                     }
@@ -586,6 +593,7 @@ class PlaybackService : MediaSessionService() {
                         }
                         favStore.setScope(next)
                         refreshCustomLayout()
+                        refreshWidget(current, exo?.isPlaying == true)
                         shuffle()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
