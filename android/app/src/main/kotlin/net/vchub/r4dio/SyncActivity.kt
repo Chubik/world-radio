@@ -52,6 +52,10 @@ class SyncActivity : ComponentActivity() {
         val merged = SyncMerge.mergedData(local, server)
         favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
         withContext(Dispatchers.IO) { syncClient.push(key, merged) }
+        // linking a device can pull in a different excluded-country set than this
+        // device had; applyMerged() already reset the sync stamp if so, but only the
+        // running service's syncNow()/refreshIfStale() acts on that reset.
+        triggerSync()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

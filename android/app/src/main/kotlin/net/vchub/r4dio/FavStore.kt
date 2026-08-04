@@ -31,6 +31,19 @@ object FavLogic {
     }
 }
 
+/**
+ * the catalogue cache is filtered by excluded-country at fetch time (see
+ * Catalog.fetchStations), so a change to that set makes the cache stop reflecting
+ * the user's intent. pulled out as a pure function so the "only on an actual change"
+ * rule is testable without a DataStore harness.
+ */
+object ExcludedCountries {
+    fun normalize(countries: Set<String>): Set<String> = countries.map { it.uppercase() }.toSet()
+
+    fun changed(previous: Set<String>, next: Set<String>): Boolean =
+        normalize(previous) != normalize(next)
+}
+
 object SyncMerge {
     fun mergedFavs(local: Set<String>, remote: List<String>): Set<String> = local + remote
 
@@ -123,8 +136,29 @@ class FavStore(context: Context) {
     suspend fun currentExcluded(): Set<String> =
         store.data.first()[keyExcludedCountries] ?: emptySet()
 
-    suspend fun setExcluded(countries: Set<String>) {
-        store.edit { it[keyExcludedCountries] = countries.map { c -> c.uppercase() }.toSet() }
+    /**
+     * returns true when the excluded set actually changed, so the caller can decide
+     * whether the catalogue cache — filtered at fetch time under the old set — needs
+     * invalidating. a same-value save (dialog opened and saved untouched) must not
+     * trigger a refetch.
+     */
+    suspend fun setExcluded(countries: Set<String>): Boolean {
+        val next = ExcludedCountries.normalize(countries)
+        var changed = false
+        store.edit { prefs ->
+            val prev = prefs[keyExcludedCountries] ?: emptySet()
+            changed = ExcludedCountries.changed(prev, next)
+            prefs[keyExcludedCountries] = next
+            // the cache was fetched and filtered under the old set, so it no longer
+            // reflects the user's intent — reset in the same transaction as the
+            // exclusion write so no reader can observe the new filters with a stamp
+            // that still claims the catalogue is fresh.
+            when (changed) {
+                true -> prefs[keyCatalogSyncedAt] = 0L
+                false -> {}
+            }
+        }
+        return changed
     }
 
     suspend fun deviceId(): String {
@@ -144,11 +178,22 @@ class FavStore(context: Context) {
         store.edit { it[keyCatalogSyncedAt] = epochSecs }
     }
 
-    suspend fun applyMerged(favs: Set<String>, blocked: Set<String>, excluded: Set<String>) {
+    /** same change-detection as [setExcluded] — a merge from another device can also
+     *  shift the excluded set (union merge), which needs the same cache invalidation. */
+    suspend fun applyMerged(favs: Set<String>, blocked: Set<String>, excluded: Set<String>): Boolean {
+        val next = ExcludedCountries.normalize(excluded)
+        var changed = false
         store.edit { prefs ->
+            val prev = prefs[keyExcludedCountries] ?: emptySet()
+            changed = ExcludedCountries.changed(prev, next)
             prefs[keyFavs] = favs
             prefs[keyBlocked] = blocked
-            prefs[keyExcludedCountries] = excluded.map { it.uppercase() }.toSet()
+            prefs[keyExcludedCountries] = next
+            when (changed) {
+                true -> prefs[keyCatalogSyncedAt] = 0L
+                false -> {}
+            }
         }
+        return changed
     }
 }
