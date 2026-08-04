@@ -24,6 +24,13 @@ class WidgetStateTest {
         assertFalse(usesCompactLayout(0))
     }
 
+    // 1 is the lower edge of the compact band; a launcher bug could report a negative
+    @Test
+    fun width_edges_outside_the_compact_band_use_the_full_layout() {
+        assertTrue(usesCompactLayout(1))
+        assertFalse(usesCompactLayout(-5))
+    }
+
     @Test
     fun station_label_shows_the_station_when_there_is_one() {
         assertEquals("Radio Paradise", widgetStationLabel("Radio Paradise", "— idle —"))
