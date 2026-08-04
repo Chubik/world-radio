@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="180dp" android:minHeight="72dp"
-    android:updatePeriodMillis="0" android:initialLayout="@layout/widget_radio"
-    android:resizeMode="horizontal" android:widgetCategory="home_screen" />
+    android:minWidth="390dp"
+    android:minHeight="80dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="122dp"
+    android:targetCellWidth="6"
+    android:targetCellHeight="2"
+    android:description="@string/widget_description"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_radio"
+    android:previewLayout="@layout/widget_radio"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen" />

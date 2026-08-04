@@ -42,4 +42,11 @@
     <string name="sync_delete">DELETE</string>
     <string name="sync_hide_countries">HIDE COUNTRIES</string>
     <string name="sync_feedback">ideas or bugs? support@r4dio.net</string>
+    <string name="widget_live">LIVE</string>
+    <string name="widget_shuffle">SHUFFLE</string>
+    <string name="widget_idle">— idle —</string>
+    <string name="widget_cd_star">star this station</string>
+    <string name="widget_cd_shuffle">shuffle</string>
+    <string name="widget_cd_toggle">play or pause</string>
+    <string name="widget_description">Shuffle a random station from the home screen</string>
 </resources>
