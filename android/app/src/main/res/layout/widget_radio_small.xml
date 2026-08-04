@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="13dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <FrameLayout
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_tile_bg">
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_launcher_foreground"
+                android:contentDescription="@null" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="9dp"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/widget_station"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/widget_idle"
+                android:textColor="@color/bright"
+                android:textSize="12.5sp"
+                android:fontFamily="@font/ibm_plex_mono"
+                android:textFontWeight="600"
+                android:maxLines="1"
+                android:ellipsize="end" />
+            <TextView
+                android:id="@+id/widget_live"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/widget_live"
+                android:textColor="@color/olive"
+                android:textSize="9sp"
+                android:fontFamily="@font/ibm_plex_mono"
+                android:textFontWeight="600"
+                android:letterSpacing="0.08"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/widget_meta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="@color/mute"
+        android:textSize="10sp"
+        android:fontFamily="@font/ibm_plex_mono"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/widget_shuffle"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:background="@drawable/widget_btn_primary">
+            <ImageView
+                android:layout_width="17dp"
+                android:layout_height="17dp"
+                android:src="@drawable/ic_shuffle"
+                android:tint="@color/on_amber"
+                android:contentDescription="@null" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="7dp"
+                android:text="@string/widget_shuffle"
+                android:textColor="@color/on_amber"
+                android:textSize="11sp"
+                android:fontFamily="@font/ibm_plex_mono"
+                android:textFontWeight="700"
+                android:letterSpacing="0.06" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/widget_toggle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:padding="9dp"
+            android:background="@drawable/widget_btn_ghost"
+            android:src="@drawable/ic_play"
+            android:contentDescription="@string/widget_cd_toggle" />
+
+        <ImageView
+            android:id="@+id/widget_star"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:padding="9dp"
+            android:background="@drawable/widget_btn_ghost"
+            android:src="@drawable/ic_star_outline"
+            android:contentDescription="@string/widget_cd_star"
+            android:visibility="gone" />
+    </LinearLayout>
+</LinearLayout>

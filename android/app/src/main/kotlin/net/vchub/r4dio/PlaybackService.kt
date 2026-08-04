@@ -157,12 +157,32 @@ class PlaybackService : MediaSessionService() {
         session?.setSessionExtras(extras)
     }
 
+    // one place that knows what the widget needs, so the five call sites cannot drift.
+    private fun refreshWidget(station: Station?, isPlaying: Boolean, favs: Set<String>) {
+        RadioWidgetProvider.refresh(
+            context = this,
+            station = station?.name.orEmpty(),
+            meta = station?.let { widgetMetaLabel(it.country, it.codec, it.bitrate) }.orEmpty(),
+            isPlaying = isPlaying,
+            isFav = station?.uuid?.let { favs.contains(it) } ?: false,
+        )
+    }
+
+    // for the three call sites with no coroutine context in hand (ExoPlayer listener,
+    // playPick, the mirror-event branch). runBlocking does not deadlock here: it
+    // installs its own event loop, so the DataStore read resumes on the blocked thread
+    // rather than waiting on Main. keep this read cheap — DataStore's data flow has no
+    // flowOn, so it runs on the caller's thread, and after the first read it is served
+    // from memory cache.
+    private fun refreshWidget(station: Station?, isPlaying: Boolean) =
+        refreshWidget(station, isPlaying, runBlocking { favStore.currentFavUuids() })
+
     override fun onCreate() {
         super.onCreate()
         val player = ExoPlayer.Builder(this).build()
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                current?.let { RadioWidgetProvider.refresh(this@PlaybackService, it.name, isPlaying) }
+                refreshWidget(current, isPlaying)
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -423,7 +443,9 @@ class PlaybackService : MediaSessionService() {
             }
             else -> {
                 current = station
-                RadioWidgetProvider.refresh(this, evt.name, false)
+                // mirror events carry no country/codec/bitrate, so meta has nothing to
+                // show — refreshWidget's widgetMetaLabel call resolves to "" on its own.
+                refreshWidget(station, false)
             }
         }
     }
@@ -473,7 +495,7 @@ class PlaybackService : MediaSessionService() {
     private fun playPick(pick: Station) {
         val player = exo ?: return
         current = pick
-        RadioWidgetProvider.refresh(this, pick.name, true)
+        refreshWidget(pick, true)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")
         val subtitle = listOf(pick.country, pick.codec, "${pick.bitrate}k")
             .filter { it.isNotBlank() && it != "0k" }
@@ -562,6 +584,7 @@ class PlaybackService : MediaSessionService() {
                         else -> scope.launch {
                             favStore.toggleFav(st)
                             refreshCustomLayout()
+                            refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
                             syncNow()
                         }
                     }
@@ -576,6 +599,7 @@ class PlaybackService : MediaSessionService() {
                         }
                         favStore.setScope(next)
                         refreshCustomLayout()
+                        refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
                         shuffle()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
