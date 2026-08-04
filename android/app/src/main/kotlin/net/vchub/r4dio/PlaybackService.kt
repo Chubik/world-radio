@@ -37,6 +37,9 @@ const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
 const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
+const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
+const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
+const val EXTRA_CATALOG_LOADED = "net.vchub.r4dio.EXTRA_CATALOG_LOADED"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -69,7 +72,17 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var exo: ExoPlayer? = null
     private val catalog = Catalog()
+    private val catalogCache by lazy { CatalogCache(filesDir) }
     @Volatile private var stations: List<Station> = emptyList()
+    // true once a load has been attempted and resolved, on either branch — including
+    // the branch where the user's filters emptied the fetch and `stations` stays
+    // empty. distinct from `stations.isNotEmpty()`, which would wrongly read as
+    // "not loaded" in that case and permanently suppress the all-hidden warn.
+    @Volatile private var catalogAttempted = false
+    // collapses concurrent refreshIfStale() callers (cold-start loadStations() and
+    // syncNow(), which both can run in the first seconds of a service) into a single
+    // network fetch instead of one each.
+    private val refreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var current: Station? = null
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
@@ -123,11 +136,23 @@ class PlaybackService : MediaSessionService() {
         val favs = favStore.currentFavUuids()
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
+        val hidden = favStore.currentExcluded()
+        // count what the user could actually reach, so the screen can tell
+        // "your filters hid everything" apart from "the catalogue is empty"
+        val playable = stations.count { allowedStation(it, hidden) }
+        // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
+        // ordering, so playableCount can be 0 just because the catalogue has not
+        // landed yet. this flag is attempted-ness, not station presence, never a
+        // filtered-vs-unfiltered difference, so it tells the two cases apart safely.
+        val catalogLoaded = catalogAttempted
         session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
             putInt(EXTRA_FAV_COUNT, favs.size)
+            putInt(EXTRA_HIDDEN_COUNT, hidden.size)
+            putInt(EXTRA_PLAYABLE_COUNT, playable)
+            putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
         }
         session?.setSessionExtras(extras)
     }
@@ -188,14 +213,95 @@ class PlaybackService : MediaSessionService() {
 
     private fun loadStations() {
         thread {
-            val fetched = catalog.fetchStations()
-            stations = fetched
-            Log.i("r4dio", "loaded ${fetched.size} stations")
             val userExcluded = runBlocking { favStore.currentExcluded() }
-            val pick = pickRandom(fetched, userExcluded) ?: return@thread
-            main.post { playPick(pick) }
+            val cached = catalogCache.read()
+            when (cached.isEmpty()) {
+                true -> {
+                    val fetched = fetchAndStore(userExcluded)
+                    catalogAttempted = true
+                    when (fetched) {
+                        // empty cache and an empty fetch: startFrom is never reached,
+                        // so nothing else republishes the extras with the now-true
+                        // catalogAttempted — without this the screen can stay on
+                        // whatever syncNow() published first, permanently stale.
+                        null -> scope.launch { refreshCustomLayout() }
+                        else -> startFrom(fetched, userExcluded)
+                    }
+                }
+                false -> {
+                    stations = cached
+                    Log.i("r4dio", "loaded ${cached.size} stations from cache")
+                    // set before startFrom so its null branch's refresh — scheduled on
+                    // Main, not run inline — is guaranteed to observe true, not a stale
+                    // false read from before this attempt resolved.
+                    catalogAttempted = true
+                    startFrom(cached, userExcluded)
+                    refreshIfStale(userExcluded)
+                }
+            }
         }
     }
+
+    private fun startFrom(list: List<Station>, userExcluded: Set<String>) {
+        val pick = pickRandom(list, userExcluded)
+        when (pick) {
+            // catalogue loaded but the user's filters left nothing playable: the
+            // screen is still on its initial idle state, so it needs the fresh
+            // counts to show the warn instead of silently doing nothing.
+            null -> scope.launch { refreshCustomLayout() }
+            else -> main.post { playPick(pick) }
+        }
+    }
+
+    /** returns the fetched list, or null when the network gave us nothing. */
+    private fun fetchAndStore(userExcluded: Set<String>): List<Station>? {
+        val fetched = catalog.fetchStations(userExcluded = userExcluded)
+        if (fetched.isEmpty()) {
+            Log.w("r4dio", "catalog fetch returned nothing")
+            return null
+        }
+        stations = fetched
+        // only stamp the sync time when the catalogue really landed on disk,
+        // otherwise a fresh timestamp would suppress the retry we need.
+        if (!catalogCache.write(fetched)) {
+            Log.w("r4dio", "catalog cached in memory only, not stamping sync time")
+            return fetched
+        }
+        runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+        Log.i("r4dio", "fetched ${fetched.size} stations")
+        return fetched
+    }
+
+    // a stale cache still plays; the refresh only replaces it if it succeeds.
+    private fun refreshIfStale(userExcluded: Set<String>) {
+        val syncedAt = runBlocking { favStore.catalogSyncedAt() }
+        if (!catalogIsStale(syncedAt, nowSecs())) {
+            return
+        }
+        // cold start can reach this from both loadStations() and syncNow() within the
+        // same second; without this guard they would both pass the staleness check
+        // and fire two network fetches for one actual staleness event.
+        if (!refreshInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                val fetched = fetchAndStore(userExcluded)
+                // a successful refetch can change playableCount — including 0 to
+                // non-zero, which is exactly the hidden-countries recovery case — so
+                // the screen needs to learn about it instead of waiting for the next
+                // event that happens to call refreshCustomLayout() on its own.
+                when (fetched) {
+                    null -> {}
+                    else -> scope.launch { refreshCustomLayout() }
+                }
+            } finally {
+                refreshInFlight.set(false)
+            }
+        }
+    }
+
+    private fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
     private fun launchSyncActivity() {
         // android 16 blocks a background service from starting an activity even
@@ -228,15 +334,38 @@ class PlaybackService : MediaSessionService() {
 
     private fun syncNow() {
         scope.launch {
-            val key = favStore.syncKey() ?: return@launch
-            val local = SyncData(
-                favs = favStore.currentFavUuids().toList(),
-                blocked = favStore.currentBlocked().toList(),
-                excluded_countries = favStore.currentExcluded().toList(),
-            )
-            val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
-            favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
-            refreshCustomLayout()
+            val key = favStore.syncKey()
+            when (key) {
+                // no linked device: nothing to merge, but local settings (including the
+                // excluded-country set) may have just changed via setExcluded(), which
+                // is the common case since most installs have no linked device — so
+                // still act on a stamp reset before refreshing the extras.
+                null -> {
+                    refreshIfStale(favStore.currentExcluded())
+                    refreshCustomLayout()
+                }
+                else -> {
+                    val local = SyncData(
+                        favs = favStore.currentFavUuids().toList(),
+                        blocked = favStore.currentBlocked().toList(),
+                        excluded_countries = favStore.currentExcluded().toList(),
+                    )
+                    val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+                    favStore.applyMerged(
+                        merged.favs.toSet(),
+                        merged.blocked.toSet(),
+                        merged.excluded_countries.toSet(),
+                    )
+                    // setExcluded()/applyMerged() already reset the sync stamp when the
+                    // excluded set actually changed — this is what acts on that reset
+                    // within the running service, since refreshIfStale() is otherwise
+                    // only reached once, from loadStations()'s cache-hit branch at
+                    // startup. always safe to call: it is itself TTL-gated, so it is a
+                    // no-op unless a reset (or real TTL expiry) actually happened.
+                    refreshIfStale(favStore.currentExcluded())
+                    refreshCustomLayout()
+                }
+            }
         }
     }
 
@@ -313,7 +442,13 @@ class PlaybackService : MediaSessionService() {
             val cat = withReadyCatalog()
             val pick = pickForScope(sc, cat, favs, userExcluded)
             when (pick) {
-                null -> Log.i("r4dio", "shuffle: nothing to play for scope $sc")
+                // same case as startFrom's null branch: nothing playable for this
+                // scope, and the user is looking at a screen that will not update
+                // itself otherwise — refresh so the warn (if any) can show.
+                null -> {
+                    Log.i("r4dio", "shuffle: nothing to play for scope $sc")
+                    refreshCustomLayout()
+                }
                 else -> playPick(pick)
             }
         }
@@ -322,12 +457,17 @@ class PlaybackService : MediaSessionService() {
     private suspend fun withReadyCatalog(): List<Station> {
         val cur = stations
         if (cur.isNotEmpty()) return cur
-        val fetched = withContext(Dispatchers.IO) {
-            catalog.fetchStations()
+        val cached = withContext(Dispatchers.IO) { catalogCache.read() }
+        if (cached.isNotEmpty()) {
+            stations = cached
+            return cached
         }
-        stations = fetched
-        Log.i("r4dio", "fetched ${fetched.size} stations for shuffle")
-        return fetched
+        val userExcluded = withContext(Dispatchers.IO) { favStore.currentExcluded() }
+        // delegate to fetchAndStore so there is one place that guards against an
+        // empty fetch clobbering the cache, not two independently-maintained ones.
+        val fetched = withContext(Dispatchers.IO) { fetchAndStore(userExcluded) }
+        catalogAttempted = true
+        return fetched ?: emptyList()
     }
 
     private fun playPick(pick: Station) {

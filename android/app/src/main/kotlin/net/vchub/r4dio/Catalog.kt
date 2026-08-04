@@ -12,6 +12,14 @@ private val EXCLUDED_NAME_SUBSTRINGS = listOf(
     "беларус", "belarus", "минск", "minsk",
 )
 
+const val DEFAULT_TARGET = 1000
+
+// ask for half again as many as we keep, so banned and hidden-country stations
+// do not eat into the target. expressed as a ratio because `3 / 2` as a single
+// integer constant would evaluate to 1.
+private const val OVERFETCH_NUMERATOR = 3
+private const val OVERFETCH_DENOMINATOR = 2
+
 fun isExcluded(station: Station): Boolean {
     if (station.country.uppercase() in EXCLUDED_COUNTRYCODES) {
         return true
@@ -24,6 +32,14 @@ fun allowedStation(station: Station, userExcluded: Set<String> = emptySet()): Bo
     station.url.isNotBlank() &&
         !isExcluded(station) &&
         station.country.uppercase() !in userExcluded
+
+// the api can include a country but not exclude one, so exclusions are applied
+// here — over-fetching is what keeps the kept list a full `target` afterwards.
+fun takeAllowed(
+    stations: List<Station>,
+    userExcluded: Set<String>,
+    target: Int,
+): List<Station> = stations.filter { allowedStation(it, userExcluded) }.take(target)
 
 fun pickRandom(
     stations: List<Station>,
@@ -52,12 +68,17 @@ fun pickForScope(
 class Catalog(private val client: OkHttpClient = OkHttpClient()) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun fetchStations(limit: Int = 1000): List<Station> {
-        repeat(2) { attempt ->
-            val result = runCatching { fetchOnce(limit) }.getOrDefault(emptyList())
-            if (result.isNotEmpty()) return result
+    fun fetchStations(
+        target: Int = DEFAULT_TARGET,
+        userExcluded: Set<String> = emptySet(),
+    ): List<Station> {
+        val ask = target * OVERFETCH_NUMERATOR / OVERFETCH_DENOMINATOR
+        repeat(2) {
+            val result = runCatching { fetchOnce(ask) }.getOrDefault(emptyList())
+            if (result.isNotEmpty()) return takeAllowed(result, userExcluded, target)
         }
-        return runCatching { fetchOnce(limit) }.getOrDefault(emptyList())
+        val last = runCatching { fetchOnce(ask) }.getOrDefault(emptyList())
+        return takeAllowed(last, userExcluded, target)
     }
 
     private fun fetchOnce(limit: Int): List<Station> {
