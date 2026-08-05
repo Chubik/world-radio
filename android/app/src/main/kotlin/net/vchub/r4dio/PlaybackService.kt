@@ -352,6 +352,28 @@ class PlaybackService : MediaSessionService() {
         nm.notify(42, notif)
     }
 
+    /**
+     * sync replaces the favourite uuid set but knows nothing about station objects,
+     * and playback picks from the cached objects — so without this a favourite
+     * starred on another device can never play here. resolve from the catalogue
+     * first (free), then fetch whatever is left (most favourites are outside the
+     * top-1000 the catalogue holds).
+     */
+    private suspend fun reconcileFavCache() {
+        val wanted = favStore.currentFavUuids()
+        val known = favStore.currentCachedFavs() + stations
+        val missing = FavSync.missingUuids(wanted, known)
+        val fetched = when (missing.isEmpty()) {
+            true -> emptyList()
+            else -> withContext(Dispatchers.IO) {
+                runCatching { catalog.fetchByUuids(missing) }.getOrDefault(emptyList())
+            }
+        }
+        val next = FavSync.reconcile(wanted, known, fetched)
+        favStore.setCachedFavs(next)
+        Log.i("r4dio", "fav cache reconciled: ${next.size}/${wanted.size} resolved")
+    }
+
     private fun syncNow() {
         scope.launch {
             val key = favStore.syncKey()
@@ -361,6 +383,7 @@ class PlaybackService : MediaSessionService() {
                 // is the common case since most installs have no linked device — so
                 // still act on a stamp reset before refreshing the extras.
                 null -> {
+                    reconcileFavCache()
                     refreshIfStale(favStore.currentExcluded())
                     refreshCustomLayout()
                 }
@@ -376,6 +399,7 @@ class PlaybackService : MediaSessionService() {
                         merged.blocked.toSet(),
                         merged.excluded_countries.toSet(),
                     )
+                    reconcileFavCache()
                     // setExcluded()/applyMerged() already reset the sync stamp when the
                     // excluded set actually changed — this is what acts on that reset
                     // within the running service, since refreshIfStale() is otherwise
