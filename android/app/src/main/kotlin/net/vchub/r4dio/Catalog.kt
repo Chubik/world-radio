@@ -52,19 +52,36 @@ fun pickRandom(
     return playable[rng.nextInt(playable.size)]
 }
 
+data class ScopePick(val station: Station?, val usedFallback: Boolean)
+
+/**
+ * in favs mode with no resolvable favourites we still play something from the
+ * full catalogue — stopping dead is worse. but the caller needs to know it
+ * happened: a silent fallback here is what made a broken favourites sync look
+ * like normal shuffling under a FAVOURITES ONLY pill.
+ */
+fun pickForScopeDetailed(
+    scope: Scope,
+    catalog: List<Station>,
+    favs: List<Station>,
+    userExcluded: Set<String> = emptySet(),
+    rng: Random = Random.Default,
+): ScopePick =
+    when (scope) {
+        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, rng), false)
+        Scope.FAVS -> when (val fav = FavLogic.pickFav(favs, rng)) {
+            null -> ScopePick(pickRandom(catalog, userExcluded, rng), true)
+            else -> ScopePick(fav, false)
+        }
+    }
+
 fun pickForScope(
     scope: Scope,
     catalog: List<Station>,
     favs: List<Station>,
     userExcluded: Set<String> = emptySet(),
     rng: Random = Random.Default,
-): Station? =
-    when (scope) {
-        Scope.ALL -> pickRandom(catalog, userExcluded, rng)
-        // in favs mode, fall back to the full catalog when there are no favourites
-        // yet — otherwise shuffle would return null and playback would just stop.
-        Scope.FAVS -> FavLogic.pickFav(favs, rng) ?: pickRandom(catalog, userExcluded, rng)
-    }
+): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, rng).station
 
 class Catalog(
     private val client: OkHttpClient = OkHttpClient(),
