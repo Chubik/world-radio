@@ -112,11 +112,9 @@ class PlaybackService : MediaSessionService() {
         .setSessionCommand(stopCommand)
         .build()
 
-    private val syncButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-        .setDisplayName("sync")
-        .setCustomIconResId(R.drawable.ic_sync)
-        .setSessionCommand(syncUiCommand)
-        .build()
+    // no sync button in the notification: the slots are scarce (3 visible when
+    // collapsed) and sync lives on the home screen, which has room for it.
+    // CMD_SYNC_UI stays available to controllers, it just isn't shown here.
 
     private fun starButton(isFav: Boolean) = CommandButton.Builder(
         if (isFav) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED,
@@ -145,7 +143,7 @@ class PlaybackService : MediaSessionService() {
         // landed yet. this flag is attempted-ness, not station presence, never a
         // filtered-vs-unfiltered difference, so it tells the two cases apart safely.
         val catalogLoaded = catalogAttempted
-        session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
+        session?.setCustomLayout(listOf(starButton(isFav), shuffleButton, scopeButton(sc), stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
@@ -574,7 +572,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, starButton(false), syncButton, stopButton))
+                .setCustomLayout(listOf(starButton(false), shuffleButton, scopeButton(Scope.ALL), stopButton))
                 .build()
         }
 
