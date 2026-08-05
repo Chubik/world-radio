@@ -112,11 +112,9 @@ class PlaybackService : MediaSessionService() {
         .setSessionCommand(stopCommand)
         .build()
 
-    private val syncButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-        .setDisplayName("sync")
-        .setCustomIconResId(R.drawable.ic_sync)
-        .setSessionCommand(syncUiCommand)
-        .build()
+    // no sync button in the notification: the slots are scarce (3 visible when
+    // collapsed) and sync lives on the home screen, which has room for it.
+    // CMD_SYNC_UI stays available to controllers, it just isn't shown here.
 
     private fun starButton(isFav: Boolean) = CommandButton.Builder(
         if (isFav) CommandButton.ICON_STAR_FILLED else CommandButton.ICON_STAR_UNFILLED,
@@ -145,7 +143,7 @@ class PlaybackService : MediaSessionService() {
         // landed yet. this flag is attempted-ness, not station presence, never a
         // filtered-vs-unfiltered difference, so it tells the two cases apart safely.
         val catalogLoaded = catalogAttempted
-        session?.setCustomLayout(listOf(shuffleButton, starButton(isFav), syncButton, stopButton))
+        session?.setCustomLayout(listOf(starButton(isFav), shuffleButton, scopeButton(sc), stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
@@ -352,6 +350,31 @@ class PlaybackService : MediaSessionService() {
         nm.notify(42, notif)
     }
 
+    /**
+     * sync replaces the favourite uuid set but knows nothing about station objects,
+     * and playback picks from the cached objects — so without this a favourite
+     * starred on another device can never play here. resolve from the catalogue
+     * first (free), then fetch whatever is left (most favourites are outside the
+     * top-1000 the catalogue holds).
+     */
+    private suspend fun reconcileFavCache() {
+        val wanted = favStore.currentFavUuids()
+        // withReadyCatalog, not the bare field: syncNow races loadStations at startup, and
+        // an empty catalogue would make every favourite look missing and be re-fetched.
+        val known = favStore.currentCachedFavs() + withReadyCatalog()
+        val missing = FavSync.missingUuids(wanted, known)
+        val fetched = when (missing.isEmpty()) {
+            true -> emptyList()
+            else -> withContext(Dispatchers.IO) { catalog.fetchByUuids(missing) }
+        }
+        // hand the resolved stations over rather than the finished list: the store settles
+        // them against the uuid set inside one transaction, so a star tapped during the
+        // fetch above survives.
+        favStore.reconcileCachedFavs(FavSync.reconcile(wanted, known, fetched))
+        val resolved = favStore.currentCachedFavs().size
+        Log.i("r4dio", "fav cache reconciled: $resolved/${wanted.size} resolved")
+    }
+
     private fun syncNow() {
         scope.launch {
             val key = favStore.syncKey()
@@ -361,6 +384,7 @@ class PlaybackService : MediaSessionService() {
                 // is the common case since most installs have no linked device — so
                 // still act on a stamp reset before refreshing the extras.
                 null -> {
+                    reconcileFavCache()
                     refreshIfStale(favStore.currentExcluded())
                     refreshCustomLayout()
                 }
@@ -376,6 +400,7 @@ class PlaybackService : MediaSessionService() {
                         merged.blocked.toSet(),
                         merged.excluded_countries.toSet(),
                     )
+                    reconcileFavCache()
                     // setExcluded()/applyMerged() already reset the sync stamp when the
                     // excluded set actually changed — this is what acts on that reset
                     // within the running service, since refreshIfStale() is otherwise
@@ -462,8 +487,11 @@ class PlaybackService : MediaSessionService() {
                 runCatching { withTimeout(3000) { favStore.currentExcluded() } }.getOrDefault(emptySet<String>())
             }
             val cat = withReadyCatalog()
-            val pick = pickForScope(sc, cat, favs, userExcluded)
-            when (pick) {
+            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded)
+            if (picked.usedFallback) {
+                Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
+            }
+            when (val pick = picked.station) {
                 // same case as startFrom's null branch: nothing playable for this
                 // scope, and the user is looking at a screen that will not update
                 // itself otherwise — refresh so the warn (if any) can show.
@@ -547,7 +575,7 @@ class PlaybackService : MediaSessionService() {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .setAvailablePlayerCommands(playerCommands)
-                .setCustomLayout(listOf(shuffleButton, starButton(false), syncButton, stopButton))
+                .setCustomLayout(listOf(starButton(false), shuffleButton, scopeButton(Scope.ALL), stopButton))
                 .build()
         }
 

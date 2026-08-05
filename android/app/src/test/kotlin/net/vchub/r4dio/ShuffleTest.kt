@@ -108,4 +108,35 @@ class ShuffleTest {
         val stations = listOf(stc("1", "RU", "ru"))
         assertNull(pickRandom(stations, userExcluded = emptySet()))
     }
+
+    @Test
+    fun detailed_favsWithFavourites_doesNotUseFallback() {
+        val favs = listOf(Station("f", "Fav", "http://f", "DE", "MP3", 128))
+        val cat = listOf(Station("c", "Cat", "http://c", "DE", "MP3", 128))
+        val out = pickForScopeDetailed(Scope.FAVS, cat, favs)
+        assertEquals("f", out.station?.uuid)
+        assertEquals(false, out.usedFallback)
+    }
+
+    @Test
+    fun detailed_favsWithoutFavourites_flagsFallback() {
+        val cat = listOf(Station("c", "Cat", "http://c", "DE", "MP3", 128))
+        val out = pickForScopeDetailed(Scope.FAVS, cat, emptyList())
+        assertEquals("c", out.station?.uuid)
+        assertEquals(true, out.usedFallback)
+    }
+
+    @Test
+    fun detailed_allScope_neverFlagsFallback() {
+        val cat = listOf(Station("c", "Cat", "http://c", "DE", "MP3", 128))
+        val out = pickForScopeDetailed(Scope.ALL, cat, emptyList())
+        assertEquals(false, out.usedFallback)
+    }
+
+    @Test
+    fun detailed_nothingPlayable_returnsNullAfterFallbackAttempt() {
+        val out = pickForScopeDetailed(Scope.FAVS, emptyList(), emptyList())
+        assertEquals(null, out.station)
+        assertEquals(true, out.usedFallback)
+    }
 }
