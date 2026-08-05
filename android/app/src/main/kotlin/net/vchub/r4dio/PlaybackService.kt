@@ -486,8 +486,11 @@ class PlaybackService : MediaSessionService() {
                 runCatching { withTimeout(3000) { favStore.currentExcluded() } }.getOrDefault(emptySet<String>())
             }
             val cat = withReadyCatalog()
-            val pick = pickForScope(sc, cat, favs, userExcluded)
-            when (pick) {
+            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded)
+            if (picked.usedFallback) {
+                Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
+            }
+            when (val pick = picked.station) {
                 // same case as startFrom's null branch: nothing playable for this
                 // scope, and the user is looking at a screen that will not update
                 // itself otherwise — refresh so the warn (if any) can show.
