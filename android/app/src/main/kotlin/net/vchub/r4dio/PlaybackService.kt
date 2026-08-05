@@ -359,17 +359,20 @@ class PlaybackService : MediaSessionService() {
      */
     private suspend fun reconcileFavCache() {
         val wanted = favStore.currentFavUuids()
-        val known = favStore.currentCachedFavs() + stations
+        // withReadyCatalog, not the bare field: syncNow races loadStations at startup, and
+        // an empty catalogue would make every favourite look missing and be re-fetched.
+        val known = favStore.currentCachedFavs() + withReadyCatalog()
         val missing = FavSync.missingUuids(wanted, known)
         val fetched = when (missing.isEmpty()) {
             true -> emptyList()
-            else -> withContext(Dispatchers.IO) {
-                runCatching { catalog.fetchByUuids(missing) }.getOrDefault(emptyList())
-            }
+            else -> withContext(Dispatchers.IO) { catalog.fetchByUuids(missing) }
         }
-        val next = FavSync.reconcile(wanted, known, fetched)
-        favStore.setCachedFavs(next)
-        Log.i("r4dio", "fav cache reconciled: ${next.size}/${wanted.size} resolved")
+        // hand the resolved stations over rather than the finished list: the store settles
+        // them against the uuid set inside one transaction, so a star tapped during the
+        // fetch above survives.
+        favStore.reconcileCachedFavs(FavSync.reconcile(wanted, known, fetched))
+        val resolved = favStore.currentCachedFavs().size
+        Log.i("r4dio", "fav cache reconciled: $resolved/${wanted.size} resolved")
     }
 
     private fun syncNow() {

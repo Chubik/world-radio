@@ -61,4 +61,26 @@ class FavSyncTest {
         val out = FavSync.reconcile(emptySet(), listOf(st("a")), emptyList())
         assertEquals(emptyList<String>(), out.map { it.uuid })
     }
+
+    /**
+     * the store re-reads the uuid set inside its write transaction, so a star tapped
+     * while a resolve was in flight arrives as a wanted uuid whose object is already
+     * cached. it must survive — losing it would recreate the very uuid/object
+     * divergence this path exists to remove.
+     */
+    @Test
+    fun reconcile_keepsAStarAddedWhileResolveWasInFlight() {
+        // "a" was synced and just resolved from the network; "b" was starred locally
+        // mid-fetch, so it is in the current cache and in the freshly-read uuid set.
+        val out = FavSync.reconcile(setOf("a", "b"), listOf(st("b")), listOf(st("a")))
+        assertEquals(setOf("a", "b"), out.map { it.uuid }.toSet())
+    }
+
+    @Test
+    fun reconcile_dropsAStarRemovedWhileResolveWasInFlight() {
+        // mirror case: "b" was un-starred mid-fetch, so it is gone from the uuid set
+        // even though the stale resolve still carries it.
+        val out = FavSync.reconcile(setOf("a"), listOf(st("b")), listOf(st("a"), st("b")))
+        assertEquals(listOf("a"), out.map { it.uuid })
+    }
 }

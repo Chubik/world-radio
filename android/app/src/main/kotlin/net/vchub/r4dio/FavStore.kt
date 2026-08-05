@@ -94,13 +94,7 @@ class FavStore(context: Context) {
             val current = prefs[keyFavs] ?: emptySet()
             val next = FavLogic.toggle(current, station.uuid)
             prefs[keyFavs] = next
-            val cachedRaw = prefs[keyCached]
-            val cached = when (cachedRaw) {
-                null -> emptyList()
-                else -> runCatching {
-                    json.decodeFromString(ListSerializer(FavStation.serializer()), cachedRaw)
-                }.getOrDefault(emptyList())
-            }
+            val cached = decodeCached(prefs[keyCached])
             val nextCached = when (next.contains(station.uuid)) {
                 true -> cached.filter { it.uuid != station.uuid } + FavStation.of(station)
                 false -> cached.filter { it.uuid != station.uuid }
@@ -109,16 +103,32 @@ class FavStore(context: Context) {
         }
     }
 
+    private fun decodeCached(raw: String?): List<FavStation> = when (raw) {
+        null -> emptyList()
+        else -> runCatching {
+            json.decodeFromString(ListSerializer(FavStation.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
     /**
-     * replaces the cached station objects wholesale. sync overwrites the uuid set,
-     * so the cache has to be rebuilt from it rather than edited one star at a time.
+     * rebuilds the cached station objects from resolved stations. sync overwrites the
+     * uuid set without touching the objects, so the cache has to be rebuilt from it
+     * rather than edited one star at a time.
+     *
+     * the uuid set is re-read inside the transaction, not passed in: resolving takes a
+     * network round-trip, and a star tapped during it would otherwise be overwritten by
+     * a caller holding a pre-tap snapshot — the same uuid/object divergence this whole
+     * path exists to remove.
      */
-    suspend fun setCachedFavs(stations: List<Station>) {
-        val encoded = json.encodeToString(
-            ListSerializer(FavStation.serializer()),
-            stations.map { FavStation.of(it) },
-        )
-        store.edit { it[keyCached] = encoded }
+    suspend fun reconcileCachedFavs(resolved: List<Station>) {
+        store.edit { prefs ->
+            val wanted = prefs[keyFavs] ?: emptySet()
+            val byUuid = LinkedHashMap<String, FavStation>()
+            decodeCached(prefs[keyCached]).forEach { byUuid[it.uuid] = it }
+            resolved.forEach { byUuid[it.uuid] = FavStation.of(it) }
+            val next = wanted.mapNotNull { byUuid[it] }.filter { it.url.isNotBlank() }
+            prefs[keyCached] = json.encodeToString(ListSerializer(FavStation.serializer()), next)
+        }
     }
 
     suspend fun setScope(scope: Scope) {
