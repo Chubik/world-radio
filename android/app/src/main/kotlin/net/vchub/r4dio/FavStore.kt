@@ -109,6 +109,18 @@ class FavStore(context: Context) {
         }
     }
 
+    /**
+     * replaces the cached station objects wholesale. sync overwrites the uuid set,
+     * so the cache has to be rebuilt from it rather than edited one star at a time.
+     */
+    suspend fun setCachedFavs(stations: List<Station>) {
+        val encoded = json.encodeToString(
+            ListSerializer(FavStation.serializer()),
+            stations.map { FavStation.of(it) },
+        )
+        store.edit { it[keyCached] = encoded }
+    }
+
     suspend fun setScope(scope: Scope) {
         store.edit { it[keyScope] = scope.name }
     }
