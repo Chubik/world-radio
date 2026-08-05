@@ -134,7 +134,7 @@ class ShuffleTest {
     }
 
     @Test
-    fun detailed_nothingPlayable_returnsNullWithoutFallback() {
+    fun detailed_nothingPlayable_returnsNullAfterFallbackAttempt() {
         val out = pickForScopeDetailed(Scope.FAVS, emptyList(), emptyList())
         assertEquals(null, out.station)
         assertEquals(true, out.usedFallback)
