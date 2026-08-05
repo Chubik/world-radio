@@ -25,7 +25,8 @@
     <string name="home_sync_sub">link desktop ↔ phone</string>
     <string name="home_idle">— idle —</string>
     <string name="sync_title">r4dio sync</string>
-    <string name="sync_done">✕ DONE</string>
+    <string name="sync_done">✕</string>
+    <string name="sync_close_desc">close</string>
     <string name="sync_lede">Sync your favourites, blocked and hidden countries across devices.</string>
     <string name="sync_key_label">SYNC KEY</string>
     <string name="sync_key_hint">paste key r4-…</string>
