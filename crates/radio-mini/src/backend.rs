@@ -141,8 +141,9 @@ impl Backend {
         ) {
             eprintln!("save favorites failed: {e}");
         }
-        // so a crash or an offline quit between the edit and the next sync doesn't lose the delta
-        if let Err(e) = self.catalog.pending.save(&self.pending_path) {
+        // sync_pending.json is shared with the TUI/CLI, which may run concurrently —
+        // merge rather than overwrite so this save can't erase their deletion.
+        if let Err(e) = self.catalog.pending.save_merged(&self.pending_path) {
             eprintln!("save pending sync log failed: {e}");
         }
     }
@@ -178,8 +179,8 @@ impl Backend {
         let merged = client.push(&key, &local)?;
         // only now: the server has the delta, so replaying it would be wrong.
         self.catalog.pending.clear();
-        self.catalog.set_favorites(merged.favs.clone());
-        self.catalog.set_blacklist(merged.blocked.clone());
+        self.catalog.apply_synced_favorites(merged.favs.clone());
+        self.catalog.apply_synced_blacklist(merged.blocked.clone());
         self.catalog
             .apply_synced_excluded_countries(merged.excluded_countries.clone());
         self.catalog.save_state(
@@ -188,6 +189,9 @@ impl Backend {
             &self.blacklist_path,
             &self.excluded_path,
         )?;
+        // self.catalog.pending is empty here (just cleared) — a plain overwrite
+        // is correct; merging in whatever is on disk would replay an
+        // already-synced deletion forever.
         self.catalog.pending.save(&self.pending_path)?;
         let all = catalog_src::all_stations(&self.catalog)?;
         let favorites = catalog_src::favorite_stations(&self.catalog)?;

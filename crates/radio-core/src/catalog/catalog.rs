@@ -179,11 +179,15 @@ impl Catalog {
         self.favorites.ids()
     }
 
-    pub fn set_favorites(&mut self, ids: Vec<String>) {
+    /// applies the server's merged favourites without logging it as a pending
+    /// change — reconciling to the answer we just received is not a new user edit.
+    pub fn apply_synced_favorites(&mut self, ids: Vec<String>) {
         self.favorites.set_from(ids);
     }
 
-    pub fn set_blacklist(&mut self, ids: Vec<String>) {
+    /// applies the server's merged blacklist without logging it as a pending
+    /// change — reconciling to the answer we just received is not a new user edit.
+    pub fn apply_synced_blacklist(&mut self, ids: Vec<String>) {
         self.blacklist.set_from(ids);
     }
 

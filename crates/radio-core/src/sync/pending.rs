@@ -50,6 +50,16 @@ impl Pending {
         self.excluded_countries.clear();
     }
 
+    /// folds `disk` into `self`: per id, `self` wins (it is the more recent
+    /// action by this surface), and ids `self` has no opinion on are kept as-is.
+    /// this is what lets two surfaces (TUI, CLI) share one pending log without
+    /// a save from one wiping out a concurrent write from the other.
+    fn merge_from(&mut self, disk: &Pending) {
+        merge_list(&mut self.favs, &disk.favs);
+        merge_list(&mut self.blocked, &disk.blocked);
+        merge_list(&mut self.excluded_countries, &disk.excluded_countries);
+    }
+
     pub fn load(path: &Path) -> Pending {
         let Ok(raw) = std::fs::read_to_string(path) else {
             // a missing file is the normal case for a device with nothing pending
@@ -69,10 +79,39 @@ impl Pending {
         }
     }
 
+    /// plain overwrite, for when `self` is already the whole truth — the
+    /// post-sync clear, where re-merging what is on disk would replay
+    /// deletions the server has already accepted forever.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let body = serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string());
-        std::fs::write(path, body)
+        write_atomic(path, &body)
     }
+
+    /// read-merge-write for the accumulate case: folds whatever another
+    /// surface (TUI, CLI, mini) has since written into `self` before saving,
+    /// so a save never clobbers a concurrent writer's entry for a different id.
+    pub fn save_merged(&self, path: &Path) -> std::io::Result<()> {
+        let mut merged = self.clone();
+        merged.merge_from(&Pending::load(path));
+        merged.save(path)
+    }
+}
+
+/// per-id, `into` wins; ids only present in `from` are appended unchanged.
+fn merge_list(into: &mut Vec<Change>, from: &[Change]) {
+    for change in from {
+        if !into.iter().any(|c| c.id == change.id) {
+            into.push(change.clone());
+        }
+    }
+}
+
+// same directory, one temp file, one rename — a crash mid-write leaves the
+// old file intact instead of the truncated-then-failed write `fs::write` risks.
+fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -148,5 +187,114 @@ mod tests {
         let bad = dir.path().join("bad.json");
         std::fs::write(&bad, "not json").unwrap();
         assert!(Pending::load(&bad).is_empty());
+    }
+
+    // PROBE (finding 1): before the fix, a plain `save` from a surface holding a
+    // stale in-memory copy clobbered a concurrent writer's deletion. this shows
+    // the old failure mode still exists on the raw `save`, and that `save_merged`
+    // — what every accumulate-case call site now uses — does not have it.
+    #[test]
+    fn probe_blind_overwrite_loses_a_concurrently_written_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        // TUI spawns with nothing pending and loads that into memory.
+        let tui_in_memory = Pending::load(&path);
+        assert!(tui_in_memory.is_empty());
+
+        // meanwhile the CLI's `sync run` notes an un-favourite and writes it out.
+        let mut cli_pending = Pending::load(&path);
+        cli_pending.note(Set::Favs, "station-1", true);
+        cli_pending.save(&path).unwrap();
+        assert!(!Pending::load(&path).is_empty());
+
+        // a plain save of the TUI's (stale, empty) in-memory state still clobbers.
+        tui_in_memory.save(&path).unwrap();
+        let on_disk = Pending::load(&path);
+        assert!(
+            on_disk.is_empty(),
+            "expected the raw save to still clobber, found {on_disk:?}"
+        );
+    }
+
+    #[test]
+    fn save_merged_keeps_a_concurrently_written_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        // TUI spawns with nothing pending and holds that in memory.
+        let tui_in_memory = Pending::load(&path);
+        assert!(tui_in_memory.is_empty());
+
+        // meanwhile the CLI notes an un-favourite and writes it out.
+        let mut cli_pending = Pending::load(&path);
+        cli_pending.note(Set::Favs, "station-1", true);
+        cli_pending.save(&path).unwrap();
+
+        // TUI saves via save_merged instead of a blind overwrite.
+        tui_in_memory.save_merged(&path).unwrap();
+
+        // fixed: the CLI's deletion survives.
+        let on_disk = Pending::load(&path);
+        assert_eq!(
+            on_disk.favs,
+            vec![Change {
+                id: "station-1".into(),
+                gone: true
+            }]
+        );
+    }
+
+    #[test]
+    fn save_merged_lets_the_in_memory_entry_win_over_a_stale_disk_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        // disk has an older action for the same id.
+        let mut on_disk = Pending::default();
+        on_disk.note(Set::Favs, "station-1", true);
+        on_disk.save(&path).unwrap();
+
+        // this surface's in-memory copy has since re-favourited it.
+        let mut in_memory = Pending::default();
+        in_memory.note(Set::Favs, "station-1", false);
+        in_memory.save_merged(&path).unwrap();
+
+        let merged = Pending::load(&path);
+        assert_eq!(
+            merged.favs,
+            vec![Change {
+                id: "station-1".into(),
+                gone: false
+            }]
+        );
+    }
+
+    #[test]
+    fn clear_then_save_does_not_resurrect_what_is_on_disk() {
+        // a "clear" that merges the old file back in would replay a deletion
+        // the server has already accepted forever.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        let mut p = Pending::default();
+        p.note(Set::Favs, "station-1", true);
+        p.save(&path).unwrap();
+
+        p.clear();
+        p.save(&path).unwrap();
+
+        assert!(Pending::load(&path).is_empty());
+    }
+
+    #[test]
+    fn save_is_atomic_no_temp_file_left_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+        let mut p = Pending::default();
+        p.note(Set::Favs, "a", true);
+        p.save(&path).unwrap();
+        assert!(path.exists());
+        assert!(!path.with_extension("tmp").exists());
     }
 }
