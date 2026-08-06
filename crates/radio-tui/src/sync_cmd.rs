@@ -150,6 +150,7 @@ fn run_sync() -> anyhow::Result<()> {
         favs: favs.ids().to_vec(),
         blocked: blocked.ids().to_vec(),
         excluded_countries: excluded.ids().to_vec(),
+        ..Default::default()
     };
     let merged = client().push(&key, &local)?;
     favorites_from(merged.favs.clone()).save(&fav_path())?;
@@ -179,6 +180,7 @@ fn merge_on_link(local: SyncData, server: SyncData) -> SyncData {
         favs: union_ids(&local.favs, &server.favs),
         blocked: union_ids(&local.blocked, &server.blocked),
         excluded_countries: union_ids(&local.excluded_countries, &server.excluded_countries),
+        ..Default::default()
     }
 }
 
@@ -192,6 +194,7 @@ fn use_key(key: &str) -> anyhow::Result<()> {
         favs: Favorites::load(&fav_path()).ids().to_vec(),
         blocked: Favorites::load(&blacklist_path()).ids().to_vec(),
         excluded_countries: Favorites::load(&excluded_path()).ids().to_vec(),
+        ..Default::default()
     };
     let server = client().pull(key)?;
     let merged = merge_on_link(local, server);
@@ -230,11 +233,13 @@ mod tests {
             favs: vec!["a".into(), "b".into()],
             blocked: vec![],
             excluded_countries: vec![],
+            ..Default::default()
         };
         let server = SyncData {
             favs: vec!["b".into(), "c".into()],
             blocked: vec!["x".into()],
             excluded_countries: vec!["US".into()],
+            ..Default::default()
         };
         let m = merge_on_link(local, server);
         assert_eq!(m.favs, vec!["a".to_string(), "b".into(), "c".into()]);

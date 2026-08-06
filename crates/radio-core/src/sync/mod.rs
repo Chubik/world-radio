@@ -1,8 +1,10 @@
 mod client;
 pub mod key;
+mod pending;
 
 pub use client::{SyncClient, SyncData};
 pub use key::is_valid_format;
+pub use pending::{Change, Pending, Set};
 
 use std::path::{Path, PathBuf};
 

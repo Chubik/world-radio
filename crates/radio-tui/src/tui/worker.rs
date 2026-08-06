@@ -268,6 +268,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
         excluded_countries: catalog.excluded_country_ids().to_vec(),
+        ..Default::default()
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
