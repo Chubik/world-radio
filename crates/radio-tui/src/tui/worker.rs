@@ -249,12 +249,28 @@ fn coalesce(pending: Vec<WorkerReq>) -> (Vec<WorkerReq>, Option<WorkerReq>) {
 }
 
 fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
-    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
-        crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
+    save_state_and_health(catalog, paths);
+    // sync_pending.json is shared with the CLI, which may run concurrently
+    // (main.rs returns before single_instance::take_over) — merge rather than
+    // overwrite so this save can't erase a deletion the CLI just persisted.
+    if let Err(e) = catalog.pending.save_merged(&paths.pending) {
+        crate::log_warn!("worker: failed to save pending sync log: {e}");
     }
-    // so a crash or an offline quit between the edit and the next sync doesn't lose the delta
+}
+
+/// only right after `catalog.pending.clear()`: `self` (empty) is already the
+/// whole truth, so a plain overwrite is correct here and merging in whatever
+/// is still on disk would replay an already-synced deletion forever.
+fn save_all_after_clear(catalog: &Catalog, paths: &WorkerPaths) {
+    save_state_and_health(catalog, paths);
     if let Err(e) = catalog.pending.save(&paths.pending) {
         crate::log_warn!("worker: failed to save pending sync log: {e}");
+    }
+}
+
+fn save_state_and_health(catalog: &Catalog, paths: &WorkerPaths) {
+    if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
+        crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
     }
     if let Err(e) = catalog.save_health(&paths.health) {
         crate::log_warn!("worker: failed to save health: {e}");
@@ -291,10 +307,10 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     };
     // only now: the server has the delta, so replaying it would be wrong.
     catalog.pending.clear();
-    catalog.set_favorites(merged.favs.clone());
-    catalog.set_blacklist(merged.blocked.clone());
+    catalog.apply_synced_favorites(merged.favs.clone());
+    catalog.apply_synced_blacklist(merged.blocked.clone());
     catalog.apply_synced_excluded_countries(merged.excluded_countries.clone());
-    save_all(catalog, paths);
+    save_all_after_clear(catalog, paths);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
