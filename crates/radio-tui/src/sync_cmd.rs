@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use radio_core::catalog::Favorites;
 use radio_core::paths;
-use radio_core::sync::{self, SyncClient, SyncData};
+use radio_core::sync::{self, Pending, SyncClient, SyncData};
 
 const SERVER: &str = "https://r4dio.net";
 
@@ -40,6 +40,10 @@ fn blacklist_path() -> std::path::PathBuf {
 
 fn excluded_path() -> std::path::PathBuf {
     paths::data_dir().join("excluded_countries.json")
+}
+
+fn pending_path() -> std::path::PathBuf {
+    paths::data_dir().join("sync_pending.json")
 }
 
 fn favorites_from(ids: Vec<String>) -> Favorites {
@@ -146,13 +150,17 @@ fn run_sync() -> anyhow::Result<()> {
     let favs = Favorites::load(&fav_path());
     let blocked = Favorites::load(&blacklist_path());
     let excluded = Favorites::load(&excluded_path());
+    let pending_path = pending_path();
+    let pending = Pending::load(&pending_path);
     let local = SyncData {
         favs: favs.ids().to_vec(),
         blocked: blocked.ids().to_vec(),
         excluded_countries: excluded.ids().to_vec(),
-        ..Default::default()
+        changed: pending,
     };
     let merged = client().push(&key, &local)?;
+    // only now: the server has the delta, so replaying it would be wrong.
+    Pending::default().save(&pending_path)?;
     favorites_from(merged.favs.clone()).save(&fav_path())?;
     favorites_from(merged.blocked.clone()).save(&blacklist_path())?;
     favorites_from(merged.excluded_countries.clone()).save(&excluded_path())?;
@@ -165,40 +173,25 @@ fn run_sync() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn union_ids(local: &[String], server: &[String]) -> Vec<String> {
-    let mut out = local.to_vec();
-    for id in server {
-        if !out.contains(id) {
-            out.push(id.clone());
-        }
-    }
-    out
-}
-
-fn merge_on_link(local: SyncData, server: SyncData) -> SyncData {
-    SyncData {
-        favs: union_ids(&local.favs, &server.favs),
-        blocked: union_ids(&local.blocked, &server.blocked),
-        excluded_countries: union_ids(&local.excluded_countries, &server.excluded_countries),
-        ..Default::default()
-    }
-}
-
 fn use_key(key: &str) -> anyhow::Result<()> {
     if !sync::is_valid_format(key) {
         println!("invalid key");
         return Ok(());
     }
     sync::store_key(key)?;
+    // union-merging local state with the server's here would resurrect anything
+    // this device deleted before linking; send our state plus our delta and let
+    // the server's authoritative per-item merge decide, same as run_sync.
+    let pending_path = pending_path();
+    let pending = Pending::load(&pending_path);
     let local = SyncData {
         favs: Favorites::load(&fav_path()).ids().to_vec(),
         blocked: Favorites::load(&blacklist_path()).ids().to_vec(),
         excluded_countries: Favorites::load(&excluded_path()).ids().to_vec(),
-        ..Default::default()
+        changed: pending,
     };
-    let server = client().pull(key)?;
-    let merged = merge_on_link(local, server);
-    let stored = client().push(key, &merged)?;
+    let stored = client().push(key, &local)?;
+    Pending::default().save(&pending_path)?;
     favorites_from(stored.favs.clone()).save(&fav_path())?;
     favorites_from(stored.blocked.clone()).save(&blacklist_path())?;
     favorites_from(stored.excluded_countries.clone()).save(&excluded_path())?;
@@ -225,25 +218,5 @@ mod tests {
     fn favorites_from_dedups_without_dropping() {
         let f = favorites_from(vec!["a".to_string(), "b".into(), "a".into()]);
         assert_eq!(f.ids(), &["a".to_string(), "b".into()]);
-    }
-
-    #[test]
-    fn merge_on_link_unions_each_field() {
-        let local = SyncData {
-            favs: vec!["a".into(), "b".into()],
-            blocked: vec![],
-            excluded_countries: vec![],
-            ..Default::default()
-        };
-        let server = SyncData {
-            favs: vec!["b".into(), "c".into()],
-            blocked: vec!["x".into()],
-            excluded_countries: vec!["US".into()],
-            ..Default::default()
-        };
-        let m = merge_on_link(local, server);
-        assert_eq!(m.favs, vec!["a".to_string(), "b".into(), "c".into()]);
-        assert_eq!(m.blocked, vec!["x".to_string()]);
-        assert_eq!(m.excluded_countries, vec!["US".to_string()]);
     }
 }

@@ -12,6 +12,7 @@ pub struct Backend {
     hist_path: PathBuf,
     blacklist_path: PathBuf,
     excluded_path: PathBuf,
+    pending_path: PathBuf,
 }
 
 impl Backend {
@@ -23,7 +24,8 @@ impl Backend {
         let hist_path = data.join("history.json");
         let blacklist_path = data.join("blacklist.json");
         let excluded_path = data.join("excluded_countries.json");
-        let catalog = Catalog::load(
+        let pending_path = data.join("sync_pending.json");
+        let mut catalog = Catalog::load(
             cache,
             health,
             &fav_path,
@@ -31,6 +33,9 @@ impl Backend {
             &blacklist_path,
             &excluded_path,
         );
+        // a prior session may have quit or gone offline before its sync landed;
+        // pick that delta back up rather than starting the log over.
+        catalog.pending = radio_core::sync::Pending::load(&pending_path);
 
         let all = catalog_src::all_stations(&catalog)?;
         let favorites = catalog_src::favorite_stations(&catalog)?;
@@ -51,6 +56,7 @@ impl Backend {
             hist_path,
             blacklist_path,
             excluded_path,
+            pending_path,
         })
     }
 
@@ -135,6 +141,10 @@ impl Backend {
         ) {
             eprintln!("save favorites failed: {e}");
         }
+        // so a crash or an offline quit between the edit and the next sync doesn't lose the delta
+        if let Err(e) = self.catalog.pending.save(&self.pending_path) {
+            eprintln!("save pending sync log failed: {e}");
+        }
     }
 
     pub fn poll_engine(&mut self) {
@@ -162,28 +172,23 @@ impl Backend {
             favs: self.catalog.favorite_ids().to_vec(),
             blocked: self.catalog.blacklist_ids().to_vec(),
             excluded_countries: self.catalog.excluded_country_ids().to_vec(),
-            ..Default::default()
+            changed: self.catalog.pending.clone(),
         };
         let client = radio_core::sync::SyncClient::new("https://r4dio.net");
         let merged = client.push(&key, &local)?;
-        for uuid in &merged.favs {
-            if !self.catalog.is_favorite(uuid) {
-                self.catalog.toggle_favorite(uuid);
-            }
-        }
-        for uuid in &merged.blocked {
-            if !self.catalog.is_blacklisted(uuid) {
-                self.catalog.toggle_blacklist(uuid);
-            }
-        }
+        // only now: the server has the delta, so replaying it would be wrong.
+        self.catalog.pending.clear();
+        self.catalog.set_favorites(merged.favs.clone());
+        self.catalog.set_blacklist(merged.blocked.clone());
         self.catalog
-            .set_excluded_countries(merged.excluded_countries.clone());
+            .apply_synced_excluded_countries(merged.excluded_countries.clone());
         self.catalog.save_state(
             &self.fav_path,
             &self.hist_path,
             &self.blacklist_path,
             &self.excluded_path,
         )?;
+        self.catalog.pending.save(&self.pending_path)?;
         let all = catalog_src::all_stations(&self.catalog)?;
         let favorites = catalog_src::favorite_stations(&self.catalog)?;
         self.state.load_stations(all, favorites);
