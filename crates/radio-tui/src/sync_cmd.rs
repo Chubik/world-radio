@@ -159,8 +159,9 @@ fn run_sync() -> anyhow::Result<()> {
         changed: pending,
     };
     let merged = client().push(&key, &local)?;
-    // only now: the server has the delta, so replaying it would be wrong.
-    Pending::default().save(&pending_path)?;
+    // remove exactly what we just sent; keep anything another surface wrote
+    // to the log during the round-trip (a plain clear would destroy it).
+    Pending::clear_pushed(&local.changed, &pending_path)?;
     favorites_from(merged.favs.clone()).save(&fav_path())?;
     favorites_from(merged.blocked.clone()).save(&blacklist_path())?;
     favorites_from(merged.excluded_countries.clone()).save(&excluded_path())?;
@@ -191,7 +192,9 @@ fn use_key(key: &str) -> anyhow::Result<()> {
         changed: pending,
     };
     let stored = client().push(key, &local)?;
-    Pending::default().save(&pending_path)?;
+    // remove exactly what we just sent; keep anything another surface wrote
+    // to the log during the round-trip (a plain clear would destroy it).
+    Pending::clear_pushed(&local.changed, &pending_path)?;
     favorites_from(stored.favs.clone()).save(&fav_path())?;
     favorites_from(stored.blocked.clone()).save(&blacklist_path())?;
     favorites_from(stored.excluded_countries.clone()).save(&excluded_path())?;

@@ -258,12 +258,16 @@ fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
     }
 }
 
-/// only right after `catalog.pending.clear()`: `self` (empty) is already the
-/// whole truth, so a plain overwrite is correct here and merging in whatever
-/// is still on disk would replay an already-synced deletion forever.
-fn save_all_after_clear(catalog: &Catalog, paths: &WorkerPaths) {
+/// only right after a successful push: `pushed` is the exact `Pending` sent in
+/// that request, so removing just those entries (not overwriting the log) keeps
+/// anything the CLI or another surface wrote to it during the round-trip.
+fn save_all_after_clear(
+    catalog: &Catalog,
+    paths: &WorkerPaths,
+    pushed: &radio_core::sync::Pending,
+) {
     save_state_and_health(catalog, paths);
-    if let Err(e) = catalog.pending.save(&paths.pending) {
+    if let Err(e) = radio_core::sync::Pending::clear_pushed(pushed, &paths.pending) {
         crate::log_warn!("worker: failed to save pending sync log: {e}");
     }
 }
@@ -310,7 +314,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     catalog.apply_synced_favorites(merged.favs.clone());
     catalog.apply_synced_blacklist(merged.blocked.clone());
     catalog.apply_synced_excluded_countries(merged.excluded_countries.clone());
-    save_all_after_clear(catalog, paths);
+    save_all_after_clear(catalog, paths, &local.changed);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));

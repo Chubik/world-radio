@@ -178,6 +178,7 @@ impl Backend {
         let client = radio_core::sync::SyncClient::new("https://r4dio.net");
         let merged = client.push(&key, &local)?;
         // only now: the server has the delta, so replaying it would be wrong.
+        let pushed = self.catalog.pending.clone();
         self.catalog.pending.clear();
         self.catalog.apply_synced_favorites(merged.favs.clone());
         self.catalog.apply_synced_blacklist(merged.blocked.clone());
@@ -189,10 +190,9 @@ impl Backend {
             &self.blacklist_path,
             &self.excluded_path,
         )?;
-        // self.catalog.pending is empty here (just cleared) — a plain overwrite
-        // is correct; merging in whatever is on disk would replay an
-        // already-synced deletion forever.
-        self.catalog.pending.save(&self.pending_path)?;
+        // remove exactly what we just sent; keep anything written to the log
+        // during the round-trip (a plain overwrite would destroy it).
+        radio_core::sync::Pending::clear_pushed(&pushed, &self.pending_path)?;
         let all = catalog_src::all_stations(&self.catalog)?;
         let favorites = catalog_src::favorite_stations(&self.catalog)?;
         self.state.load_stations(all, favorites);
