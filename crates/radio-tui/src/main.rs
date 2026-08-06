@@ -146,12 +146,18 @@ fn run_sync_catalog() -> anyhow::Result<()> {
 }
 
 fn run_update() -> anyhow::Result<()> {
-    match radio_core::update::fetch_latest()? {
-        None => println!(
+    use radio_core::update::UpdateCheck;
+    match radio_core::update::check_latest()? {
+        UpdateCheck::UpToDate => println!(
             "already up to date (v{})",
             radio_core::update::current_version()
         ),
-        Some(rel) => {
+        UpdateCheck::AssetsPending { version } => println!(
+            "v{version} is out, but the build for {} isn't published yet.\n\
+             this usually clears within the hour — try again later.",
+            radio_core::update::target_triple()
+        ),
+        UpdateCheck::Available(rel) => {
             println!("updating to v{}…", rel.version);
             radio_core::update::apply(&rel)?;
             println!("updated to v{} — restart to apply", rel.version);
