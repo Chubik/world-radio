@@ -1,6 +1,7 @@
 package net.vchub.r4dio
 
 import kotlinx.serialization.json.Json
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlin.random.Random
@@ -51,21 +52,41 @@ fun pickRandom(
     return playable[rng.nextInt(playable.size)]
 }
 
+data class ScopePick(val station: Station?, val usedFallback: Boolean)
+
+/**
+ * in favs mode with no resolvable favourites we still play something from the
+ * full catalogue — stopping dead is worse. but the caller needs to know it
+ * happened: a silent fallback here is what made a broken favourites sync look
+ * like normal shuffling under a FAVOURITES ONLY pill.
+ */
+fun pickForScopeDetailed(
+    scope: Scope,
+    catalog: List<Station>,
+    favs: List<Station>,
+    userExcluded: Set<String> = emptySet(),
+    rng: Random = Random.Default,
+): ScopePick =
+    when (scope) {
+        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, rng), false)
+        Scope.FAVS -> when (val fav = FavLogic.pickFav(favs, rng)) {
+            null -> ScopePick(pickRandom(catalog, userExcluded, rng), true)
+            else -> ScopePick(fav, false)
+        }
+    }
+
 fun pickForScope(
     scope: Scope,
     catalog: List<Station>,
     favs: List<Station>,
     userExcluded: Set<String> = emptySet(),
     rng: Random = Random.Default,
-): Station? =
-    when (scope) {
-        Scope.ALL -> pickRandom(catalog, userExcluded, rng)
-        // in favs mode, fall back to the full catalog when there are no favourites
-        // yet — otherwise shuffle would return null and playback would just stop.
-        Scope.FAVS -> FavLogic.pickFav(favs, rng) ?: pickRandom(catalog, userExcluded, rng)
-    }
+): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, rng).station
 
-class Catalog(private val client: OkHttpClient = OkHttpClient()) {
+class Catalog(
+    private val client: OkHttpClient = OkHttpClient(),
+    private val baseUrl: String = "https://all.api.radio-browser.info",
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     fun fetchStations(
@@ -81,9 +102,34 @@ class Catalog(private val client: OkHttpClient = OkHttpClient()) {
         return takeAllowed(last, userExcluded, target)
     }
 
+    /**
+     * resolves specific stations by id. the catalogue is the top-1000 by clickcount,
+     * so a favourite starred on the desktop is usually absent from it — this is the
+     * only way to get its stream url. user-excluded countries are deliberately NOT
+     * applied: an explicit favourite outranks a country filter, same as pickFav.
+     */
+    fun fetchByUuids(uuids: List<String>): List<Station> {
+        if (uuids.isEmpty()) return emptyList()
+        val body = FormBody.Builder().add("uuids", uuids.joinToString(",")).build()
+        val request = Request.Builder()
+            .url("$baseUrl/json/stations/byuuid")
+            .header("User-Agent", "world-radio-android/1.0")
+            .post(body)
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || text.isBlank()) return emptyList()
+                json.decodeFromString<List<ApiStation>>(text)
+                    .map { it.toStation() }
+                    .filter { allowedStation(it) }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun fetchOnce(limit: Int): List<Station> {
         val url =
-            "https://all.api.radio-browser.info/json/stations/search" +
+            "$baseUrl/json/stations/search" +
                 "?limit=$limit&hidebroken=true&order=clickcount&reverse=true"
         val request = Request.Builder()
             .url(url)
