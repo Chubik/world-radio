@@ -15,8 +15,12 @@ sync wins — and that is usually the device that deleted nothing. `SyncMerge.me
 Android makes it worse at link time by unioning local and server state, but the resurrection
 happens even without it.
 
-Note what is *not* broken: the server already replaces rather than unions (commit `8af5542`),
-and the CLI already accepts the server response verbatim. Only deletion memory is missing.
+Note what is *not* broken: the server already replaces rather than unions (commit `8af5542`), and
+the CLI's `run_sync` already accepts the server response verbatim. Only deletion memory is missing.
+
+**Correction (found while planning):** the CLI is not wholly innocent — `merge_on_link` /
+`union_ids` (`crates/radio-tui/src/sync_cmd.rs:167-183`) union local and server state at link
+time, exactly like Android's `SyncMerge.mergedData`. Both must go.
 
 ## The rule
 
