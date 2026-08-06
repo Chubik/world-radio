@@ -21,7 +21,8 @@ pub struct SyncClient {
 impl SyncClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
-            base_url: base_url.into(),
+            // lets a local dev server stand in for r4dio.net without touching call sites
+            base_url: std::env::var("R4DIO_SYNC_URL").unwrap_or_else(|_| base_url.into()),
             client: reqwest::blocking::Client::builder()
                 .user_agent("world-radio-sync/1")
                 .timeout(std::time::Duration::from_secs(10))

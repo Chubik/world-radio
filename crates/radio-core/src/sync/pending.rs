@@ -51,10 +51,22 @@ impl Pending {
     }
 
     pub fn load(path: &Path) -> Pending {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let Ok(raw) = std::fs::read_to_string(path) else {
+            // a missing file is the normal case for a device with nothing pending
+            return Pending::default();
+        };
+        match serde_json::from_str(&raw) {
+            Ok(pending) => pending,
+            Err(e) => {
+                // unlike a missing file, this one existed and failed to parse —
+                // silently returning empty here would drop a real pending deletion
+                eprintln!(
+                    "warning: sync pending log at {} is corrupt, treating as empty: {e}",
+                    path.display()
+                );
+                Pending::default()
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
