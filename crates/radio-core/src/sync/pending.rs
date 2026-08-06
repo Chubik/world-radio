@@ -95,6 +95,22 @@ impl Pending {
         merged.merge_from(&Pending::load(path));
         merged.save(path)
     }
+
+    /// post-sync clear for the case where `pushed` (not necessarily `self`) is what
+    /// the server round-trip actually sent: reads the current log and removes only the
+    /// exact (id, gone) entries that were pushed, keeping anything written meanwhile.
+    /// a plain overwrite here would silently drop an edit made during the round-trip;
+    /// re-merging the whole disk log back in would replay an already-synced deletion
+    /// forever. an id whose `gone` flipped since the push is a new, unsent action and
+    /// must survive the clear.
+    pub fn clear_pushed(pushed: &Pending, path: &Path) -> std::io::Result<()> {
+        let mut current = Pending::load(path);
+        current.favs = remove_pushed(&current.favs, &pushed.favs);
+        current.blocked = remove_pushed(&current.blocked, &pushed.blocked);
+        current.excluded_countries =
+            remove_pushed(&current.excluded_countries, &pushed.excluded_countries);
+        current.save(path)
+    }
 }
 
 /// per-id, `into` wins; ids only present in `from` are appended unchanged.
@@ -104,6 +120,17 @@ fn merge_list(into: &mut Vec<Change>, from: &[Change]) {
             into.push(change.clone());
         }
     }
+}
+
+/// keeps every entry of `current` except one that exactly matches (same id AND
+/// same `gone`) an entry in `pushed` — an id present in both but with `gone`
+/// flipped is a new action written during the round-trip, not the one that was sent.
+fn remove_pushed(current: &[Change], pushed: &[Change]) -> Vec<Change> {
+    current
+        .iter()
+        .filter(|c| !pushed.contains(c))
+        .cloned()
+        .collect()
 }
 
 // same directory, pid-scoped temp file, one rename — a crash mid-write leaves the
@@ -309,6 +336,113 @@ mod tests {
             .filter(|e| e.path().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(entries.is_empty(), "expected no .tmp files after save");
+    }
+
+    // PROBE (finding 2): the post-sync clear used a plain `save` with a truncated
+    // log, so an edit written during the HTTP round-trip had no chance to survive —
+    // it was never merged in, only overwritten. this shows that failure mode on the
+    // old operation (`pending.clear(); pending.save()`), and that `clear_pushed`
+    // — the fix — keeps the concurrent edit instead.
+    #[test]
+    fn probe_post_sync_clear_loses_a_concurrent_edit_before_the_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        // what actually went out on the wire.
+        let mut pushed = Pending::default();
+        pushed.note(Set::Favs, "s1", true);
+        pushed.save(&path).unwrap();
+
+        // mid-flight, a second writer (e.g. the TUI un-starring another station)
+        // appends its own entry to the same on-disk log.
+        let mut second_writer = Pending::load(&path);
+        second_writer.note(Set::Favs, "s3", true);
+        second_writer.save_merged(&path).unwrap();
+        assert_eq!(Pending::load(&path).favs.len(), 2);
+
+        // the old post-sync clear: truncate to empty and overwrite, blind to
+        // whatever landed on disk since the push.
+        let mut old_style = pushed.clone();
+        old_style.clear();
+        old_style.save(&path).unwrap();
+
+        let on_disk = Pending::load(&path);
+        assert!(
+            on_disk.is_empty(),
+            "expected the old blind clear to also destroy the concurrent edit, found {on_disk:?}"
+        );
+    }
+
+    #[test]
+    fn clear_pushed_keeps_an_edit_written_during_the_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        let mut pushed = Pending::default();
+        pushed.note(Set::Favs, "s1", true);
+        pushed.save(&path).unwrap();
+
+        // mid-flight: a second writer notes an unrelated deletion.
+        let mut second_writer = Pending::load(&path);
+        second_writer.note(Set::Favs, "s3", true);
+        second_writer.save_merged(&path).unwrap();
+
+        Pending::clear_pushed(&pushed, &path).unwrap();
+
+        let on_disk = Pending::load(&path);
+        assert_eq!(
+            on_disk.favs,
+            vec![Change {
+                id: "s3".into(),
+                gone: true
+            }],
+            "the entry pushed to the server should be gone, the concurrent one must survive"
+        );
+    }
+
+    #[test]
+    fn clear_pushed_keeps_an_id_whose_gone_flipped_during_the_round_trip() {
+        // id "x" was pushed as gone:false (a favourite). during the round-trip the
+        // same id is un-starred on disk (gone:true). that is a brand new action the
+        // server has not seen — clearing must not remove it just because the id matches.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        let mut pushed = Pending::default();
+        pushed.note(Set::Favs, "x", false);
+        pushed.save(&path).unwrap();
+
+        let mut second_writer = Pending::load(&path);
+        second_writer.note(Set::Favs, "x", true);
+        second_writer.save_merged(&path).unwrap();
+        assert_eq!(Pending::load(&path).favs.len(), 1);
+
+        Pending::clear_pushed(&pushed, &path).unwrap();
+
+        let on_disk = Pending::load(&path);
+        assert_eq!(
+            on_disk.favs,
+            vec![Change {
+                id: "x".into(),
+                gone: true
+            }],
+            "the flipped gone:true must survive the clear"
+        );
+    }
+
+    #[test]
+    fn clear_pushed_removes_nothing_extra_when_nothing_changed_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sync_pending.json");
+
+        let mut pushed = Pending::default();
+        pushed.note(Set::Favs, "s1", true);
+        pushed.note(Set::Blocked, "b1", true);
+        pushed.save(&path).unwrap();
+
+        Pending::clear_pushed(&pushed, &path).unwrap();
+
+        assert!(Pending::load(&path).is_empty());
     }
 
     #[test]
