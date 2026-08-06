@@ -3,7 +3,8 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@color/bg">
 
-    <!-- pinned app-bar with an always-visible DONE close button -->
+    <!-- pinned app-bar with an always-visible close button: the body scrolls under
+         it, so the way out stays reachable even when the QR fills the screen. -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="56dp"
         android:orientation="horizontal" android:gravity="center_vertical"
         android:paddingStart="20dp" android:paddingEnd="14dp"
@@ -12,11 +13,11 @@
             android:layout_weight="1" android:text="@string/sync_title"
             android:textColor="@color/bright" android:textSize="16sp"
             android:fontFamily="@font/ibm_plex_mono" android:fontWeight="700" />
-        <TextView android:id="@+id/done" android:layout_width="wrap_content" android:layout_height="36dp"
+        <TextView android:id="@+id/done" android:layout_width="36dp" android:layout_height="36dp"
             android:gravity="center" android:text="@string/sync_done"
-            android:paddingStart="14dp" android:paddingEnd="14dp"
-            android:textColor="@color/amber" android:textSize="12sp"
-            android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_close" />
+            android:contentDescription="@string/sync_close_desc"
+            android:textColor="@color/mute" android:textSize="14sp"
+            android:fontFamily="@font/ibm_plex_mono" android:fontWeight="400" android:background="@drawable/btn_close" />
     </LinearLayout>
 
     <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/rule" />
