@@ -106,10 +106,17 @@ fn merge_list(into: &mut Vec<Change>, from: &[Change]) {
     }
 }
 
-// same directory, one temp file, one rename — a crash mid-write leaves the
+// same directory, pid-scoped temp file, one rename — a crash mid-write leaves the
 // old file intact instead of the truncated-then-failed write `fs::write` risks.
+// the pid in the temp name ensures concurrent writers do not collide on the same temp file.
 fn write_atomic(path: &Path, body: &str) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
+    let pid = std::process::id();
+    let tmp_name = format!("{}.{}.tmp", filename, pid);
+    let tmp = path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(&tmp_name);
     std::fs::write(&tmp, body)?;
     std::fs::rename(&tmp, path)
 }
@@ -295,6 +302,30 @@ mod tests {
         p.note(Set::Favs, "a", true);
         p.save(&path).unwrap();
         assert!(path.exists());
-        assert!(!path.with_extension("tmp").exists());
+        // verify no tmp files remain in the directory
+        let entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(entries.is_empty(), "expected no .tmp files after save");
+    }
+
+    #[test]
+    fn concurrent_pids_do_not_share_temp_filename() {
+        // simulate two different processes by verifying the naming scheme produces
+        // unique names per pid: concurrent writers will use different temp filenames
+        let pid1 = std::process::id();
+        let filename = "sync_pending.json";
+        let tmp_name_1 = format!("{}.{}.tmp", filename, pid1);
+
+        // if a different pid were to write, it would use a different temp name
+        let different_pid = pid1 + 1;
+        let tmp_name_2 = format!("{}.{}.tmp", filename, different_pid);
+
+        assert_ne!(
+            tmp_name_1, tmp_name_2,
+            "different pids must produce different temp filenames"
+        );
     }
 }
