@@ -1,0 +1,90 @@
+:root {
+  --bg: #15100b; --panel: #1b1510; --fg: #d49a3a; --hi: #ffc457;
+  --dim: #6e5430; --rule: #3a2c17; --ok: #9ec074; --warn: #ffc457;
+  --err: #d96a5a; --bright: #fff0c0;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: transparent; }
+body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
+
+.panel {
+  position: relative; width: 272px; border-radius: 14px; overflow: hidden;
+  background: var(--bg); color: var(--fg); font-family: var(--mono);
+  padding: 11px 13px 12px;
+  box-shadow: inset 0 0 0 1px var(--rule), 0 18px 50px -12px rgba(0,0,0,.55);
+}
+/* the crt signature: scanlines over a soft top glow */
+.scan {
+  position: absolute; inset: 0; z-index: 3; pointer-events: none; mix-blend-mode: overlay;
+  background: repeating-linear-gradient(to bottom,
+    rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.16) 2px, rgba(0,0,0,.16) 3px);
+}
+.glow {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 0%, #d49a3a22, transparent 70%);
+}
+.body { position: relative; z-index: 4; display: flex; flex-direction: column; gap: 7px; }
+.row { display: flex; align-items: center; }
+
+.head { gap: 8px; }
+.mark { font-weight: 700; font-size: 11px; letter-spacing: -.01em; color: var(--fg); white-space: nowrap; }
+.mark i { color: var(--hi); font-style: normal; }
+.state { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; letter-spacing: .1em; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.state.ok { color: var(--ok); } .state.warn { color: var(--warn); }
+.state.err { color: var(--err); } .state.dim { color: var(--dim); }
+.state.ok .dot { box-shadow: 0 0 6px var(--ok); }
+.pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+.meta { margin-left: auto; font-size: 9px; color: var(--dim); white-space: nowrap; }
+
+.now { align-items: flex-start; gap: 8px; }
+.now_text { flex: 1; min-width: 0; }
+.station {
+  font-family: var(--sans); font-weight: 600; font-size: 13.5px; line-height: 1.15;
+  color: var(--bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.station.idle { color: var(--dim); }
+.star {
+  flex: none; width: 24px; height: 24px; border-radius: 6px; display: inline-flex;
+  align-items: center; justify-content: center; cursor: pointer; font-size: 13px;
+  color: var(--dim); box-shadow: inset 0 0 0 1px var(--rule);
+}
+.star.on { color: var(--bg); background: var(--hi); box-shadow: 0 0 9px -2px #d49a3a; }
+.star.hidden { visibility: hidden; }
+
+.levels { justify-content: space-between; align-items: flex-end; gap: 8px; }
+.spectrum { display: flex; align-items: flex-end; gap: 1px; height: 16px; }
+.spectrum span { width: 3px; background: var(--hi); border-radius: .5px; opacity: .4; }
+.spectrum.live span { opacity: 1; animation: bar .9s ease-in-out infinite alternate; }
+@keyframes bar { from { transform: scaleY(.35) } to { transform: scaleY(1) } }
+.spectrum span { transform-origin: bottom; }
+.vol { display: flex; align-items: center; gap: 4px; }
+.vol_label { font-size: 9px; color: var(--dim); }
+.vol_bar { display: flex; gap: 1.5px; }
+.vol_bar i {
+  width: 3.5px; height: 9px; border-radius: .5px; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--dim);
+}
+.vol_bar i.on { background: var(--hi); box-shadow: inset 0 0 0 1px var(--hi); }
+
+.controls { gap: 7px; }
+.btn {
+  appearance: none; border: none; cursor: pointer; font-family: var(--mono);
+  border-radius: 5px; color: var(--fg); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule); padding: 7px 9px; font-size: 13px; line-height: 1;
+}
+.btn.primary {
+  flex: 1; font-weight: 700; font-size: 12px; letter-spacing: .06em; padding: 8px 12px;
+  color: var(--bg); background: var(--hi); box-shadow: 0 0 10px -2px #d49a3a;
+}
+.foot { justify-content: space-between; }
+.scope {
+  display: inline-flex; align-items: center; gap: 2px; padding: 2px;
+  border-radius: 5px; box-shadow: inset 0 0 0 1px var(--rule);
+}
+.seg { padding: 2px 6px; font-size: 9px; letter-spacing: .04em; border-radius: 3px; color: var(--dim); cursor: pointer; }
+.seg.on { color: var(--bg); background: var(--hi); font-weight: 700; }
+.hint { font-size: 9px; color: var(--dim); }
