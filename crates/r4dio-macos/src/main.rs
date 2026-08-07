@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{ActivationPolicy, Manager};
+use tauri::Manager;
 use tauri_plugin_positioner::{Position, WindowExt};
 
 // clicking the tray icon while the popover holds key-window status makes AppKit
@@ -17,6 +17,26 @@ use tauri_plugin_positioner::{Position, WindowExt};
 const REOPEN_GUARD: Duration = Duration::from_millis(200);
 
 type LastHide = Arc<Mutex<Option<Instant>>>;
+
+// the activation policy is a macos-only api, but ci runs clippy over the whole
+// workspace on linux, so the calls are wrapped rather than sprinkled with cfgs.
+#[cfg(target_os = "macos")]
+fn set_accessory(app: &tauri::AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_accessory(_app: &tauri::AppHandle) {}
+
+// an accessory app cannot become active, so a window shown while in that policy
+// would open behind whatever the user is looking at.
+#[cfg(target_os = "macos")]
+fn set_regular(app: &tauri::AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_regular(_app: &tauri::AppHandle) {}
 
 fn main() {
     radio_core::single_instance::take_over_named(radio_core::single_instance::MACOS_LOCK);
@@ -48,7 +68,7 @@ fn show_sync(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("sync") else {
         return;
     };
-    let _ = app.set_activation_policy(ActivationPolicy::Regular);
+    set_regular(app);
     let _ = win.show();
     let _ = win.set_focus();
 }
@@ -78,7 +98,7 @@ fn run(backend: backend::Backend) {
         .manage(last_hide.clone())
         .setup(move |app| {
             // accessory: a menubar app has no dock icon and no menu bar of its own.
-            app.set_activation_policy(ActivationPolicy::Accessory);
+            set_accessory(app.handle());
 
             let shuffle = MenuItem::with_id(app, "shuffle", "Shuffle", true, None::<&str>)?;
             let playstop = MenuItem::with_id(app, "playstop", "Play / Stop", true, None::<&str>)?;
@@ -148,7 +168,7 @@ fn run(backend: backend::Backend) {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = handle.hide();
-                        let _ = app_handle.set_activation_policy(ActivationPolicy::Accessory);
+                        set_accessory(&app_handle);
                     }
                 });
             }
