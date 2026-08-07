@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- accessory from the moment launchd reads the bundle: the runtime call in
+       setup() only runs after the backend has opened sqlite and synced, which is
+       seconds of a bouncing dock icon for an app that never opens a window. -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
