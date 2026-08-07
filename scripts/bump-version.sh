@@ -32,6 +32,11 @@ stamp() {
   newcode=$((code + 1))
   sed -i.bak -E "s/versionCode = [0-9]+/versionCode = ${newcode}/" "$gradle"
   rm -f "$gradle.bak"
+  # tauri keeps its own version field; leaving it stale ships a bundle whose
+  # about-box disagrees with the release it came from.
+  tauri="$root/crates/r4dio-macos/tauri.conf.json"
+  sed -i.bak -E "s/(\"version\": \")[0-9]+\.[0-9]+\.[0-9]+(\")/\1${ver}\2/" "$tauri"
+  rm -f "$tauri.bak"
   echo "stamped ${ver} (versionCode ${newcode})"
 }
 
