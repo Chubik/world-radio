@@ -41,6 +41,54 @@ class SyncActivity : ComponentActivity() {
         }
     }
 
+    private val exportPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        when (uri) {
+            null -> {}
+            else -> lifecycleScope.launch {
+                val body = BackupFile.encode(
+                    key = favStore.syncKey(),
+                    favs = favStore.currentFavUuids(),
+                    cached = favStore.currentCachedFavs(),
+                    blocked = favStore.currentBlocked(),
+                    excluded = favStore.currentExcluded(),
+                )
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching {
+                        contentResolver.openOutputStream(uri)?.use { it.write(body.toByteArray()) }
+                    }.isSuccess
+                }
+                toast(getString(if (ok) R.string.sync_exported else R.string.sync_export_failed))
+            }
+        }
+    }
+
+    private val importPicker = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        when (uri) {
+            null -> {}
+            else -> lifecycleScope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    runCatching {
+                        contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    }.getOrNull()
+                }
+                val backup = text?.let { BackupFile.decode(it) }
+                when (backup) {
+                    null -> toast(getString(R.string.sync_import_failed))
+                    else -> {
+                        favStore.restore(backup)
+                        render()
+                        toast(getString(R.string.sync_imported, backup.favs.size))
+                        triggerSync()
+                    }
+                }
+            }
+        }
+    }
+
     private suspend fun linkAndMerge(key: String) {
         favStore.setSyncKey(key)
         val local = SyncData(
@@ -149,6 +197,13 @@ class SyncActivity : ComponentActivity() {
                 }
                 .setNegativeButton("cancel", null)
                 .show()
+        }
+        findViewById<View>(R.id.export_backup).setOnClickListener {
+            exportPicker.launch(getString(R.string.sync_export_name))
+        }
+        findViewById<View>(R.id.import_backup).setOnClickListener {
+            // some file providers hand json back as octet-stream, so accept both
+            importPicker.launch(arrayOf("application/json", "application/octet-stream", "text/plain"))
         }
         findViewById<View>(R.id.excluded_countries).setOnClickListener {
             lifecycleScope.launch {
