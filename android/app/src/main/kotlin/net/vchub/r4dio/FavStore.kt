@@ -25,8 +25,17 @@ object FavLogic {
             false -> favs + uuid
         }
 
-    fun pickFav(cached: List<Station>, rng: Random = Random.Default): Station? {
-        val playable = cached.filter { allowedStation(it) }
+    /**
+     * user-excluded countries are deliberately not passed: an explicit favourite
+     * outranks a country filter. [blocked] is passed, and that difference is the
+     * point — blocking a station means never play it, star or no star.
+     */
+    fun pickFav(
+        cached: List<Station>,
+        blocked: Set<String> = emptySet(),
+        rng: Random = Random.Default,
+    ): Station? {
+        val playable = cached.filter { allowedStation(it, blocked = blocked) }
         if (playable.isEmpty()) return null
         return playable[rng.nextInt(playable.size)]
     }
@@ -120,11 +129,13 @@ class FavStore(context: Context) {
      * the uuid set is re-read inside the transaction, not passed in: resolving takes a
      * network round-trip, and a star tapped during it would otherwise be overwritten by
      * a caller holding a pre-tap snapshot — the same uuid/object divergence this whole
-     * path exists to remove.
+     * path exists to remove. the blocked set is re-read for the same reason, and applied
+     * here so a station blocked after it was cached is evicted rather than kept alive by
+     * the cached copy — the star itself stays, so unblocking restores it.
      */
     suspend fun reconcileCachedFavs(resolved: List<Station>) {
         store.edit { prefs ->
-            val wanted = prefs[keyFavs] ?: emptySet()
+            val wanted = (prefs[keyFavs] ?: emptySet()) - (prefs[keyBlocked] ?: emptySet())
             val byUuid = LinkedHashMap<String, FavStation>()
             decodeCached(prefs[keyCached]).forEach { byUuid[it.uuid] = it }
             resolved.forEach { byUuid[it.uuid] = FavStation.of(it) }
