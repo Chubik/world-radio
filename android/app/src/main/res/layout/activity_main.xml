@@ -69,6 +69,16 @@
                 android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
                 android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
                 android:background="@drawable/bg_pill" />
+
+            <!-- a setting, not an action: it sits up here so the four big controls at
+                 the bottom keep their width for eyes-free tapping while driving. -->
+            <TextView android:id="@+id/awake_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="6dp" android:text="@string/home_awake_off"
+                android:contentDescription="@string/home_awake_desc"
+                android:textColor="@color/dim" android:textSize="9.5sp"
+                android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                android:background="@drawable/bg_pill" />
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"

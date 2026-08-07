@@ -7,12 +7,14 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -20,6 +22,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.launch
 
 /** Splits the packed artist string ("SA · MP3 · 128k") into country and codec. */
 fun parseArtist(artist: String?): Pair<String?, String?> {
@@ -40,6 +43,7 @@ class MainActivity : ComponentActivity() {
     private var playableCount = 0
     private var catalogLoaded = false
     private var released = false
+    private val favStore by lazy { FavStore(this) }
 
     private val requestPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -65,6 +69,38 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.btn_sync).setOnClickListener {
             startActivity(Intent(this, SyncActivity::class.java))
         }
+        findViewById<View>(R.id.awake_pill).setOnClickListener {
+            lifecycleScope.launch {
+                val next = nextKeepAwake(favStore.currentKeepAwake())
+                favStore.setKeepAwake(next)
+                applyKeepAwake(next)
+            }
+        }
+    }
+
+    /**
+     * FLAG_KEEP_SCREEN_ON rather than a wake lock: the system drops it for us the
+     * moment this window stops being visible, so a forgotten toggle cannot hold the
+     * screen on behind another app.
+     */
+    private fun applyKeepAwake(on: Boolean) {
+        when (on) {
+            true -> window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            false -> window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        findViewById<TextView>(R.id.awake_pill).apply {
+            text = keepAwakeLabel(on)
+            setTextColor(getColor(if (on) R.color.amber_hi else R.color.dim))
+            setBackgroundResource(if (on) R.drawable.bg_pill_on else R.drawable.bg_pill)
+        }
+    }
+
+    // the flag lives on the window, and a window rebuilt after a rotation or a trip
+    // through another app comes back without it — so it is reapplied on every resume,
+    // not just once at creation.
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch { applyKeepAwake(favStore.currentKeepAwake()) }
     }
 
     private fun send(action: String) {

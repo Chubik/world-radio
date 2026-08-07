@@ -96,6 +96,16 @@
                     android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
                     android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
                     android:background="@drawable/bg_pill" />
+
+                <!-- must exist in both layouts: landscape is the car-mount orientation,
+                     which is exactly where a screen that blanks is the problem. -->
+                <TextView android:id="@+id/awake_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp" android:text="@string/home_awake_off"
+                    android:contentDescription="@string/home_awake_desc"
+                    android:textColor="@color/dim" android:textSize="9.5sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                    android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                    android:background="@drawable/bg_pill" />
             </LinearLayout>
         </LinearLayout>
 

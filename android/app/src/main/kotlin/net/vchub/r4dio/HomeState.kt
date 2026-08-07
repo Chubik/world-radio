@@ -27,3 +27,17 @@ fun showsHiddenPill(hiddenCount: Int, scope: String): Boolean =
  */
 fun isAllHiddenWarn(playableCount: Int, hiddenCount: Int, scope: String, catalogLoaded: Boolean): Boolean =
     catalogLoaded && playableCount == 0 && hiddenCount > 0 && scope != "favs"
+
+/**
+ * the screen-awake toggle is a car feature: the phone is in a mount, and a screen
+ * that blanks mid-drive means fumbling to see what is playing. off by default, so
+ * nothing changes for anyone who does not ask for it.
+ */
+fun keepAwakeLabel(on: Boolean): String = when (on) {
+    true -> "☀ AWAKE"
+    false -> "☾ SLEEPS"
+}
+
+/** the stored flag is the only source of truth — never the window's current state,
+ *  which the system may have cleared behind our back. */
+fun nextKeepAwake(current: Boolean): Boolean = !current
