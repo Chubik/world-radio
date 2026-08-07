@@ -133,6 +133,31 @@
                 android:textColor="@color/bright" android:textSize="13sp"
                 android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
 
+            <!-- shared: a file backup, because the key IS the account — there is no
+                 password to recover it with, and auto-backup only fires with a google
+                 account on wi-fi, which a sideloaded install never waits for. -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="18dp" android:text="@string/sync_backup_label"
+                android:textColor="@color/dim" android:textSize="10sp" android:fontFamily="@font/ibm_plex_mono"
+                android:fontWeight="400" android:letterSpacing="0.18" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="10dp">
+                <TextView android:id="@+id/export_backup" android:layout_width="0dp" android:layout_height="50dp"
+                    android:layout_weight="1" android:gravity="center"
+                    android:text="@string/sync_export" android:textColor="@color/bright" android:textSize="13sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
+                <TextView android:id="@+id/import_backup" android:layout_width="0dp" android:layout_height="50dp"
+                    android:layout_weight="1" android:layout_marginStart="10dp" android:gravity="center"
+                    android:text="@string/sync_import" android:textColor="@color/bright" android:textSize="13sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:fontWeight="600" android:background="@drawable/btn_ghost" />
+            </LinearLayout>
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="@string/sync_backup_hint"
+                android:textColor="@color/dim" android:textSize="11sp"
+                android:fontFamily="@font/ibm_plex_sans" android:fontWeight="400" />
+
             <!-- feedback: a plain mailto link, no backend -->
             <TextView android:id="@+id/feedback" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="24dp" android:gravity="center"

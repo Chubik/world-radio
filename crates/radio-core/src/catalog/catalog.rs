@@ -1,5 +1,6 @@
 use crate::catalog::favorites::{Favorites, History};
 use crate::catalog::{Cache, Facets, Health, SearchQuery, Station};
+use crate::sync::{Pending, Set};
 
 pub struct Catalog {
     cache: Cache,
@@ -8,6 +9,7 @@ pub struct Catalog {
     history: History,
     blacklist: Favorites,
     excluded_countries: Favorites,
+    pub pending: Pending,
 }
 
 impl Catalog {
@@ -19,6 +21,7 @@ impl Catalog {
             history: History::new(),
             blacklist: Favorites::new(),
             excluded_countries: Favorites::new(),
+            pending: Pending::default(),
         }
     }
 
@@ -43,6 +46,7 @@ impl Catalog {
     }
 
     pub fn set_excluded_countries(&mut self, codes: Vec<String>) {
+        let before: Vec<String> = self.excluded_countries.ids().to_vec();
         let mut f = Favorites::new();
         for code in codes {
             let up = code.to_uppercase();
@@ -50,11 +54,32 @@ impl Catalog {
                 f.toggle(&up);
             }
         }
+        // a wholesale replace hides both directions; the sync log needs each one
+        // named, because an id that merely stopped being listed is not a deletion.
+        for old in &before {
+            if !f.contains(old) {
+                self.pending.note(Set::Countries, old, true);
+            }
+        }
+        for new in f.ids() {
+            if !before.contains(new) {
+                self.pending.note(Set::Countries, new, false);
+            }
+        }
         self.excluded_countries = f;
     }
 
+    /// applies the server's merged country list without logging it as a pending
+    /// change — reconciling to the answer we just received is not a new user edit.
+    pub fn apply_synced_excluded_countries(&mut self, codes: Vec<String>) {
+        self.excluded_countries.set_from(codes);
+    }
+
     pub fn toggle_excluded_country(&mut self, code: &str) -> bool {
-        self.excluded_countries.toggle(&code.to_uppercase())
+        let up = code.to_uppercase();
+        let now_in = self.excluded_countries.toggle(&up);
+        self.pending.note(Set::Countries, &up, !now_in);
+        now_in
     }
 
     pub fn last_sync(&self) -> anyhow::Result<Option<i64>> {
@@ -99,7 +124,9 @@ impl Catalog {
     }
 
     pub fn toggle_blacklist(&mut self, uuid: &str) -> bool {
-        self.blacklist.toggle(uuid)
+        let now_in = self.blacklist.toggle(uuid);
+        self.pending.note(Set::Blocked, uuid, !now_in);
+        now_in
     }
 
     pub fn is_blacklisted(&self, uuid: &str) -> bool {
@@ -139,7 +166,9 @@ impl Catalog {
     }
 
     pub fn toggle_favorite(&mut self, uuid: &str) -> bool {
-        self.favorites.toggle(uuid)
+        let now_in = self.favorites.toggle(uuid);
+        self.pending.note(Set::Favs, uuid, !now_in);
+        now_in
     }
 
     pub fn is_favorite(&self, uuid: &str) -> bool {
@@ -150,11 +179,15 @@ impl Catalog {
         self.favorites.ids()
     }
 
-    pub fn set_favorites(&mut self, ids: Vec<String>) {
+    /// applies the server's merged favourites without logging it as a pending
+    /// change — reconciling to the answer we just received is not a new user edit.
+    pub fn apply_synced_favorites(&mut self, ids: Vec<String>) {
         self.favorites.set_from(ids);
     }
 
-    pub fn set_blacklist(&mut self, ids: Vec<String>) {
+    /// applies the server's merged blacklist without logging it as a pending
+    /// change — reconciling to the answer we just received is not a new user edit.
+    pub fn apply_synced_blacklist(&mut self, ids: Vec<String>) {
         self.blacklist.set_from(ids);
     }
 
@@ -181,6 +214,7 @@ impl Catalog {
             history: History::load(hist_path),
             blacklist: Favorites::load(blacklist_path),
             excluded_countries: Favorites::load(excluded_path),
+            pending: Pending::default(),
         }
     }
 
@@ -437,6 +471,29 @@ mod tests {
         assert_eq!(cat.favorite_ids(), &["u1".to_string()]);
         assert!(!cat.toggle_favorite("u1"));
         assert!(!cat.is_favorite("u1"));
+    }
+
+    #[test]
+    fn changing_the_country_filter_records_both_directions() {
+        let mut c = catalog_in_memory();
+        c.set_excluded_countries(vec!["DE".into(), "FR".into()]);
+        c.set_excluded_countries(vec!["FR".into(), "IT".into()]);
+        // DE was removed, IT was added, FR was untouched by the second call
+        let mut got: Vec<(String, bool)> = c
+            .pending
+            .excluded_countries
+            .iter()
+            .map(|ch| (ch.id.clone(), ch.gone))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("DE".to_string(), true),
+                ("FR".to_string(), false),
+                ("IT".to_string(), false)
+            ]
+        );
     }
 
     #[test]

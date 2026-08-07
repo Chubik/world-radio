@@ -46,7 +46,18 @@ struct ApiRelease {
     tag_name: String,
 }
 
-pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<Release>> {
+/// the outcome of an update check. "no release to install" has two very
+/// different causes and the user deserves to be told which: they are already
+/// current, or a newer version is tagged but its build for this platform has
+/// not been published yet.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UpdateCheck {
+    UpToDate,
+    Available(Release),
+    AssetsPending { version: String },
+}
+
+pub fn check_from(api_url: &str, releases_base: &str) -> anyhow::Result<UpdateCheck> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("world-radio-update/1")
         .build()?;
@@ -63,36 +74,49 @@ pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<
             true => std::cmp::Ordering::Greater,
             false => std::cmp::Ordering::Less,
         }) {
-        None => return Ok(None),
+        None => return Ok(UpdateCheck::UpToDate),
         Some(v) => v,
     };
     if !is_newer(&version, current_version()) {
-        return Ok(None);
+        return Ok(UpdateCheck::UpToDate);
     }
     let asset = format!("{}-{}-{}.tar.gz", BIN_NAME, version, target_triple());
-    // the release assets (tarball + its SHA256SUMS) live under the versioned
-    // github release path, which is always current — unlike a mirror that only
-    // updates when the site is redeployed. `{version}` in the base is expanded.
     let base = releases_base.replace("{version}", &version);
-    let tarball_url = format!("{base}/{asset}");
-    let sums = client
-        .get(format!("{base}/SHA256SUMS"))
-        .send()?
-        .error_for_status()?
-        .text()?;
-    let sha256 = match sums
+    let resp = client.get(format!("{base}/SHA256SUMS")).send()?;
+    // a tagged release whose tarballs are still uploading answers 404 here.
+    // that is a wait-and-retry, not a failure worth an error trace.
+    if !resp.status().is_success() {
+        return Ok(UpdateCheck::AssetsPending { version });
+    }
+    let sums = resp.text()?;
+    match sums
         .lines()
         .find(|l| l.trim_end().ends_with(&asset))
         .and_then(|l| l.split_whitespace().next())
     {
-        None => return Ok(None),
-        Some(s) => s.to_string(),
-    };
-    Ok(Some(Release {
-        version,
-        tarball_url,
-        sha256,
-    }))
+        None => Ok(UpdateCheck::AssetsPending { version }),
+        Some(sha256) => Ok(UpdateCheck::Available(Release {
+            version,
+            tarball_url: format!("{base}/{asset}"),
+            sha256: sha256.to_string(),
+        })),
+    }
+}
+
+pub fn check_latest() -> anyhow::Result<UpdateCheck> {
+    check_from(
+        "https://api.github.com/repos/Chubik/world-radio/releases?per_page=10",
+        "https://github.com/Chubik/world-radio/releases/download/v{version}",
+    )
+}
+
+/// installable-release view of [`check_from`], for callers that only act when
+/// there is something to install (the startup banner, the in-TUI check).
+pub fn latest_from(api_url: &str, releases_base: &str) -> anyhow::Result<Option<Release>> {
+    match check_from(api_url, releases_base)? {
+        UpdateCheck::Available(rel) => Ok(Some(rel)),
+        UpdateCheck::UpToDate | UpdateCheck::AssetsPending { .. } => Ok(None),
+    }
 }
 
 pub fn fetch_latest() -> anyhow::Result<Option<Release>> {
@@ -228,6 +252,78 @@ mod tests {
             .create();
         let out = latest_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
         assert!(out.is_none());
+    }
+
+    /// a release can be tagged and published before its CLI tarballs finish
+    /// uploading — a real occurrence when a slow runner cancels the build jobs.
+    /// that is a "come back later", not the raw 404 the user used to see.
+    #[test]
+    fn checksums_missing_reports_assets_pending() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(r#"[{"tag_name":"v99.0.0"}]"#)
+            .create();
+        server.mock("GET", "/SHA256SUMS").with_status(404).create();
+        let out = check_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
+        assert_eq!(
+            out,
+            UpdateCheck::AssetsPending {
+                version: "99.0.0".into()
+            }
+        );
+    }
+
+    /// the checksum file exists but carries no line for this platform — the
+    /// release simply does not ship this target.
+    #[test]
+    fn checksums_without_this_target_report_assets_pending() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(r#"[{"tag_name":"v99.0.0"}]"#)
+            .create();
+        server
+            .mock("GET", "/SHA256SUMS")
+            .with_body("abc123  r4dio-99.0.0-some-other-triple.tar.gz\n")
+            .create();
+        let out = check_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
+        assert_eq!(
+            out,
+            UpdateCheck::AssetsPending {
+                version: "99.0.0".into()
+            }
+        );
+    }
+
+    #[test]
+    fn check_from_reports_up_to_date() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(r#"[{"tag_name":"v0.0.1"}]"#)
+            .create();
+        let out = check_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
+        assert_eq!(out, UpdateCheck::UpToDate);
+    }
+
+    #[test]
+    fn check_from_reports_available_release() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(r#"[{"tag_name":"v99.0.0"}]"#)
+            .create();
+        let asset = format!("{}-99.0.0-{}.tar.gz", BIN_NAME, target_triple());
+        server
+            .mock("GET", "/SHA256SUMS")
+            .with_body(format!("abc123  {asset}\n"))
+            .create();
+        let out = check_from(&format!("{}/releases/latest", server.url()), &server.url()).unwrap();
+        match out {
+            UpdateCheck::Available(rel) => assert_eq!(rel.version, "99.0.0"),
+            other => panic!("expected an available release, got {other:?}"),
+        }
     }
 
     fn make_tarball(bin_contents: &[u8]) -> Vec<u8> {
