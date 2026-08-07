@@ -6,6 +6,9 @@ fn to_pick(s: &radio_core::catalog::Station) -> StationPick {
         uuid: s.stationuuid.clone(),
         name: s.name.clone(),
         url: s.url_resolved.clone(),
+        country: s.countrycode.clone(),
+        codec: s.codec.clone(),
+        bitrate: s.bitrate,
     }
 }
 
