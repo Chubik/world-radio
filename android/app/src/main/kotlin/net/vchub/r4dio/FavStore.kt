@@ -3,6 +3,7 @@ package net.vchub.r4dio
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -72,6 +73,7 @@ class FavStore(context: Context) {
     private val keyExcludedCountries = stringSetPreferencesKey("excluded_countries")
     private val keyDeviceId = stringPreferencesKey("device_id")
     private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
+    private val keyKeepAwake = booleanPreferencesKey("keep_awake")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
@@ -133,6 +135,14 @@ class FavStore(context: Context) {
 
     suspend fun setScope(scope: Scope) {
         store.edit { it[keyScope] = scope.name }
+    }
+
+    val keepAwake: Flow<Boolean> = store.data.map { it[keyKeepAwake] ?: false }
+
+    suspend fun currentKeepAwake(): Boolean = keepAwake.first()
+
+    suspend fun setKeepAwake(on: Boolean) {
+        store.edit { it[keyKeepAwake] = on }
     }
 
     suspend fun currentFavUuids(): Set<String> = favUuids.first()

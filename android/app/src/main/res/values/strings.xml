@@ -42,6 +42,9 @@
     <string name="sync_logout">LOG OUT</string>
     <string name="sync_delete">DELETE</string>
     <string name="sync_hide_countries">HIDE COUNTRIES</string>
+    <string name="home_awake_on">☀ AWAKE</string>
+    <string name="home_awake_off">☾ SLEEPS</string>
+    <string name="home_awake_desc">keep the screen on</string>
     <string name="sync_backup_label">BACKUP</string>
     <string name="sync_export">SAVE TO FILE</string>
     <string name="sync_import">RESTORE</string>

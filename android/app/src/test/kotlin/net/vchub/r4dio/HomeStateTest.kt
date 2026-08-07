@@ -1,5 +1,6 @@
 package net.vchub.r4dio
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -85,5 +86,19 @@ class HomeStateTest {
     @Test
     fun no_warn_when_playable_without_a_loaded_catalogue_is_impossible_in_practice() {
         assertFalse(isAllHiddenWarn(playableCount = 5, hiddenCount = 3, scope = "all", catalogLoaded = false))
+    }
+
+    @Test
+    fun the_awake_label_reflects_the_state() {
+        assertEquals("\u2600 AWAKE", keepAwakeLabel(true))
+        assertEquals("\u263e SLEEPS", keepAwakeLabel(false))
+    }
+
+    // the toggle is the only writer of this state, so tapping it must always be the
+    // inverse of what is stored — never of what the window currently happens to do.
+    @Test
+    fun tapping_the_toggle_inverts_the_stored_state() {
+        assertTrue(nextKeepAwake(false))
+        assertFalse(nextKeepAwake(true))
     }
 }
