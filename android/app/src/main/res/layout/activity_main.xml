@@ -42,43 +42,51 @@
             android:maxLines="1" android:ellipsize="end" />
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical">
+            android:layout_marginTop="8dp" android:orientation="vertical">
 
-            <TextView android:id="@+id/ctx_country" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="" android:textColor="@color/mute" android:textSize="11sp"
-                android:fontFamily="@font/ibm_plex_mono" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
 
-            <TextView android:id="@+id/ctx_codec" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="10dp" android:text="" android:textColor="@color/mute" android:textSize="11sp"
-                android:fontFamily="@font/ibm_plex_mono" />
+                <TextView android:id="@+id/ctx_country" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="" android:textColor="@color/mute" android:textSize="11sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:maxLines="1" android:ellipsize="end" />
 
-            <TextView android:id="@+id/ctx_fav" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="10dp" android:text="@string/home_fav_no" android:textColor="@color/mute" android:textSize="11sp"
-                android:fontFamily="@font/ibm_plex_mono" />
+                <TextView android:id="@+id/ctx_codec" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp" android:text="" android:textColor="@color/mute" android:textSize="11sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:maxLines="1" android:ellipsize="end" />
 
-            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <TextView android:id="@+id/ctx_fav" android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:layout_marginStart="10dp" android:text="@string/home_fav_no" android:textColor="@color/mute" android:textSize="11sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:maxLines="1" android:ellipsize="end" />
+            </LinearLayout>
 
-            <TextView android:id="@+id/hidden_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/amber_hi" android:textSize="9.5sp"
-                android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
-                android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
-                android:background="@drawable/bg_pill_on" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">
 
-            <TextView android:id="@+id/scope_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="@string/home_scope_all" android:textColor="@color/dim" android:textSize="9.5sp"
-                android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
-                android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
-                android:background="@drawable/bg_pill" />
+                <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
 
-            <!-- a setting, not an action: it sits up here so the four big controls at
-                 the bottom keep their width for eyes-free tapping while driving. -->
-            <TextView android:id="@+id/awake_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="6dp" android:text="@string/home_awake_off"
-                android:contentDescription="@string/home_awake_desc"
-                android:textColor="@color/dim" android:textSize="9.5sp"
-                android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
-                android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
-                android:background="@drawable/bg_pill" />
+                <TextView android:id="@+id/hidden_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/amber_hi" android:textSize="9.5sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                    android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                    android:background="@drawable/bg_pill_on" />
+
+                <TextView android:id="@+id/scope_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="@string/home_scope_all" android:textColor="@color/dim" android:textSize="9.5sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                    android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                    android:background="@drawable/bg_pill" />
+
+                <!-- a setting, not an action: it sits up here so the four big controls at
+                     the bottom keep their width for eyes-free tapping while driving. -->
+                <TextView android:id="@+id/awake_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp" android:text="@string/home_awake_off"
+                    android:contentDescription="@string/home_awake_desc"
+                    android:textColor="@color/dim" android:textSize="9.5sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                    android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                    android:background="@drawable/bg_pill" />
+            </LinearLayout>
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
