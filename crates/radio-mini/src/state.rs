@@ -3,6 +3,26 @@ pub struct StationPick {
     pub uuid: String,
     pub name: String,
     pub url: String,
+    pub country: String,
+    pub codec: String,
+    pub bitrate: u32,
+}
+
+/// the panel's top-right line. parts are dropped rather than shown empty, so a
+/// station with no codec reads "MX" instead of "MX ·  0k".
+pub fn meta_label(country: &str, codec: &str, bitrate: u32) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !country.is_empty() {
+        parts.push(country.to_string());
+    }
+    let rate = match bitrate {
+        0 => String::new(),
+        n => format!(" {n}k"),
+    };
+    if !codec.is_empty() {
+        parts.push(format!("{codec}{rate}"));
+    }
+    parts.join(" · ")
 }
 
 pub fn pick_random(stations: &[StationPick]) -> Option<StationPick> {
@@ -131,6 +151,9 @@ mod tests {
             uuid: uuid.into(),
             name: uuid.into(),
             url: url.into(),
+            country: String::new(),
+            codec: String::new(),
+            bitrate: 0,
         }
     }
 
@@ -257,5 +280,23 @@ mod tests {
         assert_eq!(b.len(), 16);
         assert!(b.iter().all(|&v| (0.0..=1.0).contains(&v)));
         assert_eq!(spectrum_bars(0).len(), 0);
+    }
+
+    #[test]
+    fn meta_label_joins_what_is_present() {
+        assert_eq!(meta_label("MX", "AAC", 48), "MX · AAC 48k");
+    }
+
+    #[test]
+    fn meta_label_drops_a_zero_bitrate() {
+        // radio-browser reports 0 for plenty of stations; "AAC 0k" is noise.
+        assert_eq!(meta_label("MX", "AAC", 0), "MX · AAC");
+    }
+
+    #[test]
+    fn meta_label_drops_empty_parts() {
+        assert_eq!(meta_label("", "MP3", 128), "MP3 128k");
+        assert_eq!(meta_label("DE", "", 0), "DE");
+        assert_eq!(meta_label("", "", 0), "");
     }
 }
