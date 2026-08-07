@@ -29,11 +29,14 @@ fn main() {
     run(backend);
 }
 
+// the menubar is at the top of the screen, so the panel belongs below the icon.
+// TrayCenter puts it *above* — `tray_y - window_height`, which is off-screen here
+// and lands under the menubar itself once the plugin clamps the negative y.
 fn show_popover(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("popover") else {
         return;
     };
-    let _ = win.move_window(Position::TrayCenter);
+    let _ = win.move_window(Position::TrayBottomCenter);
     let _ = win.show();
     let _ = win.set_focus();
 }
