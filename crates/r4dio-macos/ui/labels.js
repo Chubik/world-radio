@@ -22,3 +22,43 @@ export function volumeSegments(volume, count = 6) {
 export function showsStar(phase) {
   return phase !== "idle";
 }
+
+// a key arrives pasted, so it carries whatever the clipboard had around it.
+// lowercasing matches the backend's accepted alphabet rather than rejecting a
+// key the user typed in caps.
+export function normalizeKey(raw) {
+  return (raw ?? "").trim().toLowerCase();
+}
+
+// mirrors radio_core::sync::is_valid_format, so the window can refuse an obvious
+// typo without a round trip. the backend stays the authority.
+export function isValidKey(key) {
+  return /^r4-[a-z0-9]+$/.test(key);
+}
+
+// the sync window must never echo the key back, so the status line reports only
+// whether one is stored.
+export function keyStatus(hasKey) {
+  return hasKey
+    ? { text: "KEY SET", tone: "ok" }
+    : { text: "NO KEY", tone: "dim" };
+}
+
+// what the window says after an action; the backend's save can fail on a bad
+// format or an unwritable data dir, and that must reach the user.
+export function actionResult(action, ok) {
+  switch (action) {
+    case "save":
+      return ok
+        ? { text: "key saved", tone: "ok" }
+        : { text: "could not save that key", tone: "err" };
+    case "clear":
+      return { text: "key cleared", tone: "dim" };
+    case "sync":
+      return ok
+        ? { text: "sync requested", tone: "ok" }
+        : { text: "sync needs a key first", tone: "err" };
+    default:
+      return { text: "", tone: "dim" };
+  }
+}
