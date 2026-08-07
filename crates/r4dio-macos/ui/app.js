@@ -86,7 +86,10 @@ document.addEventListener("visibilitychange", () => {
     return;
   }
   poll();
-  timer = timer ?? setInterval(poll, 1000);
+  // webkit can throttle a hidden window's interval to a standstill without
+  // clearing it, so reusing a non-null timer here would leave the panel frozen.
+  clearInterval(timer);
+  timer = setInterval(poll, 1000);
 });
 
 buildSpectrum();
