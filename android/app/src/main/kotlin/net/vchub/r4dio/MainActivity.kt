@@ -235,7 +235,7 @@ class MainActivity : ComponentActivity() {
         val pill = findViewById<TextView>(R.id.hidden_pill)
         when (showsHiddenPill(hiddenCount, scope)) {
             true -> {
-                pill.text = getString(R.string.home_hidden_n, hiddenCount)
+                pill.text = getString(R.string.home_countries_n, hiddenCount)
                 pill.visibility = View.VISIBLE
             }
             false -> pill.visibility = View.GONE
