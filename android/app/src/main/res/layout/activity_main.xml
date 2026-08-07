@@ -92,10 +92,12 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
             android:orientation="vertical" android:gravity="center">
 
-            <FrameLayout android:id="@+id/hero_ring" android:layout_width="200dp" android:layout_height="200dp"
+            <!-- sized to match the landscape ring: on narrow/short screens the fixed 200dp
+                 original left no room below the two-row header for the shuffle label. -->
+            <FrameLayout android:id="@+id/hero_ring" android:layout_width="168dp" android:layout_height="168dp"
                 android:background="@drawable/bg_hero_ring">
 
-                <ImageView android:id="@+id/hero_glyph" android:layout_width="128dp" android:layout_height="128dp"
+                <ImageView android:id="@+id/hero_glyph" android:layout_width="108dp" android:layout_height="108dp"
                     android:layout_gravity="center" android:src="@drawable/ic_shuffle"
                     android:tint="@color/amber_hi" android:contentDescription="@null" />
             </FrameLayout>
