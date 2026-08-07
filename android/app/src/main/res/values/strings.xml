@@ -42,6 +42,15 @@
     <string name="sync_logout">LOG OUT</string>
     <string name="sync_delete">DELETE</string>
     <string name="sync_hide_countries">HIDE COUNTRIES</string>
+    <string name="sync_backup_label">BACKUP</string>
+    <string name="sync_export">SAVE TO FILE</string>
+    <string name="sync_import">RESTORE</string>
+    <string name="sync_backup_hint">keeps your key and favourites if you reinstall</string>
+    <string name="sync_export_name">r4dio-backup.json</string>
+    <string name="sync_exported">saved</string>
+    <string name="sync_export_failed">could not save</string>
+    <string name="sync_imported">restored — %1$d favourites</string>
+    <string name="sync_import_failed">not an r4dio backup</string>
     <string name="sync_feedback">ideas or bugs? support@r4dio.net</string>
     <string name="widget_live">LIVE</string>
     <string name="widget_shuffle">SHUFFLE</string>

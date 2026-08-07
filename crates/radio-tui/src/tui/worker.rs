@@ -46,6 +46,7 @@ pub struct WorkerPaths {
     pub health: PathBuf,
     pub blacklist: PathBuf,
     pub excluded: PathBuf,
+    pub pending: PathBuf,
 }
 
 pub fn station_to_row(s: &Station, favorite: bool, hidden: bool) -> StationRow {
@@ -73,6 +74,9 @@ pub fn spawn(
     req_rx: Receiver<WorkerReq>,
     msg_tx: Sender<Msg>,
 ) -> std::thread::JoinHandle<()> {
+    // a prior session may have quit or gone offline before its sync landed;
+    // pick that delta back up rather than starting the log over.
+    catalog.pending = radio_core::sync::Pending::load(&paths.pending);
     std::thread::spawn(move || {
         let mut last_check = now_secs();
         loop {
@@ -245,6 +249,30 @@ fn coalesce(pending: Vec<WorkerReq>) -> (Vec<WorkerReq>, Option<WorkerReq>) {
 }
 
 fn save_all(catalog: &Catalog, paths: &WorkerPaths) {
+    save_state_and_health(catalog, paths);
+    // sync_pending.json is shared with the CLI, which may run concurrently
+    // (main.rs returns before single_instance::take_over) — merge rather than
+    // overwrite so this save can't erase a deletion the CLI just persisted.
+    if let Err(e) = catalog.pending.save_merged(&paths.pending) {
+        crate::log_warn!("worker: failed to save pending sync log: {e}");
+    }
+}
+
+/// only right after a successful push: `pushed` is the exact `Pending` sent in
+/// that request, so removing just those entries (not overwriting the log) keeps
+/// anything the CLI or another surface wrote to it during the round-trip.
+fn save_all_after_clear(
+    catalog: &Catalog,
+    paths: &WorkerPaths,
+    pushed: &radio_core::sync::Pending,
+) {
+    save_state_and_health(catalog, paths);
+    if let Err(e) = radio_core::sync::Pending::clear_pushed(pushed, &paths.pending) {
+        crate::log_warn!("worker: failed to save pending sync log: {e}");
+    }
+}
+
+fn save_state_and_health(catalog: &Catalog, paths: &WorkerPaths) {
     if let Err(e) = catalog.save_state(&paths.fav, &paths.hist, &paths.blacklist, &paths.excluded) {
         crate::log_warn!("worker: failed to save favorites/history/blacklist: {e}");
     }
@@ -268,6 +296,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
         excluded_countries: catalog.excluded_country_ids().to_vec(),
+        changed: catalog.pending.clone(),
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
@@ -280,10 +309,12 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             return;
         }
     };
-    catalog.set_favorites(merged.favs.clone());
-    catalog.set_blacklist(merged.blocked.clone());
-    catalog.set_excluded_countries(merged.excluded_countries.clone());
-    save_all(catalog, paths);
+    // only now: the server has the delta, so replaying it would be wrong.
+    catalog.pending.clear();
+    catalog.apply_synced_favorites(merged.favs.clone());
+    catalog.apply_synced_blacklist(merged.blocked.clone());
+    catalog.apply_synced_excluded_countries(merged.excluded_countries.clone());
+    save_all_after_clear(catalog, paths, &local.changed);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));

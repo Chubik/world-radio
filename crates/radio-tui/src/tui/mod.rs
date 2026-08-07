@@ -85,6 +85,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         health: data.join("station_health.json"),
         blacklist: data.join("blacklist.json"),
         excluded: data.join("excluded_countries.json"),
+        pending: data.join("sync_pending.json"),
     };
     let worker_handle = worker::spawn(catalog, worker_paths, req_rx, msg_tx.clone());
 

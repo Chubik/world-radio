@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- the sync key is the whole account — there is no email or password to recover
+     it with — so losing it on reinstall means losing the link to your other
+     devices. the catalogue cache is deliberately left out: it is large and the
+     app refetches it on its own. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="datastore/" />
+        <exclude domain="file" path="catalog.json" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore/" />
+        <exclude domain="file" path="catalog.json" />
+    </device-transfer>
+</data-extraction-rules>

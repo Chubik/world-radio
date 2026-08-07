@@ -218,4 +218,30 @@ class FavStore(context: Context) {
         }
         return changed
     }
+
+    /**
+     * restores a file backup. one transaction rather than four separate writes, so
+     * a restore interrupted halfway cannot leave the key pointing at one device's
+     * account while the favourites belong to another.
+     */
+    suspend fun restore(backup: Backup) {
+        val nextExcluded = ExcludedCountries.normalize(backup.excluded)
+        val encoded = json.encodeToString(
+            ListSerializer(FavStation.serializer()),
+            backup.cached.map { FavStation.of(it) },
+        )
+        store.edit { prefs ->
+            when (backup.key) {
+                null -> prefs.remove(keySyncKey)
+                else -> prefs[keySyncKey] = backup.key
+            }
+            prefs[keyFavs] = backup.favs
+            prefs[keyBlocked] = backup.blocked
+            prefs[keyExcludedCountries] = nextExcluded
+            prefs[keyCached] = encoded
+            // the catalogue was fetched under whatever filters this device had, so
+            // it no longer reflects the restored ones.
+            prefs[keyCatalogSyncedAt] = 0L
+        }
+    }
 }

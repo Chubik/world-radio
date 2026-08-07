@@ -1,11 +1,16 @@
+use crate::sync::Pending;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SyncData {
     pub favs: Vec<String>,
     pub blocked: Vec<String>,
     #[serde(default)]
     pub excluded_countries: Vec<String>,
+    // omitted entirely when there is nothing pending, so the request stays
+    // byte-identical to the old format for an unchanged device.
+    #[serde(default, skip_serializing_if = "Pending::is_empty")]
+    pub changed: Pending,
 }
 
 pub struct SyncClient {
@@ -16,7 +21,8 @@ pub struct SyncClient {
 impl SyncClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
-            base_url: base_url.into(),
+            // lets a local dev server stand in for r4dio.net without touching call sites
+            base_url: std::env::var("R4DIO_SYNC_URL").unwrap_or_else(|_| base_url.into()),
             client: reqwest::blocking::Client::builder()
                 .user_agent("world-radio-sync/1")
                 .timeout(std::time::Duration::from_secs(10))
@@ -111,7 +117,8 @@ mod tests {
             SyncData {
                 favs: vec!["a".into(), "b".into()],
                 blocked: vec!["x".into()],
-                excluded_countries: vec![]
+                excluded_countries: vec![],
+                ..Default::default()
             }
         );
     }
@@ -139,6 +146,7 @@ mod tests {
                     favs: vec!["c".into()],
                     blocked: vec![],
                     excluded_countries: vec![],
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -167,6 +175,7 @@ mod tests {
             favs: vec![],
             blocked: vec![],
             excluded_countries: vec!["US".into()],
+            ..Default::default()
         };
         let j = serde_json::to_string(&d).unwrap();
         assert!(
