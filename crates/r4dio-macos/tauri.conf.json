@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "World Radio Mini",
-  "version": "1.2.0",
-  "identifier": "net.r4dio.mini",
+  "productName": "r4dio",
+  "version": "1.4.5",
+  "identifier": "net.r4dio.macos",
   "build": {
     "frontendDist": "ui"
   },
@@ -19,6 +19,15 @@
         "skipTaskbar": true,
         "visible": false,
         "resizable": false
+      },
+      {
+        "label": "sync",
+        "url": "sync.html",
+        "title": "r4dio — Sync",
+        "width": 380,
+        "height": 300,
+        "visible": false,
+        "resizable": false
       }
     ],
     "macOSPrivateApi": true,
@@ -27,6 +36,9 @@
   "bundle": {
     "active": true,
     "targets": "app",
-    "macOS": {}
+    "icon": ["icons/icon.icns", "icons/icon.png"],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

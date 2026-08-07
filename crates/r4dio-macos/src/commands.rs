@@ -86,7 +86,10 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
         volume: b.state.volume,
         scope: scope_str(b.state.scope).to_string(),
         is_favorite: b.now_is_favorite(),
-        meta: now.as_ref().map(|_| "live".to_string()).unwrap_or_default(),
+        meta: now
+            .as_ref()
+            .map(|n| crate::state::meta_label(&n.country, &n.codec, n.bitrate))
+            .unwrap_or_default(),
     }
 }
 
@@ -109,6 +112,12 @@ pub fn set_sync_key(key: String) -> bool {
         return false;
     }
     radio_core::sync::store_key(&key).is_ok()
+}
+
+// the key is a secret: the window reports only that one exists, never its value.
+#[tauri::command]
+pub fn has_sync_key() -> bool {
+    radio_core::sync::load_key().is_some()
 }
 
 #[tauri::command]

@@ -135,9 +135,10 @@ class PlaybackService : MediaSessionService() {
         val isFav = current?.uuid?.let { favs.contains(it) } ?: false
         val sc = favStore.currentScope()
         val hidden = favStore.currentExcluded()
+        val blocked = favStore.currentBlocked()
         // count what the user could actually reach, so the screen can tell
         // "your filters hid everything" apart from "the catalogue is empty"
-        val playable = stations.count { allowedStation(it, hidden) }
+        val playable = stations.count { allowedStation(it, hidden, blocked) }
         // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
         // ordering, so playableCount can be 0 just because the catalogue has not
         // landed yet. this flag is attempted-ness, not station presence, never a
@@ -232,10 +233,14 @@ class PlaybackService : MediaSessionService() {
     private fun loadStations() {
         thread {
             val userExcluded = runBlocking { favStore.currentExcluded() }
+            // the cache on disk was filtered under whatever blocked set existed when it
+            // was written, so a station blocked since then is still in it — read the
+            // current set and filter on every read path, not only at fetch time.
+            val blocked = runBlocking { favStore.currentBlocked() }
             val cached = catalogCache.read()
             when (cached.isEmpty()) {
                 true -> {
-                    val fetched = fetchAndStore(userExcluded)
+                    val fetched = fetchAndStore(userExcluded, blocked)
                     catalogAttempted = true
                     when (fetched) {
                         // empty cache and an empty fetch: startFrom is never reached,
@@ -243,7 +248,7 @@ class PlaybackService : MediaSessionService() {
                         // catalogAttempted — without this the screen can stay on
                         // whatever syncNow() published first, permanently stale.
                         null -> scope.launch { refreshCustomLayout() }
-                        else -> startFrom(fetched, userExcluded)
+                        else -> startFrom(fetched, userExcluded, blocked)
                     }
                 }
                 false -> {
@@ -253,15 +258,15 @@ class PlaybackService : MediaSessionService() {
                     // Main, not run inline — is guaranteed to observe true, not a stale
                     // false read from before this attempt resolved.
                     catalogAttempted = true
-                    startFrom(cached, userExcluded)
-                    refreshIfStale(userExcluded)
+                    startFrom(cached, userExcluded, blocked)
+                    refreshIfStale(userExcluded, blocked)
                 }
             }
         }
     }
 
-    private fun startFrom(list: List<Station>, userExcluded: Set<String>) {
-        val pick = pickRandom(list, userExcluded)
+    private fun startFrom(list: List<Station>, userExcluded: Set<String>, blocked: Set<String>) {
+        val pick = pickRandom(list, userExcluded, blocked)
         when (pick) {
             // catalogue loaded but the user's filters left nothing playable: the
             // screen is still on its initial idle state, so it needs the fresh
@@ -272,8 +277,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     /** returns the fetched list, or null when the network gave us nothing. */
-    private fun fetchAndStore(userExcluded: Set<String>): List<Station>? {
-        val fetched = catalog.fetchStations(userExcluded = userExcluded)
+    private fun fetchAndStore(userExcluded: Set<String>, blocked: Set<String>): List<Station>? {
+        val fetched = catalog.fetchStations(userExcluded = userExcluded, blocked = blocked)
         if (fetched.isEmpty()) {
             Log.w("r4dio", "catalog fetch returned nothing")
             return null
@@ -291,7 +296,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     // a stale cache still plays; the refresh only replaces it if it succeeds.
-    private fun refreshIfStale(userExcluded: Set<String>) {
+    private fun refreshIfStale(userExcluded: Set<String>, blocked: Set<String>) {
         val syncedAt = runBlocking { favStore.catalogSyncedAt() }
         if (!catalogIsStale(syncedAt, nowSecs())) {
             return
@@ -304,7 +309,7 @@ class PlaybackService : MediaSessionService() {
         }
         thread {
             try {
-                val fetched = fetchAndStore(userExcluded)
+                val fetched = fetchAndStore(userExcluded, blocked)
                 // a successful refetch can change playableCount — including 0 to
                 // non-zero, which is exactly the hidden-countries recovery case — so
                 // the screen needs to learn about it instead of waiting for the next
@@ -358,14 +363,18 @@ class PlaybackService : MediaSessionService() {
      * top-1000 the catalogue holds).
      */
     private suspend fun reconcileFavCache() {
-        val wanted = favStore.currentFavUuids()
+        val blocked = favStore.currentBlocked()
+        // a blocked station stays starred — unblocking it on any device must bring the
+        // star back — so it is dropped here rather than unstarred, and the fetch below
+        // never spends a round-trip resolving something that cannot play.
+        val wanted = favStore.currentFavUuids() - blocked
         // withReadyCatalog, not the bare field: syncNow races loadStations at startup, and
         // an empty catalogue would make every favourite look missing and be re-fetched.
         val known = favStore.currentCachedFavs() + withReadyCatalog()
         val missing = FavSync.missingUuids(wanted, known)
         val fetched = when (missing.isEmpty()) {
             true -> emptyList()
-            else -> withContext(Dispatchers.IO) { catalog.fetchByUuids(missing) }
+            else -> withContext(Dispatchers.IO) { catalog.fetchByUuids(missing, blocked) }
         }
         // hand the resolved stations over rather than the finished list: the store settles
         // them against the uuid set inside one transaction, so a star tapped during the
@@ -385,7 +394,7 @@ class PlaybackService : MediaSessionService() {
                 // still act on a stamp reset before refreshing the extras.
                 null -> {
                     reconcileFavCache()
-                    refreshIfStale(favStore.currentExcluded())
+                    refreshIfStale(favStore.currentExcluded(), favStore.currentBlocked())
                     refreshCustomLayout()
                 }
                 else -> {
@@ -407,7 +416,7 @@ class PlaybackService : MediaSessionService() {
                     // only reached once, from loadStations()'s cache-hit branch at
                     // startup. always safe to call: it is itself TTL-gated, so it is a
                     // no-op unless a reset (or real TTL expiry) actually happened.
-                    refreshIfStale(favStore.currentExcluded())
+                    refreshIfStale(favStore.currentExcluded(), favStore.currentBlocked())
                     refreshCustomLayout()
                 }
             }
@@ -457,7 +466,8 @@ class PlaybackService : MediaSessionService() {
         mirrorSeq = evt.seq
         val station = Station(evt.uuid, evt.name, evt.url, "", "", 0)
         val userExcluded = runBlocking { favStore.currentExcluded() }
-        if (isExcluded(station) || station.country.uppercase() in userExcluded) {
+        val blocked = runBlocking { favStore.currentBlocked() }
+        if (isExcluded(station) || station.country.uppercase() in userExcluded || station.uuid in blocked) {
             return
         }
         when (exo?.isPlaying) {
@@ -486,8 +496,11 @@ class PlaybackService : MediaSessionService() {
             val userExcluded = withContext(Dispatchers.IO) {
                 runCatching { withTimeout(3000) { favStore.currentExcluded() } }.getOrDefault(emptySet<String>())
             }
+            val blocked = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentBlocked() } }.getOrDefault(emptySet<String>())
+            }
             val cat = withReadyCatalog()
-            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded)
+            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked)
             if (picked.usedFallback) {
                 Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
             }
@@ -513,9 +526,10 @@ class PlaybackService : MediaSessionService() {
             return cached
         }
         val userExcluded = withContext(Dispatchers.IO) { favStore.currentExcluded() }
+        val blocked = withContext(Dispatchers.IO) { favStore.currentBlocked() }
         // delegate to fetchAndStore so there is one place that guards against an
         // empty fetch clobbering the cache, not two independently-maintained ones.
-        val fetched = withContext(Dispatchers.IO) { fetchAndStore(userExcluded) }
+        val fetched = withContext(Dispatchers.IO) { fetchAndStore(userExcluded, blocked) }
         catalogAttempted = true
         return fetched ?: emptyList()
     }

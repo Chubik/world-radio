@@ -29,8 +29,19 @@ fun isExcluded(station: Station): Boolean {
     return EXCLUDED_NAME_SUBSTRINGS.any { haystack.contains(it) }
 }
 
-fun allowedStation(station: Station, userExcluded: Set<String> = emptySet()): Boolean =
+/**
+ * [blocked] outranks everything, including a star: blocking is a pointed "never play
+ * this station again", while excluding a country is a broad taste filter that an
+ * explicit favourite is allowed to override (see fetchByUuids and FavLogic.pickFav).
+ * That asymmetry is deliberate — do not collapse the two filters into one rule.
+ */
+fun allowedStation(
+    station: Station,
+    userExcluded: Set<String> = emptySet(),
+    blocked: Set<String> = emptySet(),
+): Boolean =
     station.url.isNotBlank() &&
+        station.uuid !in blocked &&
         !isExcluded(station) &&
         station.country.uppercase() !in userExcluded
 
@@ -40,14 +51,16 @@ fun takeAllowed(
     stations: List<Station>,
     userExcluded: Set<String>,
     target: Int,
-): List<Station> = stations.filter { allowedStation(it, userExcluded) }.take(target)
+    blocked: Set<String> = emptySet(),
+): List<Station> = stations.filter { allowedStation(it, userExcluded, blocked) }.take(target)
 
 fun pickRandom(
     stations: List<Station>,
     userExcluded: Set<String> = emptySet(),
+    blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
 ): Station? {
-    val playable = stations.filter { allowedStation(it, userExcluded) }
+    val playable = stations.filter { allowedStation(it, userExcluded, blocked) }
     if (playable.isEmpty()) return null
     return playable[rng.nextInt(playable.size)]
 }
@@ -65,12 +78,13 @@ fun pickForScopeDetailed(
     catalog: List<Station>,
     favs: List<Station>,
     userExcluded: Set<String> = emptySet(),
+    blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
 ): ScopePick =
     when (scope) {
-        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, rng), false)
-        Scope.FAVS -> when (val fav = FavLogic.pickFav(favs, rng)) {
-            null -> ScopePick(pickRandom(catalog, userExcluded, rng), true)
+        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng), false)
+        Scope.FAVS -> when (val fav = FavLogic.pickFav(favs, blocked, rng)) {
+            null -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng), true)
             else -> ScopePick(fav, false)
         }
     }
@@ -80,8 +94,9 @@ fun pickForScope(
     catalog: List<Station>,
     favs: List<Station>,
     userExcluded: Set<String> = emptySet(),
+    blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
-): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, rng).station
+): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, blocked, rng).station
 
 class Catalog(
     private val client: OkHttpClient = OkHttpClient(),
@@ -92,14 +107,15 @@ class Catalog(
     fun fetchStations(
         target: Int = DEFAULT_TARGET,
         userExcluded: Set<String> = emptySet(),
+        blocked: Set<String> = emptySet(),
     ): List<Station> {
         val ask = target * OVERFETCH_NUMERATOR / OVERFETCH_DENOMINATOR
         repeat(2) {
-            val result = runCatching { fetchOnce(ask) }.getOrDefault(emptyList())
-            if (result.isNotEmpty()) return takeAllowed(result, userExcluded, target)
+            val result = runCatching { fetchOnce(ask, blocked) }.getOrDefault(emptyList())
+            if (result.isNotEmpty()) return takeAllowed(result, userExcluded, target, blocked)
         }
-        val last = runCatching { fetchOnce(ask) }.getOrDefault(emptyList())
-        return takeAllowed(last, userExcluded, target)
+        val last = runCatching { fetchOnce(ask, blocked) }.getOrDefault(emptyList())
+        return takeAllowed(last, userExcluded, target, blocked)
     }
 
     /**
@@ -107,8 +123,10 @@ class Catalog(
      * so a favourite starred on the desktop is usually absent from it — this is the
      * only way to get its stream url. user-excluded countries are deliberately NOT
      * applied: an explicit favourite outranks a country filter, same as pickFav.
+     * [blocked] IS applied — a blocked station must not be resolvable into the fav
+     * cache, because from there it would play without passing the shuffle filter.
      */
-    fun fetchByUuids(uuids: List<String>): List<Station> {
+    fun fetchByUuids(uuids: List<String>, blocked: Set<String> = emptySet()): List<Station> {
         if (uuids.isEmpty()) return emptyList()
         val body = FormBody.Builder().add("uuids", uuids.joinToString(",")).build()
         val request = Request.Builder()
@@ -122,12 +140,12 @@ class Catalog(
                 if (!resp.isSuccessful || text.isBlank()) return emptyList()
                 json.decodeFromString<List<ApiStation>>(text)
                     .map { it.toStation() }
-                    .filter { allowedStation(it) }
+                    .filter { allowedStation(it, blocked = blocked) }
             }
         }.getOrDefault(emptyList())
     }
 
-    private fun fetchOnce(limit: Int): List<Station> {
+    private fun fetchOnce(limit: Int, blocked: Set<String>): List<Station> {
         val url =
             "$baseUrl/json/stations/search" +
                 "?limit=$limit&hidebroken=true&order=clickcount&reverse=true"
@@ -139,7 +157,7 @@ class Catalog(
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful || body.isBlank()) return emptyList()
             val api = json.decodeFromString<List<ApiStation>>(body)
-            return api.map { it.toStation() }.filter { allowedStation(it) }
+            return api.map { it.toStation() }.filter { allowedStation(it, blocked = blocked) }
         }
     }
 }

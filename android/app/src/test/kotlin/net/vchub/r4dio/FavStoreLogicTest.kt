@@ -26,7 +26,7 @@ class FavStoreLogicTest {
 
     @Test
     fun pickFav_returnsOne() {
-        val p = FavLogic.pickFav(listOf(st("a"), st("b")), Random(42))!!
+        val p = FavLogic.pickFav(listOf(st("a"), st("b")), rng = Random(42))!!
         assertTrue(p.uuid == "a" || p.uuid == "b")
     }
 }
