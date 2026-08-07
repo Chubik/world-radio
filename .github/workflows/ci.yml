@@ -253,9 +253,50 @@ jobs:
             ${{ steps.pkg.outputs.asset }}
             ${{ steps.pkg.outputs.asset }}.sha
 
+  macos-app:
+    name: macos app bundle
+    needs: version
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && !startsWith(github.event.head_commit.message, 'release: v')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.version.outputs.version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: install tauri cli
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: build the bundle
+        run: cd crates/r4dio-macos && cargo tauri build
+
+      - name: package
+        id: pkg
+        run: |
+          version="${{ needs.version.outputs.version }}"
+          app="target/release/bundle/macos/r4dio.app"
+          test -d "$app" || { echo "no bundle at $app"; ls -R target/release/bundle || true; exit 1; }
+          asset="r4dio-${version}-macos.zip"
+          ditto -c -k --keepParent "$app" "$asset"
+          shasum -a 256 "$asset" > "$asset.sha"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          retention-days: 1
+          path: |
+            ${{ steps.pkg.outputs.asset }}
+            ${{ steps.pkg.outputs.asset }}.sha
+
   cli-release-publish:
     name: publish cli tarballs
-    needs: [version, android-release, cli-release]
+    needs: [version, android-release, cli-release, macos-app]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -267,12 +308,17 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-app
+          path: dist
+
       - name: combine checksums
         id: sums
         run: |
           version="${{ needs.version.outputs.version }}"
           cd dist
-          cat ./*.tar.gz.sha | sed 's# \./# #' > SHA256SUMS
+          cat ./*.sha | sed 's# \./# #' > SHA256SUMS
           rm -f ./*.sha
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "=== SHA256SUMS ==="
@@ -283,6 +329,7 @@ jobs:
           tag_name: v${{ steps.sums.outputs.version }}
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/SHA256SUMS
 
       - name: trigger ops deploy (site + stat + firebase)
