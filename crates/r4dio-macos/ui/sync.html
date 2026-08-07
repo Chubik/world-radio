@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>r4dio — Sync</title>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="sync.css" />
+  </head>
+  <body class="sync_body">
+    <div class="sheet">
+      <div class="row head">
+        <span class="mark"><i>▌</i>r<i>4</i>dio</span>
+        <span class="state" id="status"><b class="dot"></b><span id="status_text">NO KEY</span></span>
+      </div>
+
+      <p class="lede">
+        Pair this Mac with your other devices. Find the key in the r4dio app you
+        already use.
+      </p>
+
+      <label class="field_label" for="key">SYNC KEY</label>
+      <input
+        id="key"
+        class="field"
+        type="password"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder="r4-…"
+      />
+
+      <div class="row actions">
+        <button class="btn primary" id="save">SAVE</button>
+        <button class="btn" id="sync_now">SYNC NOW</button>
+        <button class="btn" id="clear">CLEAR</button>
+      </div>
+
+      <p class="note" id="note"></p>
+    </div>
+    <script type="module" src="sync.js"></script>
+  </body>
+</html>

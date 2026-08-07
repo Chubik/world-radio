@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html><body><pre id="out"></pre><script type="module">
+import { stateLabels, volumeSegments, showsStar, normalizeKey, isValidKey, keyStatus, actionResult } from "./labels.js";
+const out = [];
+let failed = 0;
+function eq(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) failed++;
+  out.push(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` — got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
+}
+
+eq("playing is live", stateLabels("playing").text, "LIVE");
+eq("error retries", stateLabels("error").primary, "RETRY");
+eq("unknown phase falls back to idle", stateLabels("nonsense").text, "IDLE");
+eq("idle does not pulse", stateLabels("idle").pulse, false);
+
+eq("volume rounds to segments", volumeSegments(0.5), 3);
+eq("volume clamps high", volumeSegments(5), 6);
+eq("volume clamps low", volumeSegments(-1), 0);
+// clicking segment 4 sets 4/6; reading it back must give 4 again, not 3.
+eq("volume round-trips", volumeSegments(4 / 6), 4);
+
+eq("star hidden when idle", showsStar("idle"), false);
+eq("star shown when playing", showsStar("playing"), true);
+
+// a pasted key carries whitespace, and a typed one may be capitalised.
+eq("key trims whitespace", normalizeKey("  r4-abc123 \n"), "r4-abc123");
+eq("key lowercases", normalizeKey("R4-ABC"), "r4-abc");
+eq("empty key survives", normalizeKey(""), "");
+eq("missing key survives", normalizeKey(undefined), "");
+
+eq("valid key accepted", isValidKey("r4-abc123"), true);
+eq("bare prefix rejected", isValidKey("r4-"), false);
+eq("wrong prefix rejected", isValidKey("xx-abc"), false);
+eq("punctuation rejected", isValidKey("r4-ab_c"), false);
+// normalize must feed validate: uppercase alone is not a reason to refuse.
+eq("caps validate after normalize", isValidKey(normalizeKey("R4-ABC")), true);
+
+eq("status when set", keyStatus(true).text, "KEY SET");
+eq("status when unset", keyStatus(false).text, "NO KEY");
+// the key must never reach the screen; the status carries no value.
+eq("status has no key value", JSON.stringify(keyStatus(true)).includes("r4-"), false);
+
+eq("save failure is surfaced", actionResult("save", false).tone, "err");
+eq("save success is surfaced", actionResult("save", true).tone, "ok");
+eq("clear reports", actionResult("clear", true).text, "key cleared");
+eq("sync without key warns", actionResult("sync", false).tone, "err");
+eq("unknown action is silent", actionResult("nonsense", true).text, "");
+
+document.getElementById("out").textContent =
+  out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;
+</script></body></html>

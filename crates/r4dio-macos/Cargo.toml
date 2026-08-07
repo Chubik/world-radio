@@ -1,13 +1,13 @@
 [package]
-name = "radio-mini"
+name = "r4dio-macos"
 version.workspace = true
 edition = "2021"
 license = "MIT"
-description = "World Radio Mini: a tray companion that shuffles and plays stations."
+description = "r4dio for macOS: a menubar companion that shuffles and plays stations."
 repository = "https://github.com/Chubik/world-radio"
 
 [[bin]]
-name = "world-radio-mini"
+name = "r4dio-macos"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -20,7 +20,7 @@ anyhow = "1"
 fastrand = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 
 [dev-dependencies]
