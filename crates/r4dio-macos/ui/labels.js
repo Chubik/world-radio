@@ -41,11 +41,19 @@ export function maskKey(key) {
     return "";
   }
   const parts = raw.split("-");
-  if (parts.length < 4) {
+  if (parts.length >= 4) {
+    return `${parts[0]}-${parts[1]}-${MASK}-${parts[parts.length - 1]}`;
+  }
+  // real keys are one long run, not the segmented shape the mockup drew. showing
+  // both ends tells two accounts apart; the body stays far too short to rebuild.
+  const body = parts.slice(1).join("-");
+  if (body.length <= EDGE * 2) {
     return `${parts[0]}-${MASK}`;
   }
-  return `${parts[0]}-${parts[1]}-${MASK}-${parts[parts.length - 1]}`;
+  return `${parts[0]}-${body.slice(0, EDGE)}${MASK}${body.slice(-EDGE)}`;
 }
+
+const EDGE = 4;
 
 // the account section is one flow in three states; this maps the backend's
 // state onto the copy each one shows, so the view only places strings.
