@@ -107,6 +107,73 @@ pub fn merge_hidden_exclusions(catalog: &Catalog, mut codes: Vec<String>) -> Vec
     codes
 }
 
+/// the offline catalogue answers 671 rows for "jazz" and 7,666 for one country,
+/// and `Cache::search` has no LIMIT of its own. drawing all of them would freeze
+/// the window for a list nobody scrolls, so the slice is cut here — before it
+/// crosses the ipc boundary — and the caller is told it was cut.
+pub const RESULT_LIMIT: usize = 200;
+
+pub struct StationPage {
+    pub stations: Vec<StationPick>,
+    pub capped: bool,
+}
+
+fn page(mut stations: Vec<radio_core::catalog::Station>) -> StationPage {
+    let capped = stations.len() > RESULT_LIMIT;
+    stations.truncate(RESULT_LIMIT);
+    StationPage {
+        stations: stations.iter().map(to_pick).collect(),
+        capped,
+    }
+}
+
+/// blocked stations stay out of browse: a station the user banned must not come
+/// back as a row they can play, and `search_offline_filtered` only applies the
+/// country exclusions, not the blacklist.
+fn visible(
+    catalog: &Catalog,
+    stations: Vec<radio_core::catalog::Station>,
+) -> Vec<radio_core::catalog::Station> {
+    stations
+        .into_iter()
+        .filter(|s| !catalog.is_hidden(&s.stationuuid))
+        .collect()
+}
+
+pub fn search_by_name(catalog: &Catalog, name: &str) -> anyhow::Result<StationPage> {
+    let q = radio_core::catalog::SearchQuery {
+        name: Some(name.to_string()),
+        ..Default::default()
+    };
+    Ok(page(visible(catalog, catalog.search_offline_filtered(&q)?)))
+}
+
+/// the country tree expands one node at a time, so this is what a node loads —
+/// never the whole catalogue. a hidden country cannot be asked for even if a
+/// crafted call names one.
+pub fn stations_in_country(catalog: &Catalog, code: &str) -> anyhow::Result<StationPage> {
+    if is_hidden_country(code) {
+        return Ok(StationPage {
+            stations: Vec::new(),
+            capped: false,
+        });
+    }
+    let q = radio_core::catalog::SearchQuery {
+        countrycode: Some(code.to_uppercase()),
+        ..Default::default()
+    };
+    Ok(page(visible(catalog, catalog.search_offline_filtered(&q)?)))
+}
+
+/// browse's ☆ is an add button, and must only ever add: toggling a uuid that is
+/// already a favourite would quietly remove it from a row that says it is in ★.
+pub fn favorite_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Vec<StationPick>> {
+    if !catalog.is_favorite(uuid) {
+        catalog.toggle_favorite(uuid);
+    }
+    favorite_stations(catalog)
+}
+
 pub struct CountryFacet {
     pub code: String,
     pub count: u32,
@@ -361,6 +428,145 @@ mod tests {
         let rows = country_facets(&cat).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].code, "UA");
+    }
+
+    fn named(uuid: &str, name: &str, country: &str) -> Station {
+        Station {
+            name: name.into(),
+            countrycode: country.into(),
+            ..station(uuid, "http://x")
+        }
+    }
+
+    #[test]
+    fn search_finds_stations_by_name() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[
+            named("a", "Smooth Jazz Cafe", "MX"),
+            named("b", "Rock Antenne", "DE"),
+        ])
+        .unwrap();
+
+        let hits = search_by_name(&cat, "jazz").unwrap();
+        assert_eq!(hits.stations.len(), 1);
+        assert_eq!(hits.stations[0].uuid, "a");
+        assert!(!hits.capped);
+        // a term that matches nothing must come back empty rather than falling
+        // through to the whole catalogue.
+        assert!(search_by_name(&cat, "zzzznothing")
+            .unwrap()
+            .stations
+            .is_empty());
+    }
+
+    #[test]
+    fn search_caps_the_result_list_and_says_so() {
+        // "jazz" matches 671 rows in the real cache and one country holds 7,666;
+        // the window must never be handed all of them.
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        let many: Vec<Station> = (0..RESULT_LIMIT + 40)
+            .map(|i| named(&format!("u{i}"), &format!("Jazz {i}"), "MX"))
+            .collect();
+        cat.ingest(&many).unwrap();
+
+        let hits = search_by_name(&cat, "jazz").unwrap();
+        assert_eq!(hits.stations.len(), RESULT_LIMIT);
+        assert!(hits.capped);
+    }
+
+    #[test]
+    fn search_never_returns_a_blocked_station() {
+        // a station the user banned must not come back as a playable browse row.
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[named("a", "Jazz One", "MX"), named("b", "Jazz Two", "MX")])
+            .unwrap();
+        cat.toggle_blacklist("a");
+
+        let hits = search_by_name(&cat, "jazz").unwrap();
+        assert_eq!(hits.stations.len(), 1);
+        assert_eq!(hits.stations[0].uuid, "b");
+    }
+
+    #[test]
+    fn search_respects_the_excluded_countries() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[named("a", "Jazz PL", "PL"), named("b", "Jazz UA", "UA")])
+            .unwrap();
+        cat.set_excluded_countries(vec!["PL".into()]);
+
+        let hits = search_by_name(&cat, "jazz").unwrap();
+        assert_eq!(hits.stations.len(), 1);
+        assert_eq!(hits.stations[0].uuid, "b");
+    }
+
+    #[test]
+    fn a_country_node_loads_only_its_own_stations() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[
+            named("a", "Radio ROKS", "UA"),
+            named("b", "Radio Nowy", "PL"),
+        ])
+        .unwrap();
+
+        let rows = stations_in_country(&cat, "UA").unwrap();
+        assert_eq!(rows.stations.len(), 1);
+        assert_eq!(rows.stations[0].uuid, "a");
+    }
+
+    #[test]
+    fn a_country_node_is_capped_too() {
+        // US holds 7,666 rows locally; expanding it must not hand the window all
+        // of them.
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        let many: Vec<Station> = (0..RESULT_LIMIT + 40)
+            .map(|i| named(&format!("u{i}"), &format!("Station {i}"), "US"))
+            .collect();
+        cat.ingest(&many).unwrap();
+
+        let rows = stations_in_country(&cat, "US").unwrap();
+        assert_eq!(rows.stations.len(), RESULT_LIMIT);
+        assert!(rows.capped);
+    }
+
+    #[test]
+    fn a_country_node_never_serves_a_hidden_country() {
+        // the tree is built from facets(), which already drops RU/BY, so no node
+        // can ask for one — this pins that a call naming one still gets nothing.
+        let cache = Cache::open_in_memory().unwrap();
+        let cat = Catalog::new(cache, Health::new());
+        assert!(stations_in_country(&cat, "RU").unwrap().stations.is_empty());
+        assert!(stations_in_country(&cat, "by").unwrap().stations.is_empty());
+    }
+
+    #[test]
+    fn a_country_node_never_returns_a_blocked_station() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[named("a", "One", "UA"), named("b", "Two", "UA")])
+            .unwrap();
+        cat.toggle_blacklist("b");
+
+        let rows = stations_in_country(&cat, "UA").unwrap();
+        assert_eq!(rows.stations.len(), 1);
+        assert_eq!(rows.stations[0].uuid, "a");
+    }
+
+    #[test]
+    fn favouriting_adds_and_never_removes() {
+        // browse's ☆ is an add button; pressing it on a row that already says
+        // "already in ★" must not quietly unstar the station.
+        let mut cat = catalog();
+        let favs = favorite_and_reload(&mut cat, "u1").unwrap();
+        assert_eq!(favs.len(), 1);
+        let favs = favorite_and_reload(&mut cat, "u1").unwrap();
+        assert_eq!(favs.len(), 1);
+        assert!(cat.is_favorite("u1"));
     }
 
     #[test]

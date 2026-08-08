@@ -3,7 +3,8 @@
 <body><pre id="out"></pre><script type="module">
 import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
          activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading,
-         blockedName, blockedHeading, countryHeading, countryName, matchesCountry } from "./labels.js";
+         blockedName, blockedHeading, countryHeading, countryName, matchesCountry,
+         browseSubtitle, resultHeading, isSearchable, stationCount } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -155,6 +156,36 @@ eq("the name matches", matchesCountry({ code: "CH" }, "switz"), true);
 eq("the code matches", matchesCountry({ code: "CH" }, "ch"), true);
 eq("case does not matter", matchesCountry({ code: "UA" }, "UKRAI"), true);
 eq("a miss is a miss", matchesCountry({ code: "CH" }, "japan"), false);
+
+// a browse row says the format, and says when the station is already starred —
+// otherwise ☆ looks like it would do something it has already done.
+eq("a browse row shows the format",
+   browseSubtitle({ codec: "MP3", bitrate: 128 }, false), "MP3 128k");
+eq("a starred browse row says so",
+   browseSubtitle({ codec: "AAC", bitrate: 48 }, true), "AAC 48k · already in ★");
+eq("a starred row with no format still says so",
+   browseSubtitle({ codec: "", bitrate: 0 }, true), "already in ★");
+eq("a formatless row is blank rather than a stray separator",
+   browseSubtitle({ codec: "", bitrate: 0 }, false), "");
+
+// the result list is capped, and a capped list has to admit it — a user who
+// searches "radio" must not believe they are looking at every match.
+eq("a short result list just counts", resultHeading(12, false), "12 results");
+eq("one result reads as one", resultHeading(1, false), "1 result");
+eq("a capped list says it is capped", resultHeading(200, true), "first 200 results");
+eq("no results reads as a state", resultHeading(0, false), "nothing found");
+
+// the search is offline over 58k rows; one or two letters match most of the
+// catalogue and cost a full scan for a list nobody wants.
+eq("a single letter is not searched yet", isSearchable("j"), false);
+eq("two letters search", isSearchable("uk"), true);
+eq("whitespace is not a term", isSearchable("   "), false);
+eq("a missing term is not a term", isSearchable(undefined), false);
+eq("padding does not count towards length", isSearchable(" j "), false);
+
+// counts run to four figures, so they are grouped rather than run together.
+eq("a large count is grouped", stationCount(7666), "7,666");
+eq("a small count is plain", stationCount(312), "312");
 
 document.getElementById("out").textContent =
   out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;
