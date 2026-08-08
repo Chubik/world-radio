@@ -38,8 +38,15 @@ eq("mask hides the middle segments", maskKey("r4-7K2P-9QXM-4DF1"), "r4-7K2P-··
 eq("mask keeps a lowercase key readable", maskKey("r4-abcd-efgh-ijkl"), "r4-abcd-····-ijkl");
 // a key that is not segmented still must not be shown; masking everything after
 // the prefix is the safe direction to fail in.
-eq("unsegmented key is fully masked", maskKey("r4-abc123def"), "r4-····");
+// a real key is one 55-char run, so the ends are what tells two accounts apart.
+eq("unsegmented key shows both ends", maskKey("r4-abc123def"), "r4-abc1····3def");
+eq("real-shaped key shows both ends",
+   maskKey("r4-tutgsmisaqwertyuiopasdfghjklzxcvbnmqwertyuiopasdfg"), "r4-tutg····sdfg");
+// too short to split without giving away most of it — mask the lot instead.
 eq("short key does not leak", maskKey("r4-ab"), "r4-····");
+eq("exactly edge-length does not leak", maskKey("r4-abcdefgh"), "r4-····");
+eq("unsegmented mask drops the middle",
+   maskKey("r4-abcSECRETMIDdef").includes("SECRETMID"), false);
 eq("bare prefix survives", maskKey("r4-"), "r4-····");
 eq("empty key survives", maskKey(""), "");
 eq("missing key survives", maskKey(undefined), "");
