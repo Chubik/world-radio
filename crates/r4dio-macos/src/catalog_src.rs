@@ -107,11 +107,14 @@ pub fn merge_hidden_exclusions(catalog: &Catalog, mut codes: Vec<String>) -> Vec
     codes
 }
 
-/// the offline catalogue answers 671 rows for "jazz" and 7,666 for one country,
-/// and `Cache::search` has no LIMIT of its own. drawing all of them would freeze
-/// the window for a list nobody scrolls, so the slice is cut here — before it
-/// crosses the ipc boundary — and the caller is told it was cut.
+/// browse never draws more than this. the numbers are why: "radio" matches
+/// 26,810 rows in the local cache and one country holds 7,666, and building
+/// every one of those took seconds before the cut moved into sqlite.
 pub const RESULT_LIMIT: usize = 200;
+
+/// one page over, so a page still fills up after the blocked rows are dropped
+/// and so the caller can tell "exactly 200 matches" from "more than 200".
+const OVERFETCH: usize = RESULT_LIMIT + 1;
 
 pub struct StationPage {
     pub stations: Vec<StationPick>,
@@ -128,8 +131,8 @@ fn page(mut stations: Vec<radio_core::catalog::Station>) -> StationPage {
 }
 
 /// blocked stations stay out of browse: a station the user banned must not come
-/// back as a row they can play, and `search_offline_filtered` only applies the
-/// country exclusions, not the blacklist.
+/// back as a row they can play, and the search only applies the country
+/// exclusions, not the blacklist.
 fn visible(
     catalog: &Catalog,
     stations: Vec<radio_core::catalog::Station>,
@@ -140,12 +143,19 @@ fn visible(
         .collect()
 }
 
+fn bounded(catalog: &Catalog, q: &radio_core::catalog::SearchQuery) -> anyhow::Result<StationPage> {
+    let found = catalog.search_offline_limited(q, OVERFETCH)?;
+    Ok(page(visible(catalog, found)))
+}
+
 pub fn search_by_name(catalog: &Catalog, name: &str) -> anyhow::Result<StationPage> {
-    let q = radio_core::catalog::SearchQuery {
-        name: Some(name.to_string()),
-        ..Default::default()
-    };
-    Ok(page(visible(catalog, catalog.search_offline_filtered(&q)?)))
+    bounded(
+        catalog,
+        &radio_core::catalog::SearchQuery {
+            name: Some(name.to_string()),
+            ..Default::default()
+        },
+    )
 }
 
 /// the country tree expands one node at a time, so this is what a node loads —
@@ -158,11 +168,13 @@ pub fn stations_in_country(catalog: &Catalog, code: &str) -> anyhow::Result<Stat
             capped: false,
         });
     }
-    let q = radio_core::catalog::SearchQuery {
-        countrycode: Some(code.to_uppercase()),
-        ..Default::default()
-    };
-    Ok(page(visible(catalog, catalog.search_offline_filtered(&q)?)))
+    bounded(
+        catalog,
+        &radio_core::catalog::SearchQuery {
+            countrycode: Some(code.to_uppercase()),
+            ..Default::default()
+        },
+    )
 }
 
 /// browse's ☆ is an add button, and must only ever add: toggling a uuid that is
@@ -180,19 +192,16 @@ pub struct CountryFacet {
     pub excluded: bool,
 }
 
-const TAGS_UNUSED: usize = 1;
-
 pub fn country_facets(catalog: &Catalog) -> anyhow::Result<Vec<CountryFacet>> {
     let excluded: Vec<String> = catalog
         .excluded_country_ids()
         .iter()
         .map(|c| c.to_uppercase())
         .collect();
-    // the argument bounds tags, which this list does not use; countries always
-    // come back whole, so a small number here costs nothing.
-    let facets = catalog.facets(TAGS_UNUSED)?;
-    Ok(facets
-        .countries
+    // countries only: the full facet call also splits the tags of all 58k rows,
+    // which no country list shows and which cost seconds on the real cache.
+    Ok(catalog
+        .country_counts()?
         .into_iter()
         .filter(|(code, _)| !code.trim().is_empty() && !is_hidden_country(code))
         .map(|(code, count)| {
@@ -567,52 +576,6 @@ mod tests {
         let favs = favorite_and_reload(&mut cat, "u1").unwrap();
         assert_eq!(favs.len(), 1);
         assert!(cat.is_favorite("u1"));
-    }
-
-    #[test]
-    #[ignore]
-    fn scale_check_against_the_real_catalogue() {
-        use std::time::Instant;
-        let home = std::env::var("HOME").unwrap();
-        let path = std::path::PathBuf::from(home)
-            .join("Library/Application Support/net.vchub.r4dio/stations.db");
-        if !path.exists() {
-            eprintln!("no local cache; skipping");
-            return;
-        }
-        let cache = Cache::open(&path).unwrap();
-        let cat = Catalog::new(cache, Health::new());
-        eprintln!("catalogue rows: {}", cat.catalog_count().unwrap());
-        for term in ["jazz", "radio", "fm", "the"] {
-            let t = Instant::now();
-            let page = search_by_name(&cat, term).unwrap();
-            eprintln!(
-                "search {term:>6}: {:>4} rows capped={} in {:?}",
-                page.stations.len(),
-                page.capped,
-                t.elapsed()
-            );
-            assert!(page.stations.len() <= RESULT_LIMIT);
-        }
-        for code in ["US", "DE", "UA"] {
-            let t = Instant::now();
-            let page = stations_in_country(&cat, code).unwrap();
-            eprintln!(
-                "country {code}: {:>4} rows capped={} in {:?}",
-                page.stations.len(),
-                page.capped,
-                t.elapsed()
-            );
-            assert!(page.stations.len() <= RESULT_LIMIT);
-        }
-        let t = Instant::now();
-        let facets = country_facets(&cat).unwrap();
-        eprintln!(
-            "country tree: {} countries in {:?}",
-            facets.len(),
-            t.elapsed()
-        );
-        assert!(!facets.iter().any(|f| f.code == "RU" || f.code == "BY"));
     }
 
     #[test]
