@@ -5,6 +5,26 @@ const $ = (id) => document.getElementById(id);
 
 let lastPhase = null;
 
+// px per second: slow enough to read a long name, fast enough that the end of
+// it arrives before the station changes.
+const ROAM_SPEED = 22;
+
+function setStation(name) {
+  const box = $("station");
+  const text = $("station_text");
+  if (text.textContent !== name) {
+    text.textContent = name;
+  }
+  // measuring after the write is what decides between roaming and sitting still;
+  // scrollWidth is the laid-out text, clientWidth the room the panel gives it.
+  const over = text.scrollWidth - box.clientWidth;
+  box.classList.toggle("roams", over > 0);
+  if (over > 0) {
+    box.style.setProperty("--roam-to", `${-over}px`);
+    box.style.setProperty("--roam", `${(over / ROAM_SPEED) * 2 + 4}s`);
+  }
+}
+
 function render(s) {
   const labels = stateLabels(s.phase);
 
@@ -13,7 +33,7 @@ function render(s) {
   $("state_text").textContent = labels.text;
 
   $("meta").textContent = s.meta || "";
-  $("station").textContent = s.station || "Nothing playing";
+  setStation(s.station || "Nothing playing");
   $("station").classList.toggle("idle", s.phase === "idle");
 
   const star = $("star");
