@@ -288,10 +288,12 @@ fn run(backend: backend::Backend) {
                 })
                 .on_tray_icon_event(move |tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
-                    // the menu opens on the press, so the labels have to be correct
-                    // before the button comes back up.
+                    // appkit opens the menu on the press, so the labels have to be
+                    // rewritten on Down: a refresh on Up would land after the menu
+                    // the user is already reading has been drawn.
                     if let TrayIconEvent::Click {
                         button: MouseButton::Right,
+                        button_state: MouseButtonState::Down,
                         ..
                     } = event
                     {
