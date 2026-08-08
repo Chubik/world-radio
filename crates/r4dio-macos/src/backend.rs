@@ -207,6 +207,63 @@ impl Backend {
         }
     }
 
+    pub fn blocked_rows(&mut self) -> Vec<crate::commands::StationRow> {
+        let blocked = match catalog_src::blocked_stations(&self.catalog) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("load blocked failed: {e}");
+                return Vec::new();
+            }
+        };
+        blocked
+            .into_iter()
+            .map(|s| crate::commands::StationRow {
+                is_playing: false,
+                uuid: s.uuid,
+                name: s.name,
+                country: s.country,
+                codec: s.codec,
+                bitrate: s.bitrate,
+            })
+            .collect()
+    }
+
+    pub fn unblock(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
+        catalog_src::unblock(&mut self.catalog, uuid);
+        self.persist();
+        self.blocked_rows()
+    }
+
+    pub fn country_rows(&self) -> Vec<crate::commands::CountryRow> {
+        match catalog_src::country_facets(&self.catalog) {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|c| crate::commands::CountryRow {
+                    code: c.code,
+                    count: c.count,
+                    excluded: c.excluded,
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("load countries failed: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn set_excluded(&mut self, codes: Vec<String>) -> Vec<crate::commands::CountryRow> {
+        self.catalog
+            .set_excluded_countries(catalog_src::merge_hidden_exclusions(&self.catalog, codes));
+        self.persist();
+        // the excluded set changes which stations shuffle may reach, so the
+        // loaded lists are stale the moment it is written.
+        match catalog_src::all_stations(&self.catalog) {
+            Ok(all) => self.state.set_all(all),
+            Err(e) => eprintln!("reload stations failed: {e}"),
+        }
+        self.country_rows()
+    }
+
     pub fn filter_counts(&self) -> crate::commands::FilterCounts {
         crate::commands::FilterCounts {
             excluded: self.catalog.excluded_country_ids().len() as u32,

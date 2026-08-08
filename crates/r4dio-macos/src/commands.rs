@@ -128,6 +128,35 @@ pub fn shuffle_favourites(state: tauri::State<Shared>) {
     state.lock().unwrap().shuffle_favourites();
 }
 
+#[tauri::command]
+pub fn blocked(state: tauri::State<Shared>) -> Vec<StationRow> {
+    state.lock().unwrap().blocked_rows()
+}
+
+#[tauri::command]
+pub fn unblock(state: tauri::State<Shared>, uuid: String) -> Vec<StationRow> {
+    state.lock().unwrap().unblock(&uuid)
+}
+
+#[derive(Serialize)]
+pub struct CountryRow {
+    pub code: String,
+    pub count: u32,
+    pub excluded: bool,
+}
+
+#[tauri::command]
+pub fn countries(state: tauri::State<Shared>) -> Vec<CountryRow> {
+    state.lock().unwrap().country_rows()
+}
+
+/// the whole list is sent back rather than one toggle, so a row the window never
+/// drew cannot be dropped from the account by a partial update.
+#[tauri::command]
+pub fn set_excluded(state: tauri::State<Shared>, codes: Vec<String>) -> Vec<CountryRow> {
+    state.lock().unwrap().set_excluded(codes)
+}
+
 #[derive(Serialize)]
 pub struct FilterCounts {
     pub excluded: u32,
