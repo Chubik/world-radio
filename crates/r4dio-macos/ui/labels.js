@@ -68,3 +68,54 @@ function favouritesLine(n) {
   }
   return `★ ${n} favorite${n === 1 ? "" : "s"} synced.`;
 }
+
+// the window's sections, in sidebar order. the list is the authority on what a
+// valid section is, so a nav item and a pane cannot drift apart.
+export const SECTIONS = ["favourites", "browse", "countries", "blocked", "sync"];
+
+const LANDING = "favourites";
+
+// an unknown id must resolve to a real section: a window whose content pane is
+// blank because a nav id was misspelled looks broken rather than empty.
+export function activeSection(id) {
+  return SECTIONS.includes(id) ? id : LANDING;
+}
+
+const A = "A".codePointAt(0);
+const REGIONAL_A = 0x1f1e6;
+
+// a two-letter country code maps onto the regional-indicator pair that renders
+// as a flag. anything else is left blank rather than guessed — a wrong flag is
+// worse than none, and radio-browser leaves the field empty often.
+export function flagFor(code) {
+  const c = (code ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) {
+    return "";
+  }
+  return String.fromCodePoint(
+    REGIONAL_A + c.codePointAt(0) - A,
+    REGIONAL_A + c.codePointAt(1) - A
+  );
+}
+
+// one line, one job: the live row announces itself, every other row shows the
+// format. showing both would put the format where the eye looks for the marker.
+export function rowSubtitle(station, isPlaying) {
+  if (isPlaying) {
+    return "● now playing";
+  }
+  const s = station ?? {};
+  const codec = s.codec ?? "";
+  const rate = s.bitrate ? `${s.bitrate}k` : "";
+  return [codec, rate].filter((p) => p !== "").join(" ");
+}
+
+export function filterSummary(excluded, blocked) {
+  return `◔ ${excluded ?? 0} excluded · ⛌ ${blocked ?? 0} blocked`;
+}
+
+// a new account has no favourites, and that is a normal state — the header says
+// "none yet" rather than a bare 0, which reads like a count that failed.
+export function favouritesHeading(n) {
+  return n ? String(n) : "none yet";
+}

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>r4dio</title>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="main.css" />
+    <link rel="stylesheet" href="views/account.css" />
+  </head>
+  <body class="win_body">
+    <div class="winbody">
+      <nav class="sidebar">
+        <div class="navgroup">
+          <div class="glabel">Library</div>
+          <button class="navitem" data-section="favourites"><span class="ic">★</span>Favorites</button>
+          <button class="navitem" data-section="browse"><span class="ic">⌕</span>Browse</button>
+        </div>
+        <div class="navgroup">
+          <div class="glabel">Filters</div>
+          <button class="navitem" data-section="countries"><span class="ic">◔</span>Countries</button>
+          <button class="navitem" data-section="blocked"><span class="ic">⛌</span>Blocked</button>
+        </div>
+        <div class="navgroup">
+          <div class="glabel">Account</div>
+          <button class="navitem" data-section="sync"><span class="ic">◇</span>Sync</button>
+        </div>
+        <div class="acct" id="filter_summary"></div>
+      </nav>
+
+      <main class="content">
+        <section class="pane" data-pane="favourites" id="pane_favourites"></section>
+        <section class="pane" data-pane="browse">
+          <div class="paneh"><h3>⌕ Browse</h3></div>
+          <p class="panesub soon">Search and browse the full catalogue — coming next.</p>
+        </section>
+        <section class="pane" data-pane="countries">
+          <div class="paneh"><h3>◔ Countries</h3></div>
+          <p class="panesub soon">Exclude whole countries from shuffle — coming next.</p>
+        </section>
+        <section class="pane" data-pane="blocked">
+          <div class="paneh"><h3>⛌ Blocked</h3></div>
+          <p class="panesub soon">Stations you never want to hear again — coming next.</p>
+        </section>
+        <section class="pane" data-pane="sync">
+          <div class="paneh"><h3>◇ Sync</h3></div>
+          <p class="panesub">Keep your ★ favorites the same on every device.</p>
+          <div id="account_host"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

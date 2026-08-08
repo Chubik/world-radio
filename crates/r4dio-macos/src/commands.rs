@@ -98,6 +98,47 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
     state.lock().unwrap().read_spectrum(16)
 }
 
+#[derive(Serialize)]
+pub struct StationRow {
+    pub uuid: String,
+    pub name: String,
+    pub country: String,
+    pub codec: String,
+    pub bitrate: u32,
+    pub is_playing: bool,
+}
+
+#[tauri::command]
+pub fn favourites(state: tauri::State<Shared>) -> Vec<StationRow> {
+    state.lock().unwrap().favourite_rows()
+}
+
+#[tauri::command]
+pub fn play_uuid(state: tauri::State<Shared>, uuid: String) {
+    state.lock().unwrap().play_uuid(&uuid);
+}
+
+#[tauri::command]
+pub fn remove_favourite(state: tauri::State<Shared>, uuid: String) -> Vec<StationRow> {
+    state.lock().unwrap().remove_favourite(&uuid)
+}
+
+#[tauri::command]
+pub fn shuffle_favourites(state: tauri::State<Shared>) {
+    state.lock().unwrap().shuffle_favourites();
+}
+
+#[derive(Serialize)]
+pub struct FilterCounts {
+    pub excluded: u32,
+    pub blocked: u32,
+}
+
+#[tauri::command]
+pub fn filter_counts(state: tauri::State<Shared>) -> FilterCounts {
+    state.lock().unwrap().filter_counts()
+}
+
 #[tauri::command]
 pub fn sync(state: tauri::State<Shared>) {
     let mut backend = state.lock().unwrap();
