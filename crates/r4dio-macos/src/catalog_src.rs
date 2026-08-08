@@ -587,4 +587,50 @@ mod tests {
         let favs = toggle_and_reload(&mut cat, "u1").unwrap();
         assert!(favs.is_empty());
     }
+
+    #[test]
+    #[ignore]
+    fn scale_check_against_the_real_catalogue() {
+        use std::time::Instant;
+        let home = std::env::var("HOME").unwrap();
+        let path = std::path::PathBuf::from(home)
+            .join("Library/Application Support/net.vchub.r4dio/stations.db");
+        if !path.exists() {
+            eprintln!("no local cache; skipping");
+            return;
+        }
+        let cache = Cache::open(&path).unwrap();
+        let cat = Catalog::new(cache, Health::new());
+        eprintln!("catalogue rows: {}", cat.catalog_count().unwrap());
+        for term in ["jazz", "radio", "fm", "the"] {
+            let t = Instant::now();
+            let page = search_by_name(&cat, term).unwrap();
+            eprintln!(
+                "search {term:>6}: {:>4} rows capped={} in {:?}",
+                page.stations.len(),
+                page.capped,
+                t.elapsed()
+            );
+            assert!(page.stations.len() <= RESULT_LIMIT);
+        }
+        for code in ["US", "DE", "UA"] {
+            let t = Instant::now();
+            let page = stations_in_country(&cat, code).unwrap();
+            eprintln!(
+                "country {code}: {:>4} rows capped={} in {:?}",
+                page.stations.len(),
+                page.capped,
+                t.elapsed()
+            );
+            assert!(page.stations.len() <= RESULT_LIMIT);
+        }
+        let t = Instant::now();
+        let facets = country_facets(&cat).unwrap();
+        eprintln!(
+            "country tree: {} countries in {:?}",
+            facets.len(),
+            t.elapsed()
+        );
+        assert!(!facets.iter().any(|f| f.code == "RU" || f.code == "BY"));
+    }
 }
