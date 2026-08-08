@@ -25,3 +25,6 @@ tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-pn
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 
 [dev-dependencies]
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2.3.2"

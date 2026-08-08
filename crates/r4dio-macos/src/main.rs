@@ -3,10 +3,11 @@ mod backend;
 mod catalog_src;
 mod commands;
 mod state;
+mod tray;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_positioner::{Position, WindowExt};
@@ -38,6 +39,48 @@ fn set_regular(app: &tauri::AppHandle) {
 
 #[cfg(not(target_os = "macos"))]
 fn set_regular(_app: &tauri::AppHandle) {}
+
+// ⌥⇧R shuffles from inside any app, including another app's fullscreen space,
+// where the panel cannot be drawn at all.
+//
+// no accessibility permission is involved: a plain key like R resolves to a
+// carbon `RegisterEventHotKey` registration, which macos grants without a
+// prompt. the crate only reaches for a `CGEventTap` — the api that *does* need
+// permission — when the shortcut is a media key, which this one is not. so
+// there is nothing to ask the user for, and nothing that can be declined.
+//
+// a failure here is deliberately not fatal: the shortcut may already be taken by
+// another app, and losing one shortcut must not cost the user the tray, the
+// panel or the window.
+#[cfg(target_os = "macos")]
+fn register_shuffle_hotkey(app: &tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
+
+    let shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyR);
+    let plugin = tauri_plugin_global_shortcut::Builder::new()
+        .with_handler(move |app, pressed, event| {
+            // the handler fires on press *and* release; acting on both would
+            // change station twice per keystroke.
+            if pressed != &shortcut || event.state() != ShortcutState::Pressed {
+                return;
+            }
+            app.state::<commands::Shared>().lock().unwrap().shuffle();
+        })
+        .build();
+
+    if let Err(e) = app.plugin(plugin) {
+        eprintln!("global shortcut plugin failed to load: {e}");
+        return;
+    }
+    if let Err(e) = app.global_shortcut().register(shortcut) {
+        eprintln!("could not register the shuffle shortcut: {e}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn register_shuffle_hotkey(_app: &tauri::AppHandle) {}
 
 fn main() {
     radio_core::single_instance::take_over_named(radio_core::single_instance::MACOS_LOCK);
@@ -93,6 +136,38 @@ fn show_main(app: &tauri::AppHandle, section: &str) {
     let _ = win.emit("show-section", section);
 }
 
+fn account_masked() -> String {
+    radio_core::sync::load_key()
+        .map(|key| account::mask_key(&key))
+        .unwrap_or_default()
+}
+
+// the menu rows whose text depends on what is playing right now. they are held
+// so the tray can rewrite them just before the menu is drawn.
+struct LiveRows {
+    playstop: MenuItem<tauri::Wry>,
+    favorite: MenuItem<tauri::Wry>,
+    account: MenuItem<tauri::Wry>,
+}
+
+impl LiveRows {
+    fn refresh(&self, app: &tauri::AppHandle) {
+        let state = app.state::<commands::Shared>();
+        let (playing, is_favorite) = {
+            let backend = state.lock().unwrap();
+            (
+                backend.phase() == state::Phase::Playing,
+                backend.now_is_favorite(),
+            )
+        };
+        let _ = self.playstop.set_text(tray::playstop_label(playing));
+        let _ = self.favorite.set_text(tray::favorite_label(is_favorite));
+        let _ = self
+            .account
+            .set_text(tray::account_label(&account_masked()));
+    }
+}
+
 fn toggle_popover(app: &tauri::AppHandle, last_hide: &LastHide) {
     let Some(win) = app.get_webview_window("popover") else {
         return;
@@ -119,13 +194,69 @@ fn run(backend: backend::Backend) {
         .setup(move |app| {
             // accessory: a menubar app has no dock icon and no menu bar of its own.
             set_accessory(app.handle());
+            register_shuffle_hotkey(app.handle());
 
-            let shuffle = MenuItem::with_id(app, "shuffle", "Shuffle", true, None::<&str>)?;
-            let playstop = MenuItem::with_id(app, "playstop", "Play / Stop", true, None::<&str>)?;
-            let open = MenuItem::with_id(app, "open", "Open r4dio", true, None::<&str>)?;
-            let sync = MenuItem::with_id(app, "sync", "Sync…", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit r4dio", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&shuffle, &playstop, &open, &sync, &quit])?;
+            let shuffle = MenuItem::with_id(
+                app,
+                "shuffle",
+                tray::SHUFFLE_ALL,
+                true,
+                Some(tray::SHUFFLE_ACCELERATOR),
+            )?;
+            let shuffle_favs = MenuItem::with_id(
+                app,
+                "shuffle_favs",
+                tray::SHUFFLE_FAVOURITES,
+                true,
+                None::<&str>,
+            )?;
+            let playstop = MenuItem::with_id(
+                app,
+                "playstop",
+                tray::playstop_label(false),
+                true,
+                None::<&str>,
+            )?;
+            let favorite = MenuItem::with_id(
+                app,
+                "favorite",
+                tray::favorite_label(false),
+                true,
+                None::<&str>,
+            )?;
+            let open = MenuItem::with_id(app, "open", tray::OPEN, true, None::<&str>)?;
+            let account_item = MenuItem::with_id(
+                app,
+                "account",
+                tray::account_label(&account_masked()),
+                true,
+                None::<&str>,
+            )?;
+            let quit = MenuItem::with_id(app, "quit", tray::QUIT, true, None::<&str>)?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &shuffle,
+                    &shuffle_favs,
+                    &PredefinedMenuItem::separator(app)?,
+                    &playstop,
+                    &favorite,
+                    &PredefinedMenuItem::separator(app)?,
+                    &open,
+                    &account_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &quit,
+                ],
+            )?;
+
+            // the three stateful rows are read straight before the menu is drawn,
+            // so a station changed by the hotkey or the panel cannot leave the menu
+            // offering "Play" for something already playing.
+            let live_rows = LiveRows {
+                playstop: playstop.clone(),
+                favorite: favorite.clone(),
+                account: account_item.clone(),
+            };
 
             TrayIconBuilder::new()
                 .icon(tauri::image::Image::from_bytes(include_bytes!(
@@ -140,6 +271,7 @@ fn run(backend: backend::Backend) {
                     let state = app.state::<commands::Shared>();
                     match event.id().as_ref() {
                         "shuffle" => state.lock().unwrap().shuffle(),
+                        "shuffle_favs" => state.lock().unwrap().shuffle_favourites(),
                         "playstop" => {
                             let mut backend = state.lock().unwrap();
                             match backend.phase() {
@@ -147,14 +279,24 @@ fn run(backend: backend::Backend) {
                                 _ => backend.resume(),
                             }
                         }
+                        "favorite" => state.lock().unwrap().toggle_favorite(),
                         "open" => show_main(app, "favourites"),
-                        "sync" => show_main(app, "sync"),
+                        "account" => show_main(app, "sync"),
                         "quit" => app.exit(0),
                         _ => {}
                     }
                 })
-                .on_tray_icon_event(|tray, event| {
+                .on_tray_icon_event(move |tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+                    // the menu opens on the press, so the labels have to be correct
+                    // before the button comes back up.
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Right,
+                        ..
+                    } = event
+                    {
+                        live_rows.refresh(tray.app_handle());
+                    }
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
