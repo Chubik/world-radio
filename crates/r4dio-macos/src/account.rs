@@ -17,7 +17,7 @@ pub struct AccountState {
 // keeps the first and last segments so the account stays recognisable and drops
 // everything between. a key with no segments is masked whole rather than shown,
 // because failing towards hiding is the only safe direction for a secret.
-fn mask_key(key: &str) -> String {
+pub fn mask_key(key: &str) -> String {
     let trimmed = key.trim();
     if trimmed.is_empty() {
         return String::new();
