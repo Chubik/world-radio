@@ -1,0 +1,98 @@
+/* the main window: a real titled macos window, so it is opaque and square —
+   the rounded, transparent chrome belongs to the popover alone. tokens come
+   from app.css. */
+.win_body {
+  display: block; padding: 0; height: 100vh; overflow: hidden;
+  background: var(--bg); color: var(--fg); font-family: var(--mono);
+}
+.winbody { display: flex; height: 100vh; }
+
+.sidebar {
+  width: 196px; flex: none; display: flex; flex-direction: column; gap: 20px;
+  padding: 16px 10px; background: var(--panel);
+  border-right: 1px solid var(--rule);
+}
+.navgroup { display: flex; flex-direction: column; gap: 2px; }
+.glabel {
+  font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--dim); padding: 0 10px; margin-bottom: 5px;
+}
+.navitem {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  appearance: none; border: none; background: transparent; cursor: pointer;
+  padding: 7px 10px; border-radius: 7px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--fg);
+}
+.navitem .ic { width: 16px; text-align: center; color: var(--dim); }
+.navitem:hover { background: rgba(255,196,87,.06); }
+.navitem.active { background: var(--hi); color: var(--bg); font-weight: 700; }
+.navitem.active .ic { color: var(--bg); }
+
+.acct {
+  margin-top: auto; display: flex; align-items: center; gap: 7px;
+  font-size: 10px; color: var(--dim);
+  padding: 8px 10px; border-top: 1px solid var(--rule);
+}
+
+.content {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 26px 30px;
+  background-image: radial-gradient(120% 50% at 50% -10%, rgba(212,154,58,.06), transparent 60%);
+}
+.pane { display: none; }
+.pane.active { display: block; }
+.paneh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.paneh h3 { font-size: 15px; font-weight: 700; color: var(--hi); letter-spacing: .02em; }
+.paneh .cnt { font-size: 11px; color: var(--dim); }
+.panesub {
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.5;
+  color: var(--dim); max-width: 520px; margin: 6px 0 18px;
+}
+.panesub.soon { font-style: italic; }
+
+/* the list scrolls: seven favourites today, and it only grows. */
+.rowlist {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 380px; overflow-y: auto;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--panel); padding: 5px;
+}
+.srow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 9px; border-radius: 7px; cursor: pointer;
+}
+.srow:hover { background: rgba(255,196,87,.06); }
+.srow.live { background: rgba(255,196,87,.08); }
+.srow .flag { font-size: 14px; width: 18px; text-align: center; flex: none; }
+.srow .meta { flex: 1; min-width: 0; margin-left: 0; }
+.srow .nm {
+  font-family: var(--sans); font-weight: 600; font-size: 12.5px; color: var(--bright);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.srow.live .nm { color: var(--hi); }
+.srow .sub { font-size: 10px; color: var(--dim); white-space: nowrap; }
+.srow .sub.on { color: var(--ok); }
+.srow .act { font-size: 12px; color: var(--fg); cursor: pointer; flex: none; padding: 0 4px; }
+.srow .act:hover { color: var(--hi); }
+
+.footbtn {
+  margin-top: 12px; display: inline-flex; align-items: center; gap: 8px;
+  appearance: none; border: none; cursor: pointer;
+  padding: 10px 16px; border-radius: 8px;
+  background: var(--hi); color: var(--bg);
+  font-family: var(--mono); font-weight: 700; font-size: 12px; letter-spacing: .04em;
+}
+
+/* an account with no favourites is a normal state, not a failure: it gets the
+   same amber treatment as the rest of the window, not an error colour. */
+.empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  padding: 46px 24px; border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--panel);
+}
+.empty_mark { font-size: 26px; color: var(--dim); margin-bottom: 12px; }
+.empty_mark.err { color: var(--err); }
+.empty_head { font-size: 13px; font-weight: 700; color: var(--fg); margin-bottom: 8px; }
+.empty_lede {
+  font-family: var(--sans); font-size: 12.5px; line-height: 1.5;
+  color: var(--dim); max-width: 340px;
+}

@@ -23,13 +23,15 @@
         "resizable": false
       },
       {
-        "label": "sync",
-        "url": "sync.html",
-        "title": "r4dio — Sync",
-        "width": 380,
-        "height": 460,
+        "label": "main",
+        "url": "main.html",
+        "title": "r4dio",
+        "width": 900,
+        "height": 600,
+        "minWidth": 720,
+        "minHeight": 460,
         "visible": false,
-        "resizable": false
+        "resizable": true
       }
     ],
     "macOSPrivateApi": true,

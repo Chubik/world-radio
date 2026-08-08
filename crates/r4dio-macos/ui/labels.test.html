@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html><body><pre id="out"></pre><script type="module">
-import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus } from "./labels.js";
+import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
+         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -68,6 +69,52 @@ eq("empty state falls back to signed out", accountStatus({}).state, "signed_out"
 eq("status carries only the masked id",
    accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).masked,
    "r4-7K2P-····-4DF1");
+
+// the sidebar drives which pane is visible, so this decides the whole window's
+// section state; every nav id must resolve and nothing else may.
+eq("favourites is the landing section", activeSection(undefined), "favourites");
+eq("a known id selects itself", activeSection("blocked"), "blocked");
+eq("browse is known", activeSection("browse"), "browse");
+eq("countries is known", activeSection("countries"), "countries");
+eq("sync is known", activeSection("sync"), "sync");
+eq("favourites is known", activeSection("favourites"), "favourites");
+// an unknown id must land somewhere real rather than blanking the content pane.
+eq("unknown id falls back", activeSection("nonsense"), "favourites");
+eq("empty id falls back", activeSection(""), "favourites");
+eq("null id falls back", activeSection(null), "favourites");
+
+// rows lead with a flag; radio-browser country codes are two-letter and cased
+// inconsistently, and plenty of stations carry none at all.
+eq("lowercase code still flags", flagFor("ua"), "🇺🇦");
+eq("uppercase code flags", flagFor("MX"), "🇲🇽");
+// a missing code must not render a broken glyph where the flag belongs.
+eq("missing code has no flag", flagFor(""), "");
+eq("undefined code has no flag", flagFor(undefined), "");
+// three letters is not a country code; guessing would draw nonsense.
+eq("three letters is not a flag", flagFor("USA"), "");
+eq("one letter is not a flag", flagFor("U"), "");
+eq("digits are not a flag", flagFor("12"), "");
+
+// the row's second line is either the live marker or the format, never both.
+eq("the live row says so", rowSubtitle({ codec: "AAC", bitrate: 48 }, true), "● now playing");
+eq("a quiet row shows format", rowSubtitle({ codec: "AAC", bitrate: 48 }, false), "AAC 48k");
+// radio-browser reports 0 bitrate for plenty of stations; "AAC 0k" is noise.
+eq("zero bitrate is dropped", rowSubtitle({ codec: "AAC", bitrate: 0 }, false), "AAC");
+eq("no codec leaves nothing", rowSubtitle({ codec: "", bitrate: 0 }, false), "");
+eq("bitrate without codec still reads", rowSubtitle({ codec: "", bitrate: 128 }, false), "128k");
+eq("a missing station does not throw", rowSubtitle(undefined, false), "");
+
+// the sidebar footer counts two different filters and must stay honest at zero.
+eq("both counts render", filterSummary(3, 14), "◔ 3 excluded · ⛌ 14 blocked");
+eq("zero blocked is still shown", filterSummary(3, 0), "◔ 3 excluded · ⛌ 0 blocked");
+eq("nothing filtered reads as zero", filterSummary(0, 0), "◔ 0 excluded · ⛌ 0 blocked");
+eq("missing counts read as zero", filterSummary(undefined, undefined), "◔ 0 excluded · ⛌ 0 blocked");
+
+// the pane header carries the count; an empty list must not read as a failure.
+eq("a count is shown", favouritesHeading(7), "7");
+eq("one favourite is not pluralised away", favouritesHeading(1), "1");
+eq("none reads as none, not an error", favouritesHeading(0), "none yet");
+eq("missing count reads as none", favouritesHeading(undefined), "none yet");
 
 document.getElementById("out").textContent =
   out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;

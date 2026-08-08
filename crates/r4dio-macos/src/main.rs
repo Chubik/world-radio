@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 // clicking the tray icon while the popover holds key-window status makes AppKit
@@ -81,13 +81,16 @@ fn drop_below_tray(win: &tauri::WebviewWindow, tray: &tauri::Rect) {
 // an accessory app cannot become active, so a plain show() would leave this
 // window behind whatever the user was looking at. going regular for as long as
 // it is open buys it focus; closing it returns us to a dock-less menubar app.
-fn show_sync(app: &tauri::AppHandle) {
-    let Some(win) = app.get_webview_window("sync") else {
+fn show_main(app: &tauri::AppHandle, section: &str) {
+    let Some(win) = app.get_webview_window("main") else {
         return;
     };
     set_regular(app);
     let _ = win.show();
     let _ = win.set_focus();
+    // the window is reused rather than recreated, so the section it should open
+    // on has to be pushed in; a fresh load would otherwise land on favourites.
+    let _ = win.emit("show-section", section);
 }
 
 fn toggle_popover(app: &tauri::AppHandle, last_hide: &LastHide) {
@@ -144,8 +147,8 @@ fn run(backend: backend::Backend) {
                                 _ => backend.resume(),
                             }
                         }
-                        "open" => show_popover(app),
-                        "sync" => show_sync(app),
+                        "open" => show_main(app, "favourites"),
+                        "sync" => show_main(app, "sync"),
                         "quit" => app.exit(0),
                         _ => {}
                     }
@@ -183,9 +186,9 @@ fn run(backend: backend::Backend) {
                     }
                 });
             }
-            // closing the settings window must not quit the app and must not
-            // leave a dock icon behind for a window that is gone.
-            if let Some(win) = app.get_webview_window("sync") {
+            // closing the main window must not quit the app and must not leave a
+            // dock icon behind for a window that is gone.
+            if let Some(win) = app.get_webview_window("main") {
                 let handle = win.clone();
                 let app_handle = app.handle().clone();
                 win.on_window_event(move |event| {
@@ -209,6 +212,11 @@ fn run(backend: backend::Backend) {
             commands::now_state,
             commands::spectrum,
             commands::sync,
+            commands::favourites,
+            commands::play_uuid,
+            commands::remove_favourite,
+            commands::shuffle_favourites,
+            commands::filter_counts,
             account::create_account,
             account::account_state,
             account::sign_in,
