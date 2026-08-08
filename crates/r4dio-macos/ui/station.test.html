@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8" /><link rel="stylesheet" href="app.css" /></head>
+<body><pre id="out"></pre>
+<!-- the panel is 272px wide, so the name box is measured at the real width it
+     gets there; a test at a wider width would never see the overflow. -->
+<div class="panel">
+  <div class="body">
+    <div class="row now">
+      <div class="now_text">
+        <div class="station" id="station"><span id="station_text">Nothing playing</span></div>
+      </div>
+      <span class="star">☆</span>
+    </div>
+  </div>
+</div>
+<script type="module">
+const out = [];
+let failed = 0;
+function eq(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) failed++;
+  out.push(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` — got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
+}
+
+const $ = (id) => document.getElementById(id);
+const ROAM_SPEED = 22;
+
+function setStation(name) {
+  const box = $("station");
+  const text = $("station_text");
+  if (text.textContent !== name) {
+    text.textContent = name;
+  }
+  const over = text.scrollWidth - box.clientWidth;
+  box.classList.toggle("roams", over > 0);
+  if (over > 0) {
+    box.style.setProperty("--roam-to", `${-over}px`);
+    box.style.setProperty("--roam", `${(over / ROAM_SPEED) * 2 + 4}s`);
+  }
+}
+
+const LONG = "Katherine FM — Katherine — 101.7";
+
+setStation("Jazz FM");
+eq("a short name sits still", $("station").classList.contains("roams"), false);
+eq("a short name is shown whole", $("station_text").textContent, "Jazz FM");
+
+setStation(LONG);
+eq("a long name roams", $("station").classList.contains("roams"), true);
+// the whole point: the text is never cut, it travels far enough to end on screen.
+eq("the long name is in the dom whole", $("station_text").textContent, LONG);
+const travel = Math.abs(parseFloat($("station").style.getPropertyValue("--roam-to")));
+const over = $("station_text").scrollWidth - $("station").clientWidth;
+eq("it travels exactly the hidden distance", Math.round(travel), Math.round(over));
+eq("there is something to travel", over > 0, true);
+
+setStation("Jazz FM");
+eq("going back to a short name stops it", $("station").classList.contains("roams"), false);
+
+setStation("Nothing playing");
+eq("the idle placeholder does not roam", $("station").classList.contains("roams"), false);
+
+document.getElementById("out").textContent =
+  out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;
+</script></body></html>

@@ -44,7 +44,16 @@ body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
 .now_text { flex: 1; min-width: 0; }
 .station {
   font-family: var(--sans); font-weight: 600; font-size: 13.5px; line-height: 1.15;
-  color: var(--bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--bright); white-space: nowrap; overflow: hidden;
+}
+/* a truncated name hides the very thing the panel exists to show, so a name that
+   does not fit travels instead. only the overflowing ones move: a short name
+   drifting for no reason is worse than one sitting still. */
+.station > span { display: inline-block; }
+.station.roams > span { animation: roam var(--roam, 12s) linear infinite; }
+@keyframes roam {
+  0%, 12% { transform: translateX(0); }
+  88%, 100% { transform: translateX(var(--roam-to, 0)); }
 }
 .station.idle { color: var(--dim); }
 .star {
