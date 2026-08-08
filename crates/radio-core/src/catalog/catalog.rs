@@ -119,6 +119,17 @@ impl Catalog {
         self.cache.search(q, self.excluded_country_ids())
     }
 
+    /// the same query bounded in sqlite, for a caller that draws a page rather
+    /// than the whole answer.
+    pub fn search_offline_limited(
+        &self,
+        q: &SearchQuery,
+        limit: usize,
+    ) -> anyhow::Result<Vec<Station>> {
+        self.cache
+            .search_limited(q, self.excluded_country_ids(), Some(limit))
+    }
+
     pub fn is_hidden(&self, uuid: &str) -> bool {
         self.health.is_hidden(uuid) || self.blacklist.contains(uuid)
     }
@@ -139,6 +150,10 @@ impl Catalog {
 
     pub fn facets(&self, limit: usize) -> anyhow::Result<Facets> {
         self.cache.facets(limit)
+    }
+
+    pub fn country_counts(&self) -> anyhow::Result<Vec<(String, u32)>> {
+        self.cache.country_counts()
     }
 
     pub fn note_play_failure(&mut self, uuid: &str) {

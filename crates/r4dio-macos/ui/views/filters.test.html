@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8" /><link rel="stylesheet" href="../main.css" /></head>
+<body><pre id="out"></pre><div id="blocked_host"></div><div id="countries_host"></div>
+<script type="module">
+// the two filter views drive real DOM, so they are checked against a stubbed
+// tauri bridge rather than by launching the app.
+const calls = [];
+let blockedRows = [
+  { uuid: "a", name: "Talk Radio Network", country: "US", codec: "MP3", bitrate: 96 },
+  { uuid: "b", name: "", country: "", codec: "", bitrate: 0 },
+];
+let countryRows = [
+  { code: "CH", count: 640, excluded: true },
+  { code: "CN", count: 1200, excluded: true },
+  { code: "IN", count: 900, excluded: true },
+  { code: "UA", count: 430, excluded: false },
+  { code: "PL", count: 780, excluded: false },
+];
+window.__TAURI__ = {
+  core: {
+    invoke: async (cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "blocked") return blockedRows;
+      if (cmd === "unblock") {
+        blockedRows = blockedRows.filter((r) => r.uuid !== args.uuid);
+        return blockedRows;
+      }
+      if (cmd === "countries") return countryRows;
+      if (cmd === "set_excluded") {
+        countryRows = countryRows.map((r) => ({ ...r, excluded: args.codes.includes(r.code) }));
+        return countryRows;
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    },
+  },
+  event: { listen: async () => {} },
+};
+
+const { mountBlocked } = await import("./blocked.js");
+const { mountCountries } = await import("./countries.js");
+
+const out = [];
+let failed = 0;
+function eq(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) failed++;
+  out.push(`${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : ` — got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+const bhost = document.getElementById("blocked_host");
+let changed = 0;
+mountBlocked(bhost, () => changed++);
+await settle();
+
+eq("every blocked station gets a row", bhost.querySelectorAll(".srow").length, 2);
+eq("an unresolved station still names itself",
+   bhost.querySelectorAll(".srow .nm")[1].textContent, "Unknown station");
+eq("the blocked count is in the header", bhost.querySelector(".paneh .cnt").textContent, "2");
+eq("each row can be unblocked", bhost.querySelectorAll(".act.unblock").length, 2);
+
+// pressing unblock must remove that row and tell the sidebar its count moved.
+bhost.querySelectorAll(".act.unblock")[0].click();
+await settle();
+eq("unblocking drops the row", bhost.querySelectorAll(".srow").length, 1);
+eq("unblocking sent the uuid", calls.at(-1)[1], { uuid: "a" });
+eq("the sidebar was told", changed, 1);
+
+// the last unblock leaves an empty state that reads as a state, not a failure.
+bhost.querySelectorAll(".act.unblock")[0].click();
+await settle();
+eq("an empty list shows an empty state", bhost.querySelectorAll(".empty").length, 1);
+eq("the empty state is not an error", bhost.querySelectorAll(".empty_mark.err").length, 0);
+eq("the empty header reads as a state", bhost.querySelector(".paneh .cnt").textContent, "none");
+
+const chost = document.getElementById("countries_host");
+mountCountries(chost, () => changed++);
+await settle();
+
+eq("every country gets a row", chost.querySelectorAll(".srow").length, 5);
+eq("the header counts the excluded ones", chost.querySelector(".paneh .cnt").textContent, "3 of 5");
+eq("the excluded ones are switched on", chost.querySelectorAll(".toggle.on").length, 3);
+eq("a code becomes a readable name", chost.querySelectorAll(".srow .nm")[0].textContent, "Switzerland");
+
+// RU/BY are hard-filtered before the window ever sees them; nothing the view
+// draws may mention them.
+const shown = [...chost.querySelectorAll(".srow")].map((r) => r.textContent).join(" ");
+eq("no russia in the list", /russia/i.test(shown), false);
+eq("no belarus in the list", /belarus/i.test(shown), false);
+
+// the filter box narrows the view; the exclusions it hides must survive a save.
+const input = chost.querySelector(".searchfield input");
+input.value = "ukr";
+input.dispatchEvent(new Event("input"));
+await settle();
+eq("the filter narrows the list", chost.querySelectorAll(".srow").length, 1);
+eq("the filter kept the match", chost.querySelector(".srow .nm").textContent, "Ukraine");
+
+// excluding the one visible row must not switch the three hidden ones back on.
+chost.querySelector(".srow").click();
+await settle();
+const sent = calls.at(-1);
+eq("the save sent the whole set, not the view", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
+eq("the hidden exclusions survived", countryRows.filter((r) => r.excluded).length, 4);
+
+// two quick toggles overlap; the last click must be the last write, whichever
+// reply lands first.
+input.value = "";
+input.dispatchEvent(new Event("input"));
+await settle();
+// toggles land while an earlier save is still in flight; every one of them must
+// still be in what finally gets stored.
+const real = window.__TAURI__.core.invoke;
+window.__TAURI__.core.invoke = async (cmd, args) => {
+  const snapshot = await real(cmd, args);
+  if (cmd === "set_excluded") await new Promise((r) => setTimeout(r, 30));
+  return snapshot;
+};
+// each save repaints the list, so the rows must be looked up again per click.
+const clickRow = (name) =>
+  [...chost.querySelectorAll(".srow")].find((r) => r.textContent.includes(name)).click();
+clickRow("Poland");
+clickRow("Switzerland");
+await new Promise((r) => setTimeout(r, 300));
+window.__TAURI__.core.invoke = real;
+eq("both quick toggles survive",
+   countryRows.filter((r) => r.excluded).map((r) => r.code).sort(),
+   ["CN", "IN", "PL", "UA"]);
+// what the window draws must agree with what was stored.
+const onNow = [...chost.querySelectorAll(".srow")]
+  .filter((r) => r.querySelector(".toggle.on"))
+  .map((r) => r.querySelector(".nm").textContent).sort();
+eq("the drawn switches match what was stored", onNow, ["China", "India", "Poland", "Ukraine"]);
+
+// an unmatched filter is an empty state, not a broken list.
+input.value = "zzzz";
+input.dispatchEvent(new Event("input"));
+await settle();
+eq("no match shows an empty state", chost.querySelectorAll(".empty").length, 1);
+eq("no match is not an error", chost.querySelectorAll(".empty_mark.err").length, 0);
+
+document.getElementById("out").textContent =
+  out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;
+</script></body></html>

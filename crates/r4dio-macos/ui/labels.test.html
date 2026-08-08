@@ -1,6 +1,10 @@
 <!DOCTYPE html>
-<html><body><pre id="out"></pre><script type="module">
-import { stateLabels, volumeSegments, showsStar, normalizeKey, isValidKey, keyStatus, actionResult } from "./labels.js";
+<html><head><meta charset="UTF-8" /></head>
+<body><pre id="out"></pre><script type="module">
+import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
+         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading,
+         blockedName, blockedHeading, countryHeading, countryName, matchesCountry,
+         browseSubtitle, resultHeading, isSearchable, stationCount } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -14,11 +18,6 @@ eq("error retries", stateLabels("error").primary, "RETRY");
 eq("unknown phase falls back to idle", stateLabels("nonsense").text, "IDLE");
 eq("idle does not pulse", stateLabels("idle").pulse, false);
 
-eq("volume rounds to segments", volumeSegments(0.5), 3);
-eq("volume clamps high", volumeSegments(5), 6);
-eq("volume clamps low", volumeSegments(-1), 0);
-// clicking segment 4 sets 4/6; reading it back must give 4 again, not 3.
-eq("volume round-trips", volumeSegments(4 / 6), 4);
 
 eq("star hidden when idle", showsStar("idle"), false);
 eq("star shown when playing", showsStar("playing"), true);
@@ -36,16 +35,157 @@ eq("punctuation rejected", isValidKey("r4-ab_c"), false);
 // normalize must feed validate: uppercase alone is not a reason to refuse.
 eq("caps validate after normalize", isValidKey(normalizeKey("R4-ABC")), true);
 
-eq("status when set", keyStatus(true).text, "KEY SET");
-eq("status when unset", keyStatus(false).text, "NO KEY");
-// the key must never reach the screen; the status carries no value.
-eq("status has no key value", JSON.stringify(keyStatus(true)).includes("r4-"), false);
+// masking is the only form the key may take after the save-this screen, so the
+// middle of a four-segment id has to go and the ends have to stay recognisable.
+eq("mask hides the middle segments", maskKey("r4-7K2P-9QXM-4DF1"), "r4-7K2P-····-4DF1");
+eq("mask keeps a lowercase key readable", maskKey("r4-abcd-efgh-ijkl"), "r4-abcd-····-ijkl");
+// a key that is not segmented still must not be shown; masking everything after
+// the prefix is the safe direction to fail in.
+// a real key is one 55-char run, so the ends are what tells two accounts apart.
+eq("unsegmented key shows both ends", maskKey("r4-abc123def"), "r4-abc1····3def");
+eq("real-shaped key shows both ends",
+   maskKey("r4-tutgsmisaqwertyuiopasdfghjklzxcvbnmqwertyuiopasdfg"), "r4-tutg····sdfg");
+// too short to split without giving away most of it — mask the lot instead.
+eq("short key does not leak", maskKey("r4-ab"), "r4-····");
+eq("exactly edge-length does not leak", maskKey("r4-abcdefgh"), "r4-····");
+eq("unsegmented mask drops the middle",
+   maskKey("r4-abcSECRETMIDdef").includes("SECRETMID"), false);
+eq("bare prefix survives", maskKey("r4-"), "r4-····");
+eq("empty key survives", maskKey(""), "");
+eq("missing key survives", maskKey(undefined), "");
+eq("null key survives", maskKey(null), "");
+// the whole point: no masked form may ever contain a middle segment verbatim.
+eq("mask drops middle segment", maskKey("r4-7K2P-9QXM-4DF1").includes("9QXM"), false);
+eq("mask drops long middle", maskKey("r4-AAAA-SECRETMID-BBBB").includes("SECRETMID"), false);
+eq("mask never returns the input", maskKey("r4-7K2P-9QXM-4DF1") === "r4-7K2P-9QXM-4DF1", false);
+eq("five segments still mask the middle", maskKey("r4-AAAA-BBBB-CCCC-DDDD"), "r4-AAAA-····-DDDD");
+eq("five segments drop every middle part",
+   maskKey("r4-AAAA-BBBB-CCCC-DDDD").includes("BBBB") || maskKey("r4-AAAA-BBBB-CCCC-DDDD").includes("CCCC"),
+   false);
 
-eq("save failure is surfaced", actionResult("save", false).tone, "err");
-eq("save success is surfaced", actionResult("save", true).tone, "ok");
-eq("clear reports", actionResult("clear", true).text, "key cleared");
-eq("sync without key warns", actionResult("sync", false).tone, "err");
-eq("unknown action is silent", actionResult("nonsense", true).text, "");
+// the section has three states and the copy differs in each; a signed-out state
+// must never claim a count.
+eq("signed out state", accountStatus({ signed_in: false, masked: "", favourites: 0 }).state, "signed_out");
+eq("signed out has no pill", accountStatus({ signed_in: false, masked: "", favourites: 0 }).pill, "");
+eq("signed in state", accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).state, "signed_in");
+eq("signed in pill reads synced", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 7 }).pill, "⊙ synced");
+eq("favourites are counted", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 7 }).detail, "★ 7 favorites synced.");
+eq("one favourite is singular", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 1 }).detail, "★ 1 favorite synced.");
+eq("zero favourites reads plainly", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 0 }).detail, "★ no favorites yet.");
+// a missing or malformed state must not crash the section into a blank pane.
+eq("missing state falls back to signed out", accountStatus(undefined).state, "signed_out");
+eq("empty state falls back to signed out", accountStatus({}).state, "signed_out");
+// accountStatus carries what is rendered, so it must never carry a full key.
+eq("status carries only the masked id",
+   accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).masked,
+   "r4-7K2P-····-4DF1");
+
+// the sidebar drives which pane is visible, so this decides the whole window's
+// section state; every nav id must resolve and nothing else may.
+eq("favourites is the landing section", activeSection(undefined), "favourites");
+eq("a known id selects itself", activeSection("blocked"), "blocked");
+eq("browse is known", activeSection("browse"), "browse");
+eq("countries is known", activeSection("countries"), "countries");
+eq("sync is known", activeSection("sync"), "sync");
+eq("favourites is known", activeSection("favourites"), "favourites");
+// an unknown id must land somewhere real rather than blanking the content pane.
+eq("unknown id falls back", activeSection("nonsense"), "favourites");
+eq("empty id falls back", activeSection(""), "favourites");
+eq("null id falls back", activeSection(null), "favourites");
+
+// rows lead with a flag; radio-browser country codes are two-letter and cased
+// inconsistently, and plenty of stations carry none at all.
+eq("lowercase code still flags", flagFor("ua"), "🇺🇦");
+eq("uppercase code flags", flagFor("MX"), "🇲🇽");
+// a missing code must not render a broken glyph where the flag belongs.
+eq("missing code has no flag", flagFor(""), "");
+eq("undefined code has no flag", flagFor(undefined), "");
+// three letters is not a country code; guessing would draw nonsense.
+eq("three letters is not a flag", flagFor("USA"), "");
+eq("one letter is not a flag", flagFor("U"), "");
+eq("digits are not a flag", flagFor("12"), "");
+
+// the row's second line is either the live marker or the format, never both.
+eq("the live row says so", rowSubtitle({ codec: "AAC", bitrate: 48 }, true), "● now playing");
+eq("a quiet row shows format", rowSubtitle({ codec: "AAC", bitrate: 48 }, false), "AAC 48k");
+// radio-browser reports 0 bitrate for plenty of stations; "AAC 0k" is noise.
+eq("zero bitrate is dropped", rowSubtitle({ codec: "AAC", bitrate: 0 }, false), "AAC");
+eq("no codec leaves nothing", rowSubtitle({ codec: "", bitrate: 0 }, false), "");
+eq("bitrate without codec still reads", rowSubtitle({ codec: "", bitrate: 128 }, false), "128k");
+eq("a missing station does not throw", rowSubtitle(undefined, false), "");
+
+// the sidebar footer counts two different filters and must stay honest at zero.
+eq("both counts render", filterSummary(3, 14), "◔ 3 excluded · ⛌ 14 blocked");
+eq("zero blocked is still shown", filterSummary(3, 0), "◔ 3 excluded · ⛌ 0 blocked");
+eq("nothing filtered reads as zero", filterSummary(0, 0), "◔ 0 excluded · ⛌ 0 blocked");
+eq("missing counts read as zero", filterSummary(undefined, undefined), "◔ 0 excluded · ⛌ 0 blocked");
+
+// the pane header carries the count; an empty list must not read as a failure.
+eq("a count is shown", favouritesHeading(7), "7");
+eq("one favourite is not pluralised away", favouritesHeading(1), "1");
+eq("none reads as none, not an error", favouritesHeading(0), "none yet");
+eq("missing count reads as none", favouritesHeading(undefined), "none yet");
+
+// a blocked uuid the catalogue dropped still needs a row to be unblocked from.
+eq("a named station keeps its name", blockedName({ name: "Talk Radio" }), "Talk Radio");
+eq("an unresolved station still reads", blockedName({ name: "" }), "Unknown station");
+eq("a whitespace name is not a name", blockedName({ name: "   " }), "Unknown station");
+eq("a missing station does not throw", blockedName(undefined), "Unknown station");
+
+eq("blocked count is shown", blockedHeading(14), "14");
+eq("no blocks reads as none", blockedHeading(0), "none");
+eq("missing block count reads as none", blockedHeading(undefined), "none");
+
+// "3 of 194": how many of the countries on offer are switched off.
+eq("excluded out of total", countryHeading(3, 194), "3 of 194");
+eq("none excluded is still honest", countryHeading(0, 194), "0 of 194");
+eq("missing counts read as zero", countryHeading(undefined, undefined), "0 of 0");
+
+// names come from the browser's own table rather than a shipped list of 194.
+eq("a code becomes a name", countryName("CH"), "Switzerland");
+eq("a lowercase code still resolves", countryName("ua"), "Ukraine");
+// an unmappable code shows as itself: a wrong country name is worse than a code.
+eq("an unknown code shows itself", countryName("ZZ"), "ZZ");
+eq("a non-code is left alone", countryName("USA"), "USA");
+eq("a missing code does not throw", countryName(undefined), "");
+
+// the filter box matches what the user reads and what they might type.
+eq("empty term matches everything", matchesCountry({ code: "CH" }, ""), true);
+eq("a missing term matches everything", matchesCountry({ code: "CH" }, undefined), true);
+eq("the name matches", matchesCountry({ code: "CH" }, "switz"), true);
+eq("the code matches", matchesCountry({ code: "CH" }, "ch"), true);
+eq("case does not matter", matchesCountry({ code: "UA" }, "UKRAI"), true);
+eq("a miss is a miss", matchesCountry({ code: "CH" }, "japan"), false);
+
+// a browse row says the format, and says when the station is already starred —
+// otherwise ☆ looks like it would do something it has already done.
+eq("a browse row shows the format",
+   browseSubtitle({ codec: "MP3", bitrate: 128 }, false), "MP3 128k");
+eq("a starred browse row says so",
+   browseSubtitle({ codec: "AAC", bitrate: 48 }, true), "AAC 48k · already in ★");
+eq("a starred row with no format still says so",
+   browseSubtitle({ codec: "", bitrate: 0 }, true), "already in ★");
+eq("a formatless row is blank rather than a stray separator",
+   browseSubtitle({ codec: "", bitrate: 0 }, false), "");
+
+// the result list is capped, and a capped list has to admit it — a user who
+// searches "radio" must not believe they are looking at every match.
+eq("a short result list just counts", resultHeading(12, false), "12 results");
+eq("one result reads as one", resultHeading(1, false), "1 result");
+eq("a capped list says it is capped", resultHeading(200, true), "first 200 results");
+eq("no results reads as a state", resultHeading(0, false), "nothing found");
+
+// the search is offline over 58k rows; one or two letters match most of the
+// catalogue and cost a full scan for a list nobody wants.
+eq("a single letter is not searched yet", isSearchable("j"), false);
+eq("two letters search", isSearchable("uk"), true);
+eq("whitespace is not a term", isSearchable("   "), false);
+eq("a missing term is not a term", isSearchable(undefined), false);
+eq("padding does not count towards length", isSearchable(" j "), false);
+
+// counts run to four figures, so they are grouped rather than run together.
+eq("a large count is grouped", stationCount(7666), "7,666");
+eq("a small count is plain", stationCount(312), "312");
 
 document.getElementById("out").textContent =
   out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;

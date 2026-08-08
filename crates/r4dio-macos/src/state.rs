@@ -96,6 +96,18 @@ impl MiniState {
         self.favorites = favorites;
     }
 
+    // changing the country filter changes which stations shuffle may reach, so
+    // the all-scope list is replaced without disturbing favourites.
+    pub fn set_all(&mut self, all: Vec<StationPick>) {
+        self.all = all;
+    }
+
+    // the window shuffles favourites regardless of the panel's scope, so it reads
+    // the list directly rather than switching scope as a side effect.
+    pub fn favorites(&self) -> &[StationPick] {
+        &self.favorites
+    }
+
     pub fn active_stations(&self) -> &[StationPick] {
         match self.scope {
             Scope::All => &self.all,
@@ -234,6 +246,16 @@ mod tests {
         m.load_stations(vec![st("a", "http://a")], vec![]);
         m.set_scope(Scope::Favorites);
         assert!(m.pick_shuffle().is_none());
+    }
+
+    #[test]
+    fn favorites_are_readable_without_switching_scope() {
+        let mut m = MiniState::new();
+        m.load_stations(vec![st("a", "http://a")], vec![st("f", "http://f")]);
+        assert_eq!(m.favorites().len(), 1);
+        assert_eq!(m.favorites()[0].uuid, "f");
+        // reading the list must not move the panel off the ALL scope.
+        assert_eq!(m.scope, Scope::All);
     }
 
     #[test]

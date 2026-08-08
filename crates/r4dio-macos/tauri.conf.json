@@ -7,6 +7,7 @@
     "frontendDist": "ui"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "popover",
@@ -15,19 +16,22 @@
         "height": 220,
         "decorations": false,
         "transparent": true,
+        "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
         "resizable": false
       },
       {
-        "label": "sync",
-        "url": "sync.html",
-        "title": "r4dio — Sync",
-        "width": 380,
-        "height": 300,
+        "label": "main",
+        "url": "main.html",
+        "title": "r4dio",
+        "width": 900,
+        "height": 600,
+        "minWidth": 720,
+        "minHeight": 460,
         "visible": false,
-        "resizable": false
+        "resizable": true
       }
     ],
     "macOSPrivateApi": true,

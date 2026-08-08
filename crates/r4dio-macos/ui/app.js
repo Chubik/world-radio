@@ -1,30 +1,29 @@
-import { stateLabels, volumeSegments, showsStar } from "./labels.js";
+import { stateLabels, showsStar } from "./labels.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 
-const SPECTRUM_SEED = [5, 7, 4, 8, 6, 3, 7, 5, 8, 4, 6, 7, 3, 5, 6, 4];
+let lastPhase = null;
 
-function buildSpectrum() {
-  const host = $("spectrum");
-  SPECTRUM_SEED.forEach((h, i) => {
-    const bar = document.createElement("span");
-    bar.style.height = `${(h / 8) * 16}px`;
-    bar.style.animationDelay = `${(i % 7) * 90}ms`;
-    host.appendChild(bar);
-  });
-}
+// px per second: slow enough to read a long name, fast enough that the end of
+// it arrives before the station changes.
+const ROAM_SPEED = 22;
 
-function buildVolume() {
-  const host = $("vol");
-  for (let i = 0; i < 6; i++) {
-    const seg = document.createElement("i");
-    seg.addEventListener("click", () => invoke("set_volume", { v: (i + 1) / 6 }));
-    host.appendChild(seg);
+function setStation(name) {
+  const box = $("station");
+  const text = $("station_text");
+  if (text.textContent !== name) {
+    text.textContent = name;
+  }
+  // measuring after the write is what decides between roaming and sitting still;
+  // scrollWidth is the laid-out text, clientWidth the room the panel gives it.
+  const over = text.scrollWidth - box.clientWidth;
+  box.classList.toggle("roams", over > 0);
+  if (over > 0) {
+    box.style.setProperty("--roam-to", `${-over}px`);
+    box.style.setProperty("--roam", `${(over / ROAM_SPEED) * 2 + 4}s`);
   }
 }
-
-let lastPhase = null;
 
 function render(s) {
   const labels = stateLabels(s.phase);
@@ -34,7 +33,7 @@ function render(s) {
   $("state_text").textContent = labels.text;
 
   $("meta").textContent = s.meta || "";
-  $("station").textContent = s.station || "Nothing playing";
+  setStation(s.station || "Nothing playing");
   $("station").classList.toggle("idle", s.phase === "idle");
 
   const star = $("star");
@@ -45,10 +44,7 @@ function render(s) {
   $("primary").textContent = `⇄ ${labels.primary}`;
   $("play").textContent = s.phase === "playing" ? "⏸" : "▶";
 
-  $("spectrum").classList.toggle("live", s.phase === "playing");
 
-  const filled = volumeSegments(s.volume);
-  [...$("vol").children].forEach((seg, i) => seg.classList.toggle("on", i < filled));
 
   [...$("scope").children].forEach((seg) =>
     seg.classList.toggle("on", seg.dataset.scope === s.scope)
@@ -92,8 +88,6 @@ document.addEventListener("visibilitychange", () => {
   timer = setInterval(poll, 1000);
 });
 
-buildSpectrum();
-buildVolume();
 wire();
 poll();
 timer = setInterval(poll, 1000);
