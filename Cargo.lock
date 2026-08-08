@@ -3362,6 +3362,7 @@ version = "1.4.5"
 dependencies = [
  "anyhow",
  "fastrand",
+ "qrcode",
  "radio-audio",
  "radio-core",
  "serde",

@@ -165,6 +165,10 @@ impl Backend {
         self.state.phase
     }
 
+    pub fn favourite_count(&self) -> u32 {
+        self.catalog.favorite_ids().len() as u32
+    }
+
     pub fn sync(&mut self) -> anyhow::Result<()> {
         let Some(key) = radio_core::sync::load_key() else {
             return Ok(());

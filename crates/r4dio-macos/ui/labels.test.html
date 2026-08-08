@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html><body><pre id="out"></pre><script type="module">
-import { stateLabels, showsStar, normalizeKey, isValidKey, keyStatus, actionResult } from "./labels.js";
+import { stateLabels, showsStar, normalizeKey, isValidKey, keyStatus, actionResult, maskKey, accountStatus } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -41,6 +41,44 @@ eq("save success is surfaced", actionResult("save", true).tone, "ok");
 eq("clear reports", actionResult("clear", true).text, "key cleared");
 eq("sync without key warns", actionResult("sync", false).tone, "err");
 eq("unknown action is silent", actionResult("nonsense", true).text, "");
+
+// masking is the only form the key may take after the save-this screen, so the
+// middle of a four-segment id has to go and the ends have to stay recognisable.
+eq("mask hides the middle segments", maskKey("r4-7K2P-9QXM-4DF1"), "r4-7K2P-····-4DF1");
+eq("mask keeps a lowercase key readable", maskKey("r4-abcd-efgh-ijkl"), "r4-abcd-····-ijkl");
+// a key that is not segmented still must not be shown; masking everything after
+// the prefix is the safe direction to fail in.
+eq("unsegmented key is fully masked", maskKey("r4-abc123def"), "r4-····");
+eq("short key does not leak", maskKey("r4-ab"), "r4-····");
+eq("bare prefix survives", maskKey("r4-"), "r4-····");
+eq("empty key survives", maskKey(""), "");
+eq("missing key survives", maskKey(undefined), "");
+eq("null key survives", maskKey(null), "");
+// the whole point: no masked form may ever contain a middle segment verbatim.
+eq("mask drops middle segment", maskKey("r4-7K2P-9QXM-4DF1").includes("9QXM"), false);
+eq("mask drops long middle", maskKey("r4-AAAA-SECRETMID-BBBB").includes("SECRETMID"), false);
+eq("mask never returns the input", maskKey("r4-7K2P-9QXM-4DF1") === "r4-7K2P-9QXM-4DF1", false);
+eq("five segments still mask the middle", maskKey("r4-AAAA-BBBB-CCCC-DDDD"), "r4-AAAA-····-DDDD");
+eq("five segments drop every middle part",
+   maskKey("r4-AAAA-BBBB-CCCC-DDDD").includes("BBBB") || maskKey("r4-AAAA-BBBB-CCCC-DDDD").includes("CCCC"),
+   false);
+
+// the section has three states and the copy differs in each; a signed-out state
+// must never claim a count.
+eq("signed out state", accountStatus({ signed_in: false, masked: "", favourites: 0 }).state, "signed_out");
+eq("signed out has no pill", accountStatus({ signed_in: false, masked: "", favourites: 0 }).pill, "");
+eq("signed in state", accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).state, "signed_in");
+eq("signed in pill reads synced", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 7 }).pill, "⊙ synced");
+eq("favourites are counted", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 7 }).detail, "★ 7 favorites synced.");
+eq("one favourite is singular", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 1 }).detail, "★ 1 favorite synced.");
+eq("zero favourites reads plainly", accountStatus({ signed_in: true, masked: "r4-a-····-b", favourites: 0 }).detail, "★ no favorites yet.");
+// a missing or malformed state must not crash the section into a blank pane.
+eq("missing state falls back to signed out", accountStatus(undefined).state, "signed_out");
+eq("empty state falls back to signed out", accountStatus({}).state, "signed_out");
+// accountStatus carries what is rendered, so it must never carry a full key.
+eq("status carries only the masked id",
+   accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).masked,
+   "r4-7K2P-····-4DF1");
 
 document.getElementById("out").textContent =
   out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;
