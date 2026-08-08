@@ -106,27 +106,6 @@ pub fn sync(state: tauri::State<Shared>) {
     }
 }
 
-#[tauri::command]
-pub fn set_sync_key(key: String) -> bool {
-    if !radio_core::sync::is_valid_format(&key) {
-        return false;
-    }
-    radio_core::sync::store_key(&key).is_ok()
-}
-
-// the key is a secret: the window reports only that one exists, never its value.
-#[tauri::command]
-pub fn has_sync_key() -> bool {
-    radio_core::sync::load_key().is_some()
-}
-
-#[tauri::command]
-pub fn clear_sync_key() {
-    if let Err(e) = radio_core::sync::clear_key() {
-        eprintln!("clear sync key failed: {e}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
