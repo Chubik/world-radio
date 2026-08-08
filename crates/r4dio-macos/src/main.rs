@@ -1,3 +1,4 @@
+mod account;
 mod backend;
 mod catalog_src;
 mod commands;
@@ -211,6 +212,12 @@ fn run(backend: backend::Backend) {
             commands::set_sync_key,
             commands::clear_sync_key,
             commands::has_sync_key,
+            account::create_account,
+            account::account_state,
+            account::sign_in,
+            account::sign_out,
+            account::delete_account,
+            account::account_qr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -37,6 +37,46 @@ export function keyStatus(hasKey) {
     : { text: "NO KEY", tone: "dim" };
 }
 
+const MASK = "····";
+
+// after the save-this screen the id may only appear masked, so this keeps the
+// first and last segments — enough to recognise the account — and drops every
+// segment between them. anything that is not segmented is masked whole rather
+// than shown, because failing towards hiding is the only safe direction here.
+export function maskKey(key) {
+  const raw = (key ?? "").trim();
+  if (raw === "") {
+    return "";
+  }
+  const parts = raw.split("-");
+  if (parts.length < 4) {
+    return `${parts[0]}-${MASK}`;
+  }
+  return `${parts[0]}-${parts[1]}-${MASK}-${parts[parts.length - 1]}`;
+}
+
+// the account section is one flow in three states; this maps the backend's
+// state onto the copy each one shows, so the view only places strings.
+export function accountStatus(state) {
+  const s = state ?? {};
+  if (!s.signed_in) {
+    return { state: "signed_out", pill: "", masked: "", detail: "" };
+  }
+  return {
+    state: "signed_in",
+    pill: "⊙ synced",
+    masked: s.masked ?? "",
+    detail: favouritesLine(s.favourites ?? 0),
+  };
+}
+
+function favouritesLine(n) {
+  if (n === 0) {
+    return "★ no favorites yet.";
+  }
+  return `★ ${n} favorite${n === 1 ? "" : "s"} synced.`;
+}
+
 // what the window says after an action; the backend's save can fail on a bad
 // format or an unwritable data dir, and that must reach the user.
 export function actionResult(action, ok) {
