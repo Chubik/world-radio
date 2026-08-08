@@ -133,19 +133,7 @@ impl Backend {
             Ok(favorites) => self.state.set_favorites(favorites),
             Err(e) => eprintln!("toggle favorite failed: {e}"),
         }
-        if let Err(e) = self.catalog.save_state(
-            &self.fav_path,
-            &self.hist_path,
-            &self.blacklist_path,
-            &self.excluded_path,
-        ) {
-            eprintln!("save favorites failed: {e}");
-        }
-        // sync_pending.json is shared with the TUI/CLI, which may run concurrently —
-        // merge rather than overwrite so this save can't erase their deletion.
-        if let Err(e) = self.catalog.pending.save_merged(&self.pending_path) {
-            eprintln!("save pending sync log failed: {e}");
-        }
+        self.persist();
     }
 
     pub fn poll_engine(&mut self) {
@@ -163,6 +151,204 @@ impl Backend {
 
     pub fn phase(&self) -> Phase {
         self.state.phase
+    }
+
+    pub fn favourite_count(&self) -> u32 {
+        self.catalog.favorite_ids().len() as u32
+    }
+
+    pub fn favourite_rows(&mut self) -> Vec<crate::commands::StationRow> {
+        // the star reflects what is on screen, so the rows are read from the
+        // catalog rather than from state.favorites, which only tracks shuffle scope.
+        let favorites = match catalog_src::favorite_stations(&self.catalog) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("load favourites failed: {e}");
+                return Vec::new();
+            }
+        };
+        let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        favorites
+            .into_iter()
+            .map(|s| crate::commands::StationRow {
+                is_playing: now.as_deref() == Some(s.uuid.as_str())
+                    && self.state.phase != Phase::Idle,
+                uuid: s.uuid,
+                name: s.name,
+                country: s.country,
+                codec: s.codec,
+                bitrate: s.bitrate,
+            })
+            .collect()
+    }
+
+    pub fn play_uuid(&mut self, uuid: &str) {
+        // a favourite is usually absent from the top-1000 cache, so the row is
+        // resolved through the catalog rather than looked up in the loaded lists.
+        match catalog_src::station_pick(&self.catalog, uuid) {
+            Ok(Some(pick)) => self.play_pick(pick),
+            Ok(None) => eprintln!("station {uuid} is not in the catalog"),
+            Err(e) => eprintln!("resolve station failed: {e}"),
+        }
+    }
+
+    pub fn remove_favourite(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
+        match catalog_src::unfavorite_and_reload(&mut self.catalog, uuid) {
+            Ok(favorites) => self.state.set_favorites(favorites),
+            Err(e) => eprintln!("remove favourite failed: {e}"),
+        }
+        self.persist();
+        self.favourite_rows()
+    }
+
+    pub fn shuffle_favourites(&mut self) {
+        if let Some(pick) = crate::state::pick_random(self.state.favorites()) {
+            self.play_pick(pick);
+        }
+    }
+
+    pub fn blocked_rows(&mut self) -> Vec<crate::commands::StationRow> {
+        let blocked = match catalog_src::blocked_stations(&self.catalog) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("load blocked failed: {e}");
+                return Vec::new();
+            }
+        };
+        blocked
+            .into_iter()
+            .map(|s| crate::commands::StationRow {
+                is_playing: false,
+                uuid: s.uuid,
+                name: s.name,
+                country: s.country,
+                codec: s.codec,
+                bitrate: s.bitrate,
+            })
+            .collect()
+    }
+
+    pub fn unblock(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
+        catalog_src::unblock(&mut self.catalog, uuid);
+        self.persist();
+        self.blocked_rows()
+    }
+
+    pub fn country_rows(&self) -> Vec<crate::commands::CountryRow> {
+        match catalog_src::country_facets(&self.catalog) {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|c| crate::commands::CountryRow {
+                    code: c.code,
+                    count: c.count,
+                    excluded: c.excluded,
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("load countries failed: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    pub fn set_excluded(&mut self, codes: Vec<String>) -> Vec<crate::commands::CountryRow> {
+        self.catalog
+            .set_excluded_countries(catalog_src::merge_hidden_exclusions(&self.catalog, codes));
+        self.persist();
+        // the excluded set changes which stations shuffle may reach, so the
+        // loaded lists are stale the moment it is written.
+        match catalog_src::all_stations(&self.catalog) {
+            Ok(all) => self.state.set_all(all),
+            Err(e) => eprintln!("reload stations failed: {e}"),
+        }
+        self.country_rows()
+    }
+
+    fn to_page(&self, page: catalog_src::StationPage) -> crate::commands::StationPage {
+        let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        crate::commands::StationPage {
+            stations: page
+                .stations
+                .into_iter()
+                .map(|s| crate::commands::StationRow {
+                    is_playing: now.as_deref() == Some(s.uuid.as_str())
+                        && self.state.phase != Phase::Idle,
+                    uuid: s.uuid,
+                    name: s.name,
+                    country: s.country,
+                    codec: s.codec,
+                    bitrate: s.bitrate,
+                })
+                .collect(),
+            capped: page.capped,
+        }
+    }
+
+    fn empty_page() -> crate::commands::StationPage {
+        crate::commands::StationPage {
+            stations: Vec::new(),
+            capped: false,
+        }
+    }
+
+    pub fn search(&self, name: &str) -> crate::commands::StationPage {
+        match catalog_src::search_by_name(&self.catalog, name) {
+            Ok(page) => self.to_page(page),
+            Err(e) => {
+                eprintln!("search failed: {e}");
+                Self::empty_page()
+            }
+        }
+    }
+
+    pub fn stations_in(&self, country: &str) -> crate::commands::StationPage {
+        match catalog_src::stations_in_country(&self.catalog, country) {
+            Ok(page) => self.to_page(page),
+            Err(e) => {
+                eprintln!("load country stations failed: {e}");
+                Self::empty_page()
+            }
+        }
+    }
+
+    /// browse marks its rows from this list rather than re-reading a full page,
+    /// so starring a station updates every row that shows it without a refetch.
+    pub fn favourite_ids(&self) -> Vec<String> {
+        self.catalog.favorite_ids().to_vec()
+    }
+
+    pub fn add_favourite(&mut self, uuid: &str) -> Vec<String> {
+        match catalog_src::favorite_and_reload(&mut self.catalog, uuid) {
+            Ok(favorites) => self.state.set_favorites(favorites),
+            Err(e) => eprintln!("add favourite failed: {e}"),
+        }
+        self.persist();
+        self.favourite_ids()
+    }
+
+    pub fn filter_counts(&self) -> crate::commands::FilterCounts {
+        crate::commands::FilterCounts {
+            excluded: self.catalog.excluded_country_ids().len() as u32,
+            blocked: self.catalog.blacklist_ids().len() as u32,
+        }
+    }
+
+    // favourites and the sync log are written together: a removal that reached
+    // disk but not the log would be re-added by the next sync.
+    fn persist(&mut self) {
+        if let Err(e) = self.catalog.save_state(
+            &self.fav_path,
+            &self.hist_path,
+            &self.blacklist_path,
+            &self.excluded_path,
+        ) {
+            eprintln!("save favorites failed: {e}");
+        }
+        // sync_pending.json is shared with the TUI/CLI, which may run concurrently —
+        // merge rather than overwrite so this save can't erase their deletion.
+        if let Err(e) = self.catalog.pending.save_merged(&self.pending_path) {
+            eprintln!("save pending sync log failed: {e}");
+        }
     }
 
     pub fn sync(&mut self) -> anyhow::Result<()> {

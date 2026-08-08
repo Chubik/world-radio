@@ -98,32 +98,109 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
     state.lock().unwrap().read_spectrum(16)
 }
 
+#[derive(Serialize)]
+pub struct StationRow {
+    pub uuid: String,
+    pub name: String,
+    pub country: String,
+    pub codec: String,
+    pub bitrate: u32,
+    pub is_playing: bool,
+}
+
+#[tauri::command]
+pub fn favourites(state: tauri::State<Shared>) -> Vec<StationRow> {
+    state.lock().unwrap().favourite_rows()
+}
+
+#[tauri::command]
+pub fn play_uuid(state: tauri::State<Shared>, uuid: String) {
+    state.lock().unwrap().play_uuid(&uuid);
+}
+
+#[tauri::command]
+pub fn remove_favourite(state: tauri::State<Shared>, uuid: String) -> Vec<StationRow> {
+    state.lock().unwrap().remove_favourite(&uuid)
+}
+
+#[tauri::command]
+pub fn shuffle_favourites(state: tauri::State<Shared>) {
+    state.lock().unwrap().shuffle_favourites();
+}
+
+#[tauri::command]
+pub fn blocked(state: tauri::State<Shared>) -> Vec<StationRow> {
+    state.lock().unwrap().blocked_rows()
+}
+
+#[tauri::command]
+pub fn unblock(state: tauri::State<Shared>, uuid: String) -> Vec<StationRow> {
+    state.lock().unwrap().unblock(&uuid)
+}
+
+#[derive(Serialize)]
+pub struct CountryRow {
+    pub code: String,
+    pub count: u32,
+    pub excluded: bool,
+}
+
+#[tauri::command]
+pub fn countries(state: tauri::State<Shared>) -> Vec<CountryRow> {
+    state.lock().unwrap().country_rows()
+}
+
+/// the whole list is sent back rather than one toggle, so a row the window never
+/// drew cannot be dropped from the account by a partial update.
+#[tauri::command]
+pub fn set_excluded(state: tauri::State<Shared>, codes: Vec<String>) -> Vec<CountryRow> {
+    state.lock().unwrap().set_excluded(codes)
+}
+
+/// `capped` is the whole point of the type: the window has to be able to say
+/// "first 200 results" rather than presenting a cut list as the full answer.
+#[derive(Serialize)]
+pub struct StationPage {
+    pub stations: Vec<StationRow>,
+    pub capped: bool,
+}
+
+#[tauri::command]
+pub fn search(state: tauri::State<Shared>, name: String) -> StationPage {
+    state.lock().unwrap().search(&name)
+}
+
+#[tauri::command]
+pub fn stations_in(state: tauri::State<Shared>, country: String) -> StationPage {
+    state.lock().unwrap().stations_in(&country)
+}
+
+#[tauri::command]
+pub fn add_favourite(state: tauri::State<Shared>, uuid: String) -> Vec<String> {
+    state.lock().unwrap().add_favourite(&uuid)
+}
+
+#[tauri::command]
+pub fn favourite_ids(state: tauri::State<Shared>) -> Vec<String> {
+    state.lock().unwrap().favourite_ids()
+}
+
+#[derive(Serialize)]
+pub struct FilterCounts {
+    pub excluded: u32,
+    pub blocked: u32,
+}
+
+#[tauri::command]
+pub fn filter_counts(state: tauri::State<Shared>) -> FilterCounts {
+    state.lock().unwrap().filter_counts()
+}
+
 #[tauri::command]
 pub fn sync(state: tauri::State<Shared>) {
     let mut backend = state.lock().unwrap();
     if let Err(e) = backend.sync() {
         eprintln!("sync failed: {e}");
-    }
-}
-
-#[tauri::command]
-pub fn set_sync_key(key: String) -> bool {
-    if !radio_core::sync::is_valid_format(&key) {
-        return false;
-    }
-    radio_core::sync::store_key(&key).is_ok()
-}
-
-// the key is a secret: the window reports only that one exists, never its value.
-#[tauri::command]
-pub fn has_sync_key() -> bool {
-    radio_core::sync::load_key().is_some()
-}
-
-#[tauri::command]
-pub fn clear_sync_key() {
-    if let Err(e) = radio_core::sync::clear_key() {
-        eprintln!("clear sync key failed: {e}");
     }
 }
 

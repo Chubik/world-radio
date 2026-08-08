@@ -20,6 +20,10 @@ fn dedup_stations(stations: Vec<Station>) -> Vec<Station> {
         .collect()
 }
 
+/// countries and codecs are bounded sets, so this is a ceiling rather than a
+/// top-N cut: it exists only so a corrupt column cannot return unbounded rows.
+const COUNTRY_LIMIT: usize = 1000;
+
 pub struct Cache {
     conn: Connection,
 }
@@ -151,6 +155,23 @@ impl Cache {
     }
 
     pub fn search(&self, q: &SearchQuery, excluded: &[String]) -> anyhow::Result<Vec<Station>> {
+        self.search_limited(q, excluded, None)
+    }
+
+    /// a browse list draws at most a couple of hundred rows, but "radio" matches
+    /// 26,810 of them and building every one costs seconds. `limit` pushes the
+    /// cut into sqlite so those rows are never materialised at all.
+    ///
+    /// the dedup goes with it: cutting first and deduping after would answer a
+    /// single row for a limit of ten whenever the head of the list repeats, so
+    /// sqlite groups on the same key `dedup_stations` uses and the limit then
+    /// counts distinct stations.
+    pub fn search_limited(
+        &self,
+        q: &SearchQuery,
+        excluded: &[String],
+        limit: Option<usize>,
+    ) -> anyhow::Result<Vec<Station>> {
         let mut sql = String::from(
             "SELECT stationuuid, name, url_resolved, countrycode, language, tags, codec, bitrate, votes, geo_lat, geo_long FROM stations",
         );
@@ -206,12 +227,25 @@ impl Cache {
             sql.push_str(&excluded_clause(excluded));
             params.extend(excluded_params(excluded));
         }
+        if limit.is_some() {
+            // the same key dedup_stations uses, so a bounded page counts distinct
+            // stations. min(rowid) keeps the choice of survivor deterministic.
+            sql.push_str(
+                " GROUP BY lower(name), lower(countrycode), lower(codec), bitrate
+                  HAVING rowid = min(rowid)",
+            );
+        }
         sql.push_str(" ORDER BY name");
+        if let Some(n) = limit {
+            sql.push_str(" LIMIT ?");
+            params.push(Box::new(n as i64));
+        }
 
         let mut stmt = self.conn.prepare(&sql)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(param_refs), row_to_station)?;
         let stations: Result<Vec<_>, _> = rows.collect();
+        // still deduped in rust: the grouping above only runs on the bounded path.
         Ok(dedup_stations(stations?))
     }
 
@@ -219,14 +253,21 @@ impl Cache {
         // countries and codecs are bounded (a few hundred / a dozen), so list
         // them all — otherwise a top-N cut hides smaller countries entirely.
         // tags run into the thousands, so keep the top-N there.
-        let countries = self.facet_column("countrycode", 1000)?;
-        let codecs = self.facet_column("codec", 1000)?;
+        let countries = self.facet_column("countrycode", COUNTRY_LIMIT)?;
+        let codecs = self.facet_column("codec", COUNTRY_LIMIT)?;
         let tags = self.facet_tags(tag_limit)?;
         Ok(crate::catalog::Facets {
             countries,
             codecs,
             tags,
         })
+    }
+
+    /// the country list on its own. `facets` also counts codecs and splits the
+    /// tags of all 58k rows, which a country tree never shows and which costs
+    /// seconds of the caller's time.
+    pub fn country_counts(&self) -> anyhow::Result<Vec<(String, u32)>> {
+        self.facet_column("countrycode", COUNTRY_LIMIT)
     }
 
     fn facet_column(&self, column: &str, limit: usize) -> anyhow::Result<Vec<(String, u32)>> {
@@ -1116,5 +1157,99 @@ mod tests {
         let rows = cache.search(&q, &[]).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].stationuuid, "u1");
+    }
+
+    #[test]
+    fn a_limited_search_returns_at_most_the_limit() {
+        // "radio" matches 26,810 rows in the real cache; building all of them
+        // cost seconds, so the cut has to happen in sqlite, not afterwards.
+        let cache = Cache::open_in_memory().unwrap();
+        let many: Vec<Station> = (0..500)
+            .map(|i| {
+                rich_station(
+                    &format!("u{i}"),
+                    &format!("Radio {i}"),
+                    "PL",
+                    "",
+                    "MP3",
+                    128,
+                )
+            })
+            .collect();
+        cache.upsert(&many).unwrap();
+        let q = SearchQuery {
+            name: Some("radio".into()),
+            ..Default::default()
+        };
+        assert_eq!(cache.search_limited(&q, &[], Some(50)).unwrap().len(), 50);
+        // no limit still means no limit, so every existing caller is unchanged.
+        assert_eq!(cache.search(&q, &[]).unwrap().len(), 500);
+    }
+
+    #[test]
+    fn a_limited_search_still_fills_its_page_past_duplicates() {
+        // dedup runs after the fetch and can only drop rows; without headroom a
+        // run of duplicates at the head of the list would return a short page.
+        let cache = Cache::open_in_memory().unwrap();
+        let mut many: Vec<Station> = (0..40)
+            .map(|i| rich_station(&format!("dup{i}"), "Radio Same", "PL", "", "MP3", 128))
+            .collect();
+        many.extend((0..40).map(|i| {
+            rich_station(
+                &format!("u{i}"),
+                &format!("Radio Unique {i}"),
+                "PL",
+                "",
+                "MP3",
+                128,
+            )
+        }));
+        cache.upsert(&many).unwrap();
+        let q = SearchQuery {
+            name: Some("radio".into()),
+            ..Default::default()
+        };
+        // 40 identical rows collapse to one, so a naive LIMIT 10 would answer 1.
+        assert_eq!(cache.search_limited(&q, &[], Some(10)).unwrap().len(), 10);
+    }
+
+    #[test]
+    fn a_limited_search_keeps_the_country_filter() {
+        let cache = Cache::open_in_memory().unwrap();
+        cache
+            .upsert(&[
+                rich_station("u1", "Radio One", "PL", "", "MP3", 128),
+                rich_station("u2", "Radio Two", "UA", "", "MP3", 128),
+            ])
+            .unwrap();
+        let q = SearchQuery {
+            countrycode: Some("UA".into()),
+            ..Default::default()
+        };
+        let rows = cache.search_limited(&q, &[], Some(50)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].stationuuid, "u2");
+    }
+
+    #[test]
+    fn country_counts_matches_the_full_facet_call() {
+        // the cheap path must answer the same countries as the expensive one —
+        // it only skips the codec and tag work a country tree never shows.
+        let cache = Cache::open_in_memory().unwrap();
+        cache
+            .upsert(&[
+                rich_station("u1", "A", "PL", "pop", "MP3", 128),
+                rich_station("u2", "B", "PL", "rock", "MP3", 128),
+                rich_station("u3", "C", "UA", "jazz", "AAC", 64),
+            ])
+            .unwrap();
+        assert_eq!(
+            cache.country_counts().unwrap(),
+            cache.facets(10).unwrap().countries
+        );
+        assert_eq!(
+            cache.country_counts().unwrap(),
+            vec![("PL".to_string(), 2), ("UA".to_string(), 1)]
+        );
     }
 }
