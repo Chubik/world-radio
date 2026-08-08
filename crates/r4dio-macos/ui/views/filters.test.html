@@ -103,6 +103,35 @@ const sent = calls.at(-1);
 eq("the save sent the whole set, not the view", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
 eq("the hidden exclusions survived", countryRows.filter((r) => r.excluded).length, 4);
 
+// two quick toggles overlap; the last click must be the last write, whichever
+// reply lands first.
+input.value = "";
+input.dispatchEvent(new Event("input"));
+await settle();
+// toggles land while an earlier save is still in flight; every one of them must
+// still be in what finally gets stored.
+const real = window.__TAURI__.core.invoke;
+window.__TAURI__.core.invoke = async (cmd, args) => {
+  const snapshot = await real(cmd, args);
+  if (cmd === "set_excluded") await new Promise((r) => setTimeout(r, 30));
+  return snapshot;
+};
+// each save repaints the list, so the rows must be looked up again per click.
+const clickRow = (name) =>
+  [...chost.querySelectorAll(".srow")].find((r) => r.textContent.includes(name)).click();
+clickRow("Poland");
+clickRow("Switzerland");
+await new Promise((r) => setTimeout(r, 300));
+window.__TAURI__.core.invoke = real;
+eq("both quick toggles survive",
+   countryRows.filter((r) => r.excluded).map((r) => r.code).sort(),
+   ["CN", "IN", "PL", "UA"]);
+// what the window draws must agree with what was stored.
+const onNow = [...chost.querySelectorAll(".srow")]
+  .filter((r) => r.querySelector(".toggle.on"))
+  .map((r) => r.querySelector(".nm").textContent).sort();
+eq("the drawn switches match what was stored", onNow, ["China", "India", "Poland", "Ukraine"]);
+
 // an unmatched filter is an empty state, not a broken list.
 input.value = "zzzz";
 input.dispatchEvent(new Event("input"));
