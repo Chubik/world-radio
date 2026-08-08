@@ -96,6 +96,12 @@ impl MiniState {
         self.favorites = favorites;
     }
 
+    // changing the country filter changes which stations shuffle may reach, so
+    // the all-scope list is replaced without disturbing favourites.
+    pub fn set_all(&mut self, all: Vec<StationPick>) {
+        self.all = all;
+    }
+
     // the window shuffles favourites regardless of the panel's scope, so it reads
     // the list directly rather than switching scope as a side effect.
     pub fn favorites(&self) -> &[StationPick] {
