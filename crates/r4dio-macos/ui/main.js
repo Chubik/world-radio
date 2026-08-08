@@ -3,6 +3,7 @@ import { mountAccount } from "./views/account.js";
 import { mountFavourites } from "./views/favourites.js";
 import { mountBlocked } from "./views/blocked.js";
 import { mountCountries } from "./views/countries.js";
+import { mountBrowse } from "./views/browse.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
@@ -13,12 +14,16 @@ const favourites = mountFavourites(document.getElementById("pane_favourites"));
 // they did rather than leaving it stale until the window is reopened.
 const blocked = mountBlocked(document.getElementById("pane_blocked"), loadFilterSummary);
 const countries = mountCountries(document.getElementById("pane_countries"), loadFilterSummary);
+const browse = mountBrowse(document.getElementById("pane_browse"));
 
 // the window reads on demand rather than on a timer: favourites only change when
 // the user changes them, and sign_in holds the backend mutex across a blocking
 // http sync, so a poll would stall the whole window for those seconds.
 const REFRESH = {
   favourites: () => favourites.refresh(),
+  // browse re-reads only the star marks: a full reload would close every country
+  // the user opened and clear the search they typed.
+  browse: () => browse.syncStars(),
   blocked: () => blocked.refresh(),
   countries: () => countries.refresh(),
   sync: () => account.refresh(),
