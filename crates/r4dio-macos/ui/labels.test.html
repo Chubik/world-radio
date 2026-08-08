@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html><body><pre id="out"></pre><script type="module">
-import { stateLabels, showsStar, normalizeKey, isValidKey, keyStatus, actionResult, maskKey, accountStatus } from "./labels.js";
+import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -30,17 +30,6 @@ eq("wrong prefix rejected", isValidKey("xx-abc"), false);
 eq("punctuation rejected", isValidKey("r4-ab_c"), false);
 // normalize must feed validate: uppercase alone is not a reason to refuse.
 eq("caps validate after normalize", isValidKey(normalizeKey("R4-ABC")), true);
-
-eq("status when set", keyStatus(true).text, "KEY SET");
-eq("status when unset", keyStatus(false).text, "NO KEY");
-// the key must never reach the screen; the status carries no value.
-eq("status has no key value", JSON.stringify(keyStatus(true)).includes("r4-"), false);
-
-eq("save failure is surfaced", actionResult("save", false).tone, "err");
-eq("save success is surfaced", actionResult("save", true).tone, "ok");
-eq("clear reports", actionResult("clear", true).text, "key cleared");
-eq("sync without key warns", actionResult("sync", false).tone, "err");
-eq("unknown action is silent", actionResult("nonsense", true).text, "");
 
 // masking is the only form the key may take after the save-this screen, so the
 // middle of a four-segment id has to go and the ends have to stay recognisable.

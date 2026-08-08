@@ -29,14 +29,6 @@ export function isValidKey(key) {
   return /^r4-[a-z0-9]+$/.test(key);
 }
 
-// the sync window must never echo the key back, so the status line reports only
-// whether one is stored.
-export function keyStatus(hasKey) {
-  return hasKey
-    ? { text: "KEY SET", tone: "ok" }
-    : { text: "NO KEY", tone: "dim" };
-}
-
 const MASK = "····";
 
 // after the save-this screen the id may only appear masked, so this keeps the
@@ -75,23 +67,4 @@ function favouritesLine(n) {
     return "★ no favorites yet.";
   }
   return `★ ${n} favorite${n === 1 ? "" : "s"} synced.`;
-}
-
-// what the window says after an action; the backend's save can fail on a bad
-// format or an unwritable data dir, and that must reach the user.
-export function actionResult(action, ok) {
-  switch (action) {
-    case "save":
-      return ok
-        ? { text: "key saved", tone: "ok" }
-        : { text: "could not save that key", tone: "err" };
-    case "clear":
-      return { text: "key cleared", tone: "dim" };
-    case "sync":
-      return ok
-        ? { text: "sync requested", tone: "ok" }
-        : { text: "sync needs a key first", tone: "err" };
-    default:
-      return { text: "", tone: "dim" };
-  }
 }

@@ -153,6 +153,22 @@ mod tests {
     }
 
     #[test]
+    fn mask_of_a_real_server_key_contains_no_part_of_it() {
+        // the server issues one opaque lowercase run; the masked form must not
+        // carry any run of it long enough to be worth guessing from.
+        let key = "r4-7k2p9qxm4df1secret";
+        let masked = mask_key(key);
+        let body = key.strip_prefix("r4-").unwrap();
+        assert!(!masked.contains(body), "leaked whole: {masked}");
+        for len in 4..=body.len() {
+            for start in 0..=body.len() - len {
+                let chunk = &body[start..start + len];
+                assert!(!masked.contains(chunk), "leaked chunk {chunk} in {masked}");
+            }
+        }
+    }
+
+    #[test]
     fn mask_drops_every_middle_segment() {
         let masked = mask_key("r4-AAAA-BBBB-CCCC-DDDD");
         assert_eq!(masked, "r4-AAAA-····-DDDD");
