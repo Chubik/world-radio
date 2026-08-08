@@ -113,13 +113,17 @@ pub struct CountryFacet {
     pub excluded: bool,
 }
 
+const TAGS_UNUSED: usize = 1;
+
 pub fn country_facets(catalog: &Catalog) -> anyhow::Result<Vec<CountryFacet>> {
     let excluded: Vec<String> = catalog
         .excluded_country_ids()
         .iter()
         .map(|c| c.to_uppercase())
         .collect();
-    let facets = catalog.facets(1)?;
+    // the argument bounds tags, which this list does not use; countries always
+    // come back whole, so a small number here costs nothing.
+    let facets = catalog.facets(TAGS_UNUSED)?;
     Ok(facets
         .countries
         .into_iter()
