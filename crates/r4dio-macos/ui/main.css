@@ -127,3 +127,39 @@
   font-family: var(--sans); font-size: 12.5px; line-height: 1.5;
   color: var(--dim); max-width: 340px;
 }
+
+/* ── browse ─────────────────────────────────────────────────────────────── */
+
+/* a result list is capped at 200 rows, so the count above it is what tells the
+   user they are looking at a slice rather than the whole catalogue. */
+.listhead {
+  display: flex; justify-content: flex-end;
+  font-size: 10.5px; color: var(--dim); margin-bottom: 5px;
+}
+.results:not(:empty) { margin-bottom: 18px; }
+/* the search results and an open country both scroll on their own, so 200 rows
+   never push the tree off the window. */
+.results .rowlist { max-height: 240px; }
+
+.tree > .glabel { padding: 0; margin-bottom: 9px; }
+.treenode {
+  border: 1px solid var(--rule); border-radius: 8px;
+  margin-bottom: 6px; overflow: hidden; background: var(--panel);
+}
+.treehead {
+  display: flex; align-items: center; gap: 9px; padding: 9px 12px;
+  font-family: var(--mono); font-size: 12px; color: var(--fg); cursor: pointer;
+}
+.treehead:hover { background: rgba(255,196,87,.06); }
+.treehead .car { color: var(--dim); font-size: 9px; width: 10px; flex: none; }
+.treehead .flag { width: 18px; text-align: center; flex: none; }
+.treehead .cname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.treehead .cnt { margin-left: auto; color: var(--dim); font-size: 10.5px; flex: none; }
+.treenode.open .treehead { color: var(--hi); }
+.treebody { padding: 2px 8px 8px 30px; }
+.treebody .rowlist { max-height: 240px; }
+/* a country node already sits in a bordered box; a second border inside it
+   would read as two nested panels. */
+.treebody .rowlist { border: none; background: none; padding: 0; }
+.treebody .empty { padding: 20px 16px; }
+.loading { padding: 10px 4px; font-size: 11px; color: var(--dim); }
