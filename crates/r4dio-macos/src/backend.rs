@@ -185,25 +185,15 @@ impl Backend {
     pub fn play_uuid(&mut self, uuid: &str) {
         // a favourite is usually absent from the top-1000 cache, so the row is
         // resolved through the catalog rather than looked up in the loaded lists.
-        match self.catalog.station_by_uuid(uuid) {
-            Ok(Some(s)) => {
-                let pick = StationPick {
-                    uuid: s.stationuuid.clone(),
-                    name: s.name.clone(),
-                    url: s.url_resolved.clone(),
-                    country: s.countrycode.clone(),
-                    codec: s.codec.clone(),
-                    bitrate: s.bitrate,
-                };
-                self.play_pick(pick);
-            }
+        match catalog_src::station_pick(&self.catalog, uuid) {
+            Ok(Some(pick)) => self.play_pick(pick),
             Ok(None) => eprintln!("station {uuid} is not in the catalog"),
             Err(e) => eprintln!("resolve station failed: {e}"),
         }
     }
 
     pub fn remove_favourite(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
-        match catalog_src::toggle_and_reload(&mut self.catalog, uuid) {
+        match catalog_src::unfavorite_and_reload(&mut self.catalog, uuid) {
             Ok(favorites) => self.state.set_favorites(favorites),
             Err(e) => eprintln!("remove favourite failed: {e}"),
         }

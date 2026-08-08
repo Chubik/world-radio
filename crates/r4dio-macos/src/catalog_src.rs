@@ -30,6 +30,22 @@ pub fn toggle_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Ve
     favorite_stations(catalog)
 }
 
+/// the window's remove button, which must only ever remove: toggling a uuid that
+/// is not a favourite would add it, turning ★ into an add button on a stale row.
+pub fn unfavorite_and_reload(
+    catalog: &mut Catalog,
+    uuid: &str,
+) -> anyhow::Result<Vec<StationPick>> {
+    if catalog.is_favorite(uuid) {
+        catalog.toggle_favorite(uuid);
+    }
+    favorite_stations(catalog)
+}
+
+pub fn station_pick(catalog: &Catalog, uuid: &str) -> anyhow::Result<Option<StationPick>> {
+    Ok(catalog.station_by_uuid(uuid)?.as_ref().map(to_pick))
+}
+
 pub fn favorite_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
     let mut out = Vec::new();
     for uuid in catalog.favorite_ids() {
@@ -86,6 +102,33 @@ mod tests {
         let picks = favorite_stations(&cat).unwrap();
         assert_eq!(picks.len(), 1);
         assert_eq!(picks[0].uuid, "u2");
+    }
+
+    #[test]
+    fn unfavorite_removes_a_favourite() {
+        let mut cat = catalog();
+        cat.toggle_favorite("u1");
+        let favs = unfavorite_and_reload(&mut cat, "u1").unwrap();
+        assert!(favs.is_empty());
+    }
+
+    #[test]
+    fn unfavorite_never_adds_one() {
+        // the window's ★ is a remove button; a stale row must not re-add the
+        // station a toggle would have flipped back on.
+        let mut cat = catalog();
+        let favs = unfavorite_and_reload(&mut cat, "u1").unwrap();
+        assert!(favs.is_empty());
+        assert!(!cat.is_favorite("u1"));
+    }
+
+    #[test]
+    fn station_pick_resolves_by_uuid_and_misses_cleanly() {
+        let cat = catalog();
+        let pick = station_pick(&cat, "u1").unwrap().unwrap();
+        assert_eq!(pick.uuid, "u1");
+        assert_eq!(pick.url, "http://one");
+        assert!(station_pick(&cat, "nope").unwrap().is_none());
     }
 
     #[test]
