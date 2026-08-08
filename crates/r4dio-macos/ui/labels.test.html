@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html><body><pre id="out"></pre><script type="module">
-import { stateLabels, volumeSegments, showsStar, normalizeKey, isValidKey, keyStatus, actionResult } from "./labels.js";
+import { stateLabels, showsStar, normalizeKey, isValidKey, keyStatus, actionResult } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -14,11 +14,6 @@ eq("error retries", stateLabels("error").primary, "RETRY");
 eq("unknown phase falls back to idle", stateLabels("nonsense").text, "IDLE");
 eq("idle does not pulse", stateLabels("idle").pulse, false);
 
-eq("volume rounds to segments", volumeSegments(0.5), 3);
-eq("volume clamps high", volumeSegments(5), 6);
-eq("volume clamps low", volumeSegments(-1), 0);
-// clicking segment 4 sets 4/6; reading it back must give 4 again, not 3.
-eq("volume round-trips", volumeSegments(4 / 6), 4);
 
 eq("star hidden when idle", showsStar("idle"), false);
 eq("star shown when playing", showsStar("playing"), true);

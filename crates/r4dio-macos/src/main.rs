@@ -50,8 +50,9 @@ fn main() {
 }
 
 // the menubar is at the top of the screen, so the panel belongs below the icon.
-// TrayCenter puts it *above* — `tray_y - window_height`, which is off-screen here
-// and lands under the menubar itself once the plugin clamps the negative y.
+// TrayCenter puts it *above* — `tray_y - window_height`, which is off-screen here.
+// TrayBottomCenter lands on `tray_y`, i.e. covering the menubar and the icon
+// itself, so the user cannot click the icon again to close it. drop it clear.
 fn show_popover(app: &tauri::AppHandle) {
     let Some(win) = app.get_webview_window("popover") else {
         return;
@@ -59,6 +60,21 @@ fn show_popover(app: &tauri::AppHandle) {
     let _ = win.move_window(Position::TrayBottomCenter);
     let _ = win.show();
     let _ = win.set_focus();
+}
+
+// hang the panel off the bottom edge of the icon's own rect. the positioner
+// plugin only knows the icon's origin, so it parks the window over the menubar
+// and the icon with it — leaving no icon left to click to close the panel.
+fn drop_below_tray(win: &tauri::WebviewWindow, tray: &tauri::Rect) {
+    let Ok(size) = win.outer_size() else {
+        return;
+    };
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let pos = tray.position.to_physical::<i32>(scale);
+    let tray_size = tray.size.to_physical::<i32>(scale);
+    let x = pos.x + (tray_size.width - size.width as i32) / 2;
+    let y = pos.y + tray_size.height;
+    let _ = win.set_position(tauri::PhysicalPosition { x, y });
 }
 
 // an accessory app cannot become active, so a plain show() would leave this
@@ -138,11 +154,18 @@ fn run(backend: backend::Backend) {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        rect,
                         ..
                     } = event
                     {
-                        let last_hide = tray.app_handle().state::<LastHide>();
-                        toggle_popover(tray.app_handle(), &last_hide);
+                        let app = tray.app_handle();
+                        let last_hide = app.state::<LastHide>();
+                        toggle_popover(app, &last_hide);
+                        if let Some(win) = app.get_webview_window("popover") {
+                            if win.is_visible().unwrap_or(false) {
+                                drop_below_tray(&win, &rect);
+                            }
+                        }
                     }
                 })
                 .build(app)?;
