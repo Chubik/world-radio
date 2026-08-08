@@ -5,7 +5,7 @@
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --sans: "IBM Plex Sans", system-ui, sans-serif;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-user-select: none; user-select: none; }
 html, body { background: transparent; }
 body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
 
@@ -55,20 +55,6 @@ body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
 .star.on { color: var(--bg); background: var(--hi); box-shadow: 0 0 9px -2px #d49a3a; }
 .star.hidden { visibility: hidden; }
 
-.levels { justify-content: space-between; align-items: flex-end; gap: 8px; }
-.spectrum { display: flex; align-items: flex-end; gap: 1px; height: 16px; }
-.spectrum span { width: 3px; background: var(--hi); border-radius: .5px; opacity: .4; }
-.spectrum.live span { opacity: 1; animation: bar .9s ease-in-out infinite alternate; }
-@keyframes bar { from { transform: scaleY(.35) } to { transform: scaleY(1) } }
-.spectrum span { transform-origin: bottom; }
-.vol { display: flex; align-items: center; gap: 4px; }
-.vol_label { font-size: 9px; color: var(--dim); }
-.vol_bar { display: flex; gap: 1.5px; }
-.vol_bar i {
-  width: 3.5px; height: 9px; border-radius: .5px; cursor: pointer;
-  box-shadow: inset 0 0 0 1px var(--dim);
-}
-.vol_bar i.on { background: var(--hi); box-shadow: inset 0 0 0 1px var(--hi); }
 
 .controls { gap: 7px; }
 .btn {
@@ -87,4 +73,3 @@ body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
 }
 .seg { padding: 2px 6px; font-size: 9px; letter-spacing: .04em; border-radius: 3px; color: var(--dim); cursor: pointer; }
 .seg.on { color: var(--bg); background: var(--hi); font-weight: 700; }
-.hint { font-size: 9px; color: var(--dim); }

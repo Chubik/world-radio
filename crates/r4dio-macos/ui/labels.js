@@ -11,13 +11,6 @@ export function stateLabels(phase) {
   }
 }
 
-// six segments; clicking segment n sets n/6, so the filled count must round the
-// same way on the way back or the bar jumps under the cursor.
-export function volumeSegments(volume, count = 6) {
-  const v = Math.min(1, Math.max(0, volume));
-  return Math.round(v * count);
-}
-
 // nothing to star when nothing is playing.
 export function showsStar(phase) {
   return phase !== "idle";
