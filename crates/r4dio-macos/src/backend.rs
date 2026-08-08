@@ -264,6 +264,68 @@ impl Backend {
         self.country_rows()
     }
 
+    fn to_page(&self, page: catalog_src::StationPage) -> crate::commands::StationPage {
+        let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        crate::commands::StationPage {
+            stations: page
+                .stations
+                .into_iter()
+                .map(|s| crate::commands::StationRow {
+                    is_playing: now.as_deref() == Some(s.uuid.as_str())
+                        && self.state.phase != Phase::Idle,
+                    uuid: s.uuid,
+                    name: s.name,
+                    country: s.country,
+                    codec: s.codec,
+                    bitrate: s.bitrate,
+                })
+                .collect(),
+            capped: page.capped,
+        }
+    }
+
+    fn empty_page() -> crate::commands::StationPage {
+        crate::commands::StationPage {
+            stations: Vec::new(),
+            capped: false,
+        }
+    }
+
+    pub fn search(&self, name: &str) -> crate::commands::StationPage {
+        match catalog_src::search_by_name(&self.catalog, name) {
+            Ok(page) => self.to_page(page),
+            Err(e) => {
+                eprintln!("search failed: {e}");
+                Self::empty_page()
+            }
+        }
+    }
+
+    pub fn stations_in(&self, country: &str) -> crate::commands::StationPage {
+        match catalog_src::stations_in_country(&self.catalog, country) {
+            Ok(page) => self.to_page(page),
+            Err(e) => {
+                eprintln!("load country stations failed: {e}");
+                Self::empty_page()
+            }
+        }
+    }
+
+    /// browse marks its rows from this list rather than re-reading a full page,
+    /// so starring a station updates every row that shows it without a refetch.
+    pub fn favourite_ids(&self) -> Vec<String> {
+        self.catalog.favorite_ids().to_vec()
+    }
+
+    pub fn add_favourite(&mut self, uuid: &str) -> Vec<String> {
+        match catalog_src::favorite_and_reload(&mut self.catalog, uuid) {
+            Ok(favorites) => self.state.set_favorites(favorites),
+            Err(e) => eprintln!("add favourite failed: {e}"),
+        }
+        self.persist();
+        self.favourite_ids()
+    }
+
     pub fn filter_counts(&self) -> crate::commands::FilterCounts {
         crate::commands::FilterCounts {
             excluded: self.catalog.excluded_country_ids().len() as u32,

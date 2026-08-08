@@ -189,3 +189,39 @@ export function matchesCountry(row, term) {
 export function favouritesHeading(n) {
   return n ? String(n) : "none yet";
 }
+
+// browse rows carry a ☆ that adds. a station already starred has to say so, or
+// the button reads as an action that is still available.
+export function browseSubtitle(station, isFavourite) {
+  const format = rowSubtitle(station, false);
+  if (!isFavourite) {
+    return format;
+  }
+  return [format, "already in ★"].filter((p) => p !== "").join(" · ");
+}
+
+// the offline catalogue answers 671 rows for "jazz" and 7,666 for one country,
+// and only the first slice is ever drawn. saying so is what stops the list
+// reading as the whole truth about the catalogue.
+export function resultHeading(shown, capped) {
+  const n = shown ?? 0;
+  if (n === 0) {
+    return "nothing found";
+  }
+  if (capped) {
+    return `first ${stationCount(n)} results`;
+  }
+  return `${stationCount(n)} result${n === 1 ? "" : "s"}`;
+}
+
+const MIN_TERM = 2;
+
+// one letter matches most of a 58k-row catalogue, which costs a full scan to
+// produce a list nobody can use. two is where a search starts being a search.
+export function isSearchable(term) {
+  return (term ?? "").trim().length >= MIN_TERM;
+}
+
+export function stationCount(n) {
+  return (n ?? 0).toLocaleString("en");
+}

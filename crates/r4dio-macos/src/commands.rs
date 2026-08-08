@@ -157,6 +157,34 @@ pub fn set_excluded(state: tauri::State<Shared>, codes: Vec<String>) -> Vec<Coun
     state.lock().unwrap().set_excluded(codes)
 }
 
+/// `capped` is the whole point of the type: the window has to be able to say
+/// "first 200 results" rather than presenting a cut list as the full answer.
+#[derive(Serialize)]
+pub struct StationPage {
+    pub stations: Vec<StationRow>,
+    pub capped: bool,
+}
+
+#[tauri::command]
+pub fn search(state: tauri::State<Shared>, name: String) -> StationPage {
+    state.lock().unwrap().search(&name)
+}
+
+#[tauri::command]
+pub fn stations_in(state: tauri::State<Shared>, country: String) -> StationPage {
+    state.lock().unwrap().stations_in(&country)
+}
+
+#[tauri::command]
+pub fn add_favourite(state: tauri::State<Shared>, uuid: String) -> Vec<String> {
+    state.lock().unwrap().add_favourite(&uuid)
+}
+
+#[tauri::command]
+pub fn favourite_ids(state: tauri::State<Shared>) -> Vec<String> {
+    state.lock().unwrap().favourite_ids()
+}
+
 #[derive(Serialize)]
 pub struct FilterCounts {
     pub excluded: u32,
