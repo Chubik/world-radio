@@ -1,7 +1,9 @@
 <!DOCTYPE html>
-<html><body><pre id="out"></pre><script type="module">
+<html><head><meta charset="UTF-8" /></head>
+<body><pre id="out"></pre><script type="module">
 import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
-         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading } from "./labels.js";
+         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading,
+         blockedName, blockedHeading, countryHeading, countryName, matchesCountry } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -122,6 +124,37 @@ eq("a count is shown", favouritesHeading(7), "7");
 eq("one favourite is not pluralised away", favouritesHeading(1), "1");
 eq("none reads as none, not an error", favouritesHeading(0), "none yet");
 eq("missing count reads as none", favouritesHeading(undefined), "none yet");
+
+// a blocked uuid the catalogue dropped still needs a row to be unblocked from.
+eq("a named station keeps its name", blockedName({ name: "Talk Radio" }), "Talk Radio");
+eq("an unresolved station still reads", blockedName({ name: "" }), "Unknown station");
+eq("a whitespace name is not a name", blockedName({ name: "   " }), "Unknown station");
+eq("a missing station does not throw", blockedName(undefined), "Unknown station");
+
+eq("blocked count is shown", blockedHeading(14), "14");
+eq("no blocks reads as none", blockedHeading(0), "none");
+eq("missing block count reads as none", blockedHeading(undefined), "none");
+
+// "3 of 194": how many of the countries on offer are switched off.
+eq("excluded out of total", countryHeading(3, 194), "3 of 194");
+eq("none excluded is still honest", countryHeading(0, 194), "0 of 194");
+eq("missing counts read as zero", countryHeading(undefined, undefined), "0 of 0");
+
+// names come from the browser's own table rather than a shipped list of 194.
+eq("a code becomes a name", countryName("CH"), "Switzerland");
+eq("a lowercase code still resolves", countryName("ua"), "Ukraine");
+// an unmappable code shows as itself: a wrong country name is worse than a code.
+eq("an unknown code shows itself", countryName("ZZ"), "ZZ");
+eq("a non-code is left alone", countryName("USA"), "USA");
+eq("a missing code does not throw", countryName(undefined), "");
+
+// the filter box matches what the user reads and what they might type.
+eq("empty term matches everything", matchesCountry({ code: "CH" }, ""), true);
+eq("a missing term matches everything", matchesCountry({ code: "CH" }, undefined), true);
+eq("the name matches", matchesCountry({ code: "CH" }, "switz"), true);
+eq("the code matches", matchesCountry({ code: "CH" }, "ch"), true);
+eq("case does not matter", matchesCountry({ code: "UA" }, "UKRAI"), true);
+eq("a miss is a miss", matchesCountry({ code: "CH" }, "japan"), false);
 
 document.getElementById("out").textContent =
   out.join("\n") + `\n\n${failed === 0 ? "ALL PASS" : failed + " FAILED"}`;

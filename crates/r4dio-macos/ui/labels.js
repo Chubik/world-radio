@@ -122,6 +122,68 @@ export function filterSummary(excluded, blocked) {
   return `◔ ${excluded ?? 0} excluded · ⛌ ${blocked ?? 0} blocked`;
 }
 
+// a blocked station the catalogue can no longer resolve still needs a row to be
+// unblocked from, so the uuid stands in for a name rather than leaving it blank.
+export function blockedName(station) {
+  const name = (station?.name ?? "").trim();
+  return name === "" ? "Unknown station" : name;
+}
+
+// the header counts the rows the user can act on, and "none" reads as a state
+// rather than as a count that failed to load.
+export function blockedHeading(n) {
+  return n ? String(n) : "none";
+}
+
+// "3 of 194" — how many of the countries on offer are switched off.
+export function countryHeading(excluded, total) {
+  return `${excluded ?? 0} of ${total ?? 0}`;
+}
+
+// the intl table is the browser's, so it stays correct without shipping a list
+// of 194 names. an unmappable code shows as itself rather than as a guess.
+// fallback:"code" matters — without it an unassigned code resolves to the string
+// "Unknown Region", which would sit in the list looking like a real country.
+const REGION_NAMES = (() => {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region", fallback: "code" });
+  } catch {
+    return null;
+  }
+})();
+
+export function countryName(code) {
+  const c = (code ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) {
+    return c;
+  }
+  let name;
+  try {
+    name = REGION_NAMES?.of(c);
+  } catch {
+    return c;
+  }
+  // CLDR answers "Unknown Region" for codes it reserves rather than refusing
+  // them, and that placeholder would sit in the list looking like a country.
+  if (!name || name === UNKNOWN_REGION) {
+    return c;
+  }
+  return name;
+}
+
+const UNKNOWN_REGION = "Unknown Region";
+
+// the filter box matches the name the user reads and the code they might type,
+// so "swi", "CH" and "Switzerland" all find the same row.
+export function matchesCountry(row, term) {
+  const q = (term ?? "").trim().toLowerCase();
+  if (q === "") {
+    return true;
+  }
+  const code = (row?.code ?? "").toLowerCase();
+  return code.includes(q) || countryName(row?.code).toLowerCase().includes(q);
+}
+
 // a new account has no favourites, and that is a normal state — the header says
 // "none yet" rather than a bare 0, which reads like a count that failed.
 export function favouritesHeading(n) {

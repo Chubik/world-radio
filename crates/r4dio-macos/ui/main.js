@@ -1,18 +1,26 @@
 import { activeSection, filterSummary } from "./labels.js";
 import { mountAccount } from "./views/account.js";
 import { mountFavourites } from "./views/favourites.js";
+import { mountBlocked } from "./views/blocked.js";
+import { mountCountries } from "./views/countries.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
 
 const account = mountAccount(document.getElementById("account_host"));
 const favourites = mountFavourites(document.getElementById("pane_favourites"));
+// both filter sections change the counts the sidebar shows, so they say when
+// they did rather than leaving it stale until the window is reopened.
+const blocked = mountBlocked(document.getElementById("pane_blocked"), loadFilterSummary);
+const countries = mountCountries(document.getElementById("pane_countries"), loadFilterSummary);
 
 // the window reads on demand rather than on a timer: favourites only change when
 // the user changes them, and sign_in holds the backend mutex across a blocking
 // http sync, so a poll would stall the whole window for those seconds.
 const REFRESH = {
   favourites: () => favourites.refresh(),
+  blocked: () => blocked.refresh(),
+  countries: () => countries.refresh(),
   sync: () => account.refresh(),
 };
 
