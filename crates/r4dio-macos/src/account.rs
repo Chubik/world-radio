@@ -23,16 +23,31 @@ pub fn mask_key(key: &str) -> String {
         return String::new();
     }
     let parts: Vec<&str> = trimmed.split('-').collect();
-    if parts.len() < 4 {
+    if parts.len() >= 4 {
+        return format!(
+            "{}-{}-{MASK}-{}",
+            parts[0],
+            parts[1],
+            parts[parts.len() - 1]
+        );
+    }
+    // real keys are one long run, not the segmented shape the mockup drew. showing
+    // both ends tells two accounts apart; the body stays far too short to rebuild.
+    // this mirrors maskKey in ui/labels.js — the two must agree or the tray and
+    // the window would disagree about the same account.
+    let body: String = parts[1..].join("-");
+    if body.chars().count() <= EDGE * 2 {
         return format!("{}-{MASK}", parts[0]);
     }
-    format!(
-        "{}-{}-{MASK}-{}",
-        parts[0],
-        parts[1],
-        parts[parts.len() - 1]
-    )
+    let head: String = body.chars().take(EDGE).collect();
+    let tail: String = body
+        .chars()
+        .skip(body.chars().count() - EDGE)
+        .collect::<String>();
+    format!("{}-{head}{MASK}{tail}", parts[0])
 }
+
+const EDGE: usize = 4;
 
 fn client() -> radio_core::sync::SyncClient {
     radio_core::sync::SyncClient::new(SERVER)
@@ -139,9 +154,20 @@ mod tests {
     }
 
     #[test]
-    fn unsegmented_key_is_masked_whole() {
+    fn unsegmented_key_shows_both_ends() {
         // the server issues one lowercase run, which is the shape that matters most
-        assert_eq!(mask_key("r4-abc123def"), "r4-····");
+        assert_eq!(mask_key("r4-abc123def"), "r4-abc1····3def");
+        // and it must agree with maskKey in ui/labels.js, or the tray menu and the
+        // account section would print two different things for one account.
+        assert_eq!(
+            mask_key("r4-tutgsmisaqwertyuiopasdfghjklzxcvbnmqwertyuiopasdfg"),
+            "r4-tutg····sdfg"
+        );
+    }
+
+    #[test]
+    fn an_unsegmented_mask_never_carries_the_middle() {
+        assert!(!mask_key("r4-abcSECRETMIDdef").contains("SECRETMID"));
     }
 
     #[test]
@@ -153,19 +179,22 @@ mod tests {
     }
 
     #[test]
-    fn mask_of_a_real_server_key_contains_no_part_of_it() {
-        // the server issues one opaque lowercase run; the masked form must not
-        // carry any run of it long enough to be worth guessing from.
+    fn mask_of_a_real_server_key_keeps_only_its_ends() {
+        // the ends are deliberate — they are what tells two accounts apart. the
+        // middle is the part worth guessing from, so no chunk of it may survive.
         let key = "r4-7k2p9qxm4df1secret";
         let masked = mask_key(key);
         let body = key.strip_prefix("r4-").unwrap();
         assert!(!masked.contains(body), "leaked whole: {masked}");
-        for len in 4..=body.len() {
-            for start in 0..=body.len() - len {
-                let chunk = &body[start..start + len];
+        let middle = &body[EDGE..body.len() - EDGE];
+        for len in 2..=middle.len() {
+            for start in 0..=middle.len() - len {
+                let chunk = &middle[start..start + len];
                 assert!(!masked.contains(chunk), "leaked chunk {chunk} in {masked}");
             }
         }
+        // and what is kept is exactly the two ends, nothing more.
+        assert_eq!(masked, "r4-7k2p····cret");
     }
 
     #[test]
