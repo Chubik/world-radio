@@ -211,6 +211,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Tick(now) => tick(model, now),
         Msg::MirrorPlay(evt) => mirror_play(model, evt),
         Msg::UpdateAvailable(rel) => {
+            model.notice = Some(format!(
+                "new version v{} available — press U to update",
+                rel.version
+            ));
             model.pending_update = Some(rel);
             vec![]
         }
@@ -1703,6 +1707,21 @@ mod tests {
         assert!(fx.is_empty());
         assert!(m.now.station_name.is_none());
         assert!(m.notice.is_none());
+    }
+
+    #[test]
+    fn update_available_sets_pending_and_notice() {
+        let mut m = model();
+        let rel = radio_core::update::Release {
+            version: "9.9.9".into(),
+            tarball_url: "http://localhost/r4dio.tar.gz".into(),
+            sha256: "abc".into(),
+        };
+        update(&mut m, Msg::UpdateAvailable(rel.clone()));
+        assert_eq!(m.pending_update, Some(rel));
+        let notice = m.notice.as_deref().unwrap();
+        assert!(notice.contains("9.9.9"));
+        assert!(notice.contains("press U"));
     }
 
     #[test]
