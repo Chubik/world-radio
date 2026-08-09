@@ -60,6 +60,8 @@ pub enum UpdateCheck {
 pub fn check_from(api_url: &str, releases_base: &str) -> anyhow::Result<UpdateCheck> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("world-radio-update/1")
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(5))
         .build()?;
     let releases: Vec<ApiRelease> = client
         .get(api_url)
@@ -129,6 +131,8 @@ pub fn fetch_latest() -> anyhow::Result<Option<Release>> {
 pub fn apply(release: &Release) -> anyhow::Result<()> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("world-radio-update/1")
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(None)
         .build()?;
     let bytes = client
         .get(&release.tarball_url)
