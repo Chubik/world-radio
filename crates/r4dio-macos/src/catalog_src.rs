@@ -18,7 +18,8 @@ pub fn all_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
 }
 
 pub fn last_played(catalog: &Catalog) -> anyhow::Result<Option<StationPick>> {
-    let Some(uuid) = catalog.history_ids().first() else {
+    let ids = catalog.history_ids();
+    let Some(uuid) = ids.first() else {
         return Ok(None);
     };
     let station = catalog.station_by_uuid(uuid)?;

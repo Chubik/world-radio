@@ -1,6 +1,13 @@
-use crate::catalog::favorites::{Favorites, History};
+use crate::catalog::favorites::{Favorites, History, Play};
 use crate::catalog::{Cache, Facets, Health, SearchQuery, Station};
 use crate::sync::{Pending, Set};
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 pub struct Catalog {
     cache: Cache,
@@ -206,18 +213,25 @@ impl Catalog {
         self.blacklist.set_from(ids);
     }
 
+    /// stamps the play with wall-clock now — this is the moment the station was
+    /// actually played, and the stamp is never rewritten afterwards, so another
+    /// device's older play still finds its own place in a merged history.
     pub fn record_history(&mut self, uuid: &str) {
-        self.history.record(uuid);
+        self.history.record(uuid, now_secs());
     }
 
-    pub fn history_ids(&self) -> &[String] {
+    pub fn history_ids(&self) -> Vec<String> {
         self.history.ids()
+    }
+
+    pub fn history_plays(&self) -> &[Play] {
+        self.history.plays()
     }
 
     /// applies a sync-merged history without going through `record`, which
     /// assumes a single fresh play rather than an already-ordered union.
-    pub fn apply_synced_history(&mut self, ids: Vec<String>) {
-        self.history.set_from(ids);
+    pub fn apply_synced_history(&mut self, plays: Vec<Play>) {
+        self.history.set_from(plays);
     }
 
     pub fn load(

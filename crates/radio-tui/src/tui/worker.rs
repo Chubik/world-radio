@@ -1,7 +1,7 @@
 use crate::tui::message::Msg;
 use crate::tui::model::{RowState, StationRow};
-use radio_core::catalog::{api, Catalog, SearchQuery, Station};
-use radio_core::sync::{HistoryRecord, Lww};
+use radio_core::catalog::{api, Catalog, Play, SearchQuery, Station};
+use radio_core::sync::{HistoryRecord, Lww, ProfileChange};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -309,7 +309,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         shuffle_filter: profile_lww_filter(&profile),
         scope: profile_lww_string(&profile.scope, profile.scope_at),
         theme: profile_lww_string(&profile.theme, profile.theme_at),
-        history: local_history_records(catalog.history_ids()),
+        history: local_history_records(catalog.history_plays()),
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
@@ -332,8 +332,8 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let filter = remote_lww_filter(&merged.shuffle_filter);
     let scope = remote_lww_string(&merged.scope);
     let theme = remote_lww_string(&merged.theme);
-    let profile_changed = profile.apply_newer(filter, scope, theme);
-    if profile_changed {
+    let changed = profile.apply_newer(filter, scope, theme);
+    if changed.any() {
         if let Err(e) = profile.save(&paths.profile) {
             crate::log_warn!("worker: failed to save profile: {e}");
         }
@@ -344,12 +344,8 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
-    if profile_changed {
-        let _ = msg_tx.send(Msg::ProfileSynced {
-            countries: Some(profile.countries.clone()),
-            scope: Some(profile.scope.clone()),
-            theme: Some(profile.theme.clone()),
-        });
+    if changed.any() {
+        let _ = msg_tx.send(profile_synced_msg(&profile, changed));
     }
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
@@ -358,6 +354,17 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             merged.blocked.len(),
             merged.excluded_countries.len()
         )));
+    }
+}
+
+// only the fields the merge actually moved are sent: reporting an unchanged
+// scope would reset the user's current browse scope on the receiving side.
+fn profile_synced_msg(profile: &radio_core::sync::Profile, changed: ProfileChange) -> Msg {
+    Msg::ProfileSynced {
+        profile: profile.clone(),
+        countries: changed.countries.then(|| profile.countries.clone()),
+        scope: changed.scope.then(|| profile.scope.clone()),
+        theme: changed.theme.then(|| profile.theme.clone()),
     }
 }
 
@@ -397,34 +404,31 @@ fn remote_lww_string(lww: &Option<Lww>) -> Option<(String, i64)> {
     Some((value, lww.at))
 }
 
-// synthesizes descending timestamps from the file's most-recent-first order,
-// since the local history file only ever stored station ids, never play times.
-fn local_history_records(ids: &[String]) -> Vec<HistoryRecord> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    ids.iter()
-        .enumerate()
-        .map(|(i, id)| HistoryRecord {
-            id: id.clone(),
-            at: now - i as i64,
+// each play carries the time it actually happened, captured when the station
+// was played and never rewritten — re-stamping here would make every local
+// entry outrank every remote one and pin them all at the top of the cap.
+fn local_history_records(plays: &[Play]) -> Vec<HistoryRecord> {
+    plays
+        .iter()
+        .map(|p| HistoryRecord {
+            id: p.id.clone(),
+            at: p.at,
             gone: false,
         })
         .collect()
 }
 
 // merges the server's history back into the local file: union by uuid, newest
-// `at` wins — the same rule the server itself uses to merge two devices. the
-// caller persists the result via the normal save-state path.
+// `at` wins, capped at HISTORY_CAP — the same rule the server itself uses to
+// merge two devices. the caller persists the result via the normal save path.
 fn merge_remote_history(catalog: &mut Catalog, remote: &[HistoryRecord]) {
     if remote.is_empty() {
         return;
     }
-    let local_at = local_history_records(catalog.history_ids());
+    let local = local_history_records(catalog.history_plays());
     let mut by_id: std::collections::HashMap<&str, &HistoryRecord> =
         std::collections::HashMap::new();
-    for r in local_at.iter().chain(remote.iter()) {
+    for r in local.iter().chain(remote.iter()) {
         match by_id.get(r.id.as_str()) {
             Some(have) if have.at >= r.at => {}
             _ => {
@@ -434,7 +438,16 @@ fn merge_remote_history(catalog: &mut Catalog, remote: &[HistoryRecord]) {
     }
     let mut merged: Vec<&HistoryRecord> = by_id.into_values().filter(|r| !r.gone).collect();
     merged.sort_by_key(|r| std::cmp::Reverse(r.at));
-    catalog.apply_synced_history(merged.into_iter().map(|r| r.id.clone()).collect());
+    merged.truncate(radio_core::catalog::favorites::HISTORY_CAP);
+    catalog.apply_synced_history(
+        merged
+            .into_iter()
+            .map(|r| Play {
+                id: r.id.clone(),
+                at: r.at,
+            })
+            .collect(),
+    );
 }
 
 fn matches_filters(row: &StationRow, f: &crate::tui::model::BrowseFilters) -> bool {
@@ -476,7 +489,7 @@ fn handle_search(
                 filters,
             )),
             StatusFilter::Recent => Msg::SearchResults(narrow(
-                resolve(catalog, catalog.history_ids(), false),
+                resolve(catalog, &catalog.history_ids(), false),
                 filters,
             )),
             StatusFilter::Blocked => Msg::SearchResults(narrow(
@@ -905,6 +918,121 @@ mod tests {
         let (others, last) = coalesce(vec![WorkerReq::SaveState, WorkerReq::LoadFacets]);
         assert_eq!(others.len(), 2);
         assert!(last.is_none());
+    }
+
+    #[test]
+    fn local_history_records_keep_the_recorded_play_time() {
+        // the defect: re-stamping every local id at sync time made all of them
+        // outrank every remote play, so a station played on another device
+        // could never reach this one.
+        let plays = vec![
+            Play {
+                id: "u1".into(),
+                at: 1_700_000_000,
+            },
+            Play {
+                id: "u2".into(),
+                at: 1_600_000_000,
+            },
+        ];
+        let records = local_history_records(&plays);
+        assert_eq!(records[0].at, 1_700_000_000);
+        assert_eq!(records[1].at, 1_600_000_000);
+    }
+
+    #[test]
+    fn local_history_records_are_stable_across_two_syncs() {
+        let plays = vec![Play {
+            id: "u1".into(),
+            at: 1_700_000_000,
+        }];
+        assert_eq!(local_history_records(&plays), local_history_records(&plays));
+    }
+
+    fn catalog_with_history(plays: Vec<Play>) -> Catalog {
+        use radio_core::catalog::{Cache, Health};
+        let mut cat = Catalog::new(Cache::open_in_memory().unwrap(), Health::new());
+        cat.apply_synced_history(plays);
+        cat
+    }
+
+    #[test]
+    fn a_newer_remote_play_outranks_an_older_local_one() {
+        // the defect: local ids were re-stamped to `now` at merge time, so a
+        // station played on another device could never rank above them.
+        let mut cat = catalog_with_history(vec![Play {
+            id: "local".into(),
+            at: 1_000,
+        }]);
+        merge_remote_history(
+            &mut cat,
+            &[HistoryRecord {
+                id: "remote".into(),
+                at: 2_000,
+                gone: false,
+            }],
+        );
+        assert_eq!(
+            cat.history_ids(),
+            vec!["remote".to_string(), "local".to_string()]
+        );
+        assert_eq!(cat.history_plays()[1].at, 1_000);
+    }
+
+    #[test]
+    fn merged_history_keeps_two_hundred_entries() {
+        let mut cat = catalog_with_history(vec![]);
+        let remote: Vec<HistoryRecord> = (0..300)
+            .map(|i| HistoryRecord {
+                id: format!("u{i}"),
+                at: 1_000_000 - i,
+                gone: false,
+            })
+            .collect();
+        merge_remote_history(&mut cat, &remote);
+        assert_eq!(cat.history_ids().len(), 200);
+    }
+
+    #[test]
+    fn profile_synced_msg_reports_only_the_field_that_moved() {
+        // sending an unchanged scope resets the receiving side's browse scope.
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(vec!["UA".into()], 100);
+        p.set_scope("FAVS", 100);
+        p.set_theme("nord", 200);
+        let changed = ProfileChange {
+            theme: true,
+            ..Default::default()
+        };
+        match profile_synced_msg(&p, changed) {
+            Msg::ProfileSynced {
+                countries,
+                scope,
+                theme,
+                ..
+            } => {
+                assert_eq!(countries, None);
+                assert_eq!(scope, None);
+                assert_eq!(theme, Some("nord".to_string()));
+            }
+            _ => panic!("expected ProfileSynced"),
+        }
+    }
+
+    #[test]
+    fn profile_synced_msg_carries_the_whole_profile_it_just_saved() {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(vec!["PL".into()], 300);
+        match profile_synced_msg(
+            &p,
+            ProfileChange {
+                countries: true,
+                ..Default::default()
+            },
+        ) {
+            Msg::ProfileSynced { profile, .. } => assert_eq!(profile, p),
+            _ => panic!("expected ProfileSynced"),
+        }
     }
 
     #[test]
