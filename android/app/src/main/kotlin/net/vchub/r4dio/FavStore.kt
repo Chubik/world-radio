@@ -79,6 +79,7 @@ class FavStore(context: Context) {
     private val keyCached = stringPreferencesKey("cached_favs")
     private val keySyncKey = stringPreferencesKey("sync_key")
     private val keyBlocked = stringSetPreferencesKey("blocked_uuids")
+    private val keyHiddenDead = stringSetPreferencesKey("hidden_dead")
     private val keyExcludedCountries = stringSetPreferencesKey("excluded_countries")
     private val keyDeviceId = stringPreferencesKey("device_id")
     private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
@@ -172,6 +173,28 @@ class FavStore(context: Context) {
     }
 
     suspend fun currentBlocked(): Set<String> = store.data.first()[keyBlocked] ?: emptySet()
+
+    // stream health is local by design: a station dead on this device's network
+    // may be fine elsewhere, so hidden_dead is never synced and never backed up.
+    suspend fun currentHiddenDead(): Set<String> = store.data.first()[keyHiddenDead] ?: emptySet()
+
+    suspend fun hideDead(uuid: String) {
+        store.edit { prefs ->
+            prefs[keyHiddenDead] = (prefs[keyHiddenDead] ?: emptySet()) + uuid
+        }
+    }
+
+    suspend fun unhideDead(uuid: String) {
+        store.edit { prefs ->
+            prefs[keyHiddenDead] = (prefs[keyHiddenDead] ?: emptySet()) - uuid
+        }
+    }
+
+    suspend fun pruneHiddenDead(keep: Set<String>) {
+        store.edit { prefs ->
+            prefs[keyHiddenDead] = pruneHidden(prefs[keyHiddenDead] ?: emptySet(), keep)
+        }
+    }
 
     val excludedCountries: Flow<Set<String>> =
         store.data.map { it[keyExcludedCountries] ?: emptySet() }
