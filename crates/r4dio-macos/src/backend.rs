@@ -360,6 +360,7 @@ impl Backend {
             blocked: self.catalog.blacklist_ids().to_vec(),
             excluded_countries: self.catalog.excluded_country_ids().to_vec(),
             changed: self.catalog.pending.clone(),
+            ..Default::default()
         };
         let client = radio_core::sync::SyncClient::new("https://r4dio.net");
         let merged = client.push(&key, &local)?;

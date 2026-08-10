@@ -2,6 +2,7 @@ use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
     BrowseFocus, BrowseState, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
+use crate::tui::theme::Theme;
 use radio_audio::{FailureKind, Status};
 use std::time::{Duration, Instant};
 
@@ -185,6 +186,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.browse.pending_online_search = Some(Instant::now());
             vec![]
         }
+        Msg::ProfileSynced {
+            countries,
+            scope,
+            theme,
+        } => apply_profile_synced(model, countries, scope, theme),
         Msg::RecheckSelected => recheck_selected(model),
         Msg::AudioStatus(s) => audio_status(model, s),
         Msg::FocusToggle => focus_toggle(model),
@@ -501,7 +507,11 @@ fn capture_key(model: &mut Model, chord: crate::tui::keybind::KeyChord) {
 
 fn settings_toggle(model: &mut Model) -> Vec<Effect> {
     match model.settings_cursor {
-        SETTINGS_THEME_ROW => model.theme = model.theme.next(),
+        SETTINGS_THEME_ROW => {
+            model.theme = model.theme.next();
+            model.profile.set_theme(model.theme.slug(), now_secs());
+            return vec![Effect::SaveProfile(model.profile.clone())];
+        }
         SETTINGS_CROSSFADE_ROW => {
             model.crossfade = !model.crossfade;
             return vec![Effect::SetCrossfade(model.crossfade)];
@@ -647,9 +657,20 @@ fn filter_apply(model: &mut Model) -> Vec<Effect> {
         apply_option(model, group, option);
         model.browse.pending_online_search = Some(Instant::now());
         let q = model.browse.filters.to_query(&model.browse.query);
-        return vec![Effect::Search(q, model.browse.filters.clone())];
+        let mut effects = vec![Effect::Search(q, model.browse.filters.clone())];
+        if group == 0 {
+            effects.push(Effect::SaveProfile(model.profile.clone()));
+        }
+        return effects;
     }
     vec![]
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
@@ -675,6 +696,45 @@ fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
     effects.push(Effect::Search(q, model.browse.filters.clone()));
+    model
+        .profile
+        .set_countries(model.browse.filters.countries.clone(), now_secs());
+    effects.push(Effect::SaveProfile(model.profile.clone()));
+    effects
+}
+
+/// the synced scope only distinguishes "everything" from "favourites only" —
+/// the other `StatusFilter` variants (recent/blocked/dead) are local-only
+/// browsing states, not something another device should be pushed into.
+fn status_filter_to_scope(status: StatusFilter) -> &'static str {
+    match status {
+        StatusFilter::Favorites => "FAVS",
+        _ => "ALL",
+    }
+}
+
+fn apply_profile_synced(
+    model: &mut Model,
+    countries: Option<Vec<String>>,
+    scope: Option<String>,
+    theme: Option<String>,
+) -> Vec<Effect> {
+    let mut effects = vec![];
+    if let Some(countries) = countries {
+        model.browse.filters.countries = countries;
+        model.browse.pending_online_search = Some(Instant::now());
+        let q = model.browse.filters.to_query(&model.browse.query);
+        effects.push(Effect::Search(q, model.browse.filters.clone()));
+    }
+    if let Some(scope) = scope {
+        model.browse.filters.status = match scope.as_str() {
+            "FAVS" => StatusFilter::Favorites,
+            _ => StatusFilter::All,
+        };
+    }
+    if let Some(theme) = theme {
+        model.theme = Theme::from_slug(&theme);
+    }
     effects
 }
 
@@ -687,6 +747,8 @@ fn apply_option(model: &mut Model, group: usize, option: usize) {
             4 => StatusFilter::Dead,
             _ => StatusFilter::All,
         };
+        let scope = status_filter_to_scope(model.browse.filters.status);
+        model.profile.set_scope(scope, now_secs());
         return;
     }
     if option == 0 {
@@ -1115,9 +1177,9 @@ mod tests {
         m.browse.facets.countries = vec![("GB".into(), 47)];
         let fx = update(&mut m, Msg::FilterApply);
         assert_eq!(m.browse.filters.countries, vec!["GB".to_string()]);
-        assert!(
-            matches!(fx.as_slice(), [Effect::Search(q, _)] if q.countrycode.as_deref() == Some("GB"))
-        );
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::Search(q, _) if q.countrycode.as_deref() == Some("GB"))));
         assert!(m.browse.pending_online_search.is_some());
     }
 
@@ -1884,6 +1946,75 @@ mod tests {
         assert!(m.browse.pending_online_search.is_some());
     }
 
+    #[test]
+    fn profile_synced_applies_countries_scope_and_theme_to_the_model() {
+        let mut m = model();
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                countries: Some(vec!["PL".into()]),
+                scope: Some("FAVS".into()),
+                theme: Some("nord".into()),
+            },
+        );
+        assert_eq!(m.browse.filters.countries, vec!["PL".to_string()]);
+        assert_eq!(m.browse.filters.status, StatusFilter::Favorites);
+        assert_eq!(m.theme, crate::tui::theme::Theme::Nord);
+        assert!(fx.iter().any(|e| matches!(e, Effect::Search(_, _))));
+    }
+
+    #[test]
+    fn profile_synced_with_none_fields_leaves_the_model_untouched() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                countries: None,
+                scope: None,
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.countries, vec!["UA".to_string()]);
+        assert!(fx.is_empty());
+    }
+
+    #[test]
+    fn cycle_country_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        m.browse.facets.countries = vec![("GB".into(), 47)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.countries, vec!["GB".to_string()]);
+        assert!(m.profile.countries_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn status_scope_change_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        m.browse.focus = BrowseFocus::Filters {
+            group: 0,
+            option: 1,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.scope, "FAVS");
+        assert!(m.profile.scope_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn theme_change_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        let fx = update(&mut m, Msg::SettingsToggle);
+        assert_eq!(m.profile.theme, m.theme.slug());
+        assert!(m.profile.theme_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
     fn eff_kind(e: &Effect) -> &'static str {
         match e {
             Effect::Search(_, _) => "search",
@@ -1902,6 +2033,7 @@ mod tests {
             Effect::MarkSuccess(_) => "marksuccess",
             Effect::MirrorAnnounce { .. } => "mirrorannounce",
             Effect::SaveState => "savestate",
+            Effect::SaveProfile(_) => "saveprofile",
             Effect::Sync => "sync",
             Effect::SyncCreate => "synccreate",
             Effect::SyncLogout => "synclogout",

@@ -40,6 +40,11 @@ pub enum Msg {
     ToggleFavoriteSelected,
     BlacklistSelected,
     ExcludedCountriesChanged(Vec<String>),
+    ProfileSynced {
+        countries: Option<Vec<String>>,
+        scope: Option<String>,
+        theme: Option<String>,
+    },
     RecheckSelected,
     AudioStatus(Status),
     SearchResults(Vec<StationRow>),
@@ -64,9 +69,13 @@ pub enum Msg {
     UpdateFound(radio_core::update::Release),
     UpdateUpToDate,
     UpdateApplied(String),
-    CatalogSynced { count: usize },
+    CatalogSynced {
+        count: usize,
+    },
     CatalogSyncFailed,
-    QuickTopReady { count: usize },
+    QuickTopReady {
+        count: usize,
+    },
 }
 
 #[allow(dead_code)]
@@ -97,6 +106,7 @@ pub enum Effect {
         url: String,
     },
     SaveState,
+    SaveProfile(radio_core::sync::Profile),
     CheckUpdate,
     Update(radio_core::update::Release),
 }

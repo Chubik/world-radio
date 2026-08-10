@@ -1,6 +1,7 @@
 use crate::tui::message::Msg;
 use crate::tui::model::{RowState, StationRow};
 use radio_core::catalog::{api, Catalog, SearchQuery, Station};
+use radio_core::sync::{HistoryRecord, Lww};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -28,6 +29,7 @@ pub enum WorkerReq {
     },
     ResolveAndPlay(String),
     SaveState,
+    SaveProfile(radio_core::sync::Profile),
     SyncCatalog,
     QuickTop,
     PopularSeed,
@@ -47,6 +49,7 @@ pub struct WorkerPaths {
     pub blacklist: PathBuf,
     pub excluded: PathBuf,
     pub pending: PathBuf,
+    pub profile: PathBuf,
 }
 
 pub fn station_to_row(s: &Station, favorite: bool, hidden: bool) -> StationRow {
@@ -173,6 +176,11 @@ fn handle_req(
         }
         WorkerReq::ResolveAndPlay(uuid) => handle_resolve_and_play(catalog, &uuid, msg_tx),
         WorkerReq::SaveState => save_all(catalog, paths),
+        WorkerReq::SaveProfile(profile) => {
+            if let Err(e) = profile.save(&paths.profile) {
+                crate::log_warn!("worker: failed to save profile: {e}");
+            }
+        }
         WorkerReq::SyncCatalog => handle_sync_catalog(catalog, msg_tx),
         WorkerReq::QuickTop => handle_quick_top(catalog, paths, msg_tx),
         WorkerReq::PopularSeed => handle_popular_seed(catalog, msg_tx),
@@ -282,7 +290,7 @@ fn save_state_and_health(catalog: &Catalog, paths: &WorkerPaths) {
 }
 
 fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>, announce: bool) {
-    use radio_core::sync::{self, SyncClient, SyncData};
+    use radio_core::sync::{self, Profile, SyncClient, SyncData};
 
     let Some(key) = sync::load_key() else {
         if announce {
@@ -292,11 +300,16 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         }
         return;
     };
+    let profile = Profile::load(&paths.profile);
     let local = SyncData {
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
         excluded_countries: catalog.excluded_country_ids().to_vec(),
         changed: catalog.pending.clone(),
+        shuffle_filter: profile_lww_filter(&profile),
+        scope: profile_lww_string(&profile.scope, profile.scope_at),
+        theme: profile_lww_string(&profile.theme, profile.theme_at),
+        history: local_history_records(catalog.history_ids()),
     };
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
@@ -314,10 +327,30 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     catalog.apply_synced_favorites(merged.favs.clone());
     catalog.apply_synced_blacklist(merged.blocked.clone());
     catalog.apply_synced_excluded_countries(merged.excluded_countries.clone());
+
+    let mut profile = profile;
+    let filter = remote_lww_filter(&merged.shuffle_filter);
+    let scope = remote_lww_string(&merged.scope);
+    let theme = remote_lww_string(&merged.theme);
+    let profile_changed = profile.apply_newer(filter, scope, theme);
+    if profile_changed {
+        if let Err(e) = profile.save(&paths.profile) {
+            crate::log_warn!("worker: failed to save profile: {e}");
+        }
+    }
+    merge_remote_history(catalog, &merged.history);
+
     save_all_after_clear(catalog, paths, &local.changed);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
+    if profile_changed {
+        let _ = msg_tx.send(Msg::ProfileSynced {
+            countries: Some(profile.countries.clone()),
+            scope: Some(profile.scope.clone()),
+            theme: Some(profile.theme.clone()),
+        });
+    }
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
             "synced: {} favourites, {} blocked, {} excluded countries",
@@ -326,6 +359,82 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             merged.excluded_countries.len()
         )));
     }
+}
+
+fn profile_lww_filter(profile: &radio_core::sync::Profile) -> Option<Lww> {
+    if profile.countries_at == 0 {
+        return None;
+    }
+    Some(Lww {
+        value: serde_json::json!({ "countries": profile.countries }),
+        at: profile.countries_at,
+    })
+}
+
+fn profile_lww_string(value: &str, at: i64) -> Option<Lww> {
+    if at == 0 {
+        return None;
+    }
+    Some(Lww {
+        value: serde_json::Value::String(value.to_string()),
+        at,
+    })
+}
+
+fn remote_lww_filter(lww: &Option<Lww>) -> Option<(Vec<String>, i64)> {
+    let lww = lww.as_ref()?;
+    let countries = lww.value.get("countries")?.as_array()?;
+    let countries = countries
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    Some((countries, lww.at))
+}
+
+fn remote_lww_string(lww: &Option<Lww>) -> Option<(String, i64)> {
+    let lww = lww.as_ref()?;
+    let value = lww.value.as_str()?.to_string();
+    Some((value, lww.at))
+}
+
+// synthesizes descending timestamps from the file's most-recent-first order,
+// since the local history file only ever stored station ids, never play times.
+fn local_history_records(ids: &[String]) -> Vec<HistoryRecord> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    ids.iter()
+        .enumerate()
+        .map(|(i, id)| HistoryRecord {
+            id: id.clone(),
+            at: now - i as i64,
+            gone: false,
+        })
+        .collect()
+}
+
+// merges the server's history back into the local file: union by uuid, newest
+// `at` wins — the same rule the server itself uses to merge two devices. the
+// caller persists the result via the normal save-state path.
+fn merge_remote_history(catalog: &mut Catalog, remote: &[HistoryRecord]) {
+    if remote.is_empty() {
+        return;
+    }
+    let local_at = local_history_records(catalog.history_ids());
+    let mut by_id: std::collections::HashMap<&str, &HistoryRecord> =
+        std::collections::HashMap::new();
+    for r in local_at.iter().chain(remote.iter()) {
+        match by_id.get(r.id.as_str()) {
+            Some(have) if have.at >= r.at => {}
+            _ => {
+                by_id.insert(&r.id, r);
+            }
+        }
+    }
+    let mut merged: Vec<&HistoryRecord> = by_id.into_values().filter(|r| !r.gone).collect();
+    merged.sort_by_key(|r| std::cmp::Reverse(r.at));
+    catalog.apply_synced_history(merged.into_iter().map(|r| r.id.clone()).collect());
 }
 
 fn matches_filters(row: &StationRow, f: &crate::tui::model::BrowseFilters) -> bool {

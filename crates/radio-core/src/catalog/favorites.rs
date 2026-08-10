@@ -90,6 +90,13 @@ impl History {
         self.ids.truncate(HISTORY_CAP);
     }
 
+    /// replaces the contents outright, most-recent-first — used to apply a
+    /// sync merge, which already decided the order.
+    pub fn set_from(&mut self, ids: Vec<String>) {
+        self.ids = ids;
+        self.ids.truncate(HISTORY_CAP);
+    }
+
     pub fn ids(&self) -> &[String] {
         &self.ids
     }

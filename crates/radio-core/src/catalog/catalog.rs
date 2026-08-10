@@ -214,6 +214,12 @@ impl Catalog {
         self.history.ids()
     }
 
+    /// applies a sync-merged history without going through `record`, which
+    /// assumes a single fresh play rather than an already-ordered union.
+    pub fn apply_synced_history(&mut self, ids: Vec<String>) {
+        self.history.set_from(ids);
+    }
+
     pub fn load(
         cache: Cache,
         health: Health,
