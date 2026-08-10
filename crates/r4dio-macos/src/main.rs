@@ -189,6 +189,7 @@ fn run(backend: backend::Backend) {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Mutex::new(backend))
         .manage(last_hide.clone())
         .setup(move |app| {
@@ -282,6 +283,22 @@ fn run(backend: backend::Backend) {
                         "favorite" => state.lock().unwrap().toggle_favorite(),
                         "open" => show_main(app, "favourites"),
                         "account" => show_main(app, "sync"),
+                        "update" => {
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let update = {
+                                    let pending =
+                                        app.state::<Mutex<Option<tauri_plugin_updater::Update>>>();
+                                    let guard = pending.lock().unwrap();
+                                    guard.clone()
+                                };
+                                let Some(update) = update else { return };
+                                match update.download_and_install(|_, _| {}, || {}).await {
+                                    Ok(()) => app.restart(),
+                                    Err(e) => eprintln!("update install failed: {e}"),
+                                }
+                            });
+                        }
                         "quit" => app.exit(0),
                         _ => {}
                     }
@@ -317,6 +334,36 @@ fn run(backend: backend::Backend) {
                     }
                 })
                 .build(app)?;
+
+            let update_item = MenuItem::with_id(app, "update", "", true, None::<&str>)?;
+            app.manage(Mutex::new(None::<tauri_plugin_updater::Update>));
+            {
+                use tauri_plugin_updater::UpdaterExt;
+                let handle = app.handle().clone();
+                let menu_handle = menu.clone();
+                let row = update_item.clone();
+                tauri::async_runtime::spawn(async move {
+                    let updater = match handle.updater() {
+                        Ok(u) => u,
+                        Err(e) => {
+                            eprintln!("update check unavailable: {e}");
+                            return;
+                        }
+                    };
+                    match updater.check().await {
+                        Ok(Some(update)) => {
+                            let _ = row.set_text(tray::update_label(&update.version));
+                            // insert above the final separator, next to the account row
+                            let _ = menu_handle.insert(&row, 8);
+                            let pending =
+                                handle.state::<Mutex<Option<tauri_plugin_updater::Update>>>();
+                            *pending.lock().unwrap() = Some(update);
+                        }
+                        Ok(None) => {}
+                        Err(e) => eprintln!("update check failed: {e}"),
+                    }
+                });
+            }
 
             // clicking anywhere else must dismiss the panel, or an always-on-top
             // window sits over everything until the icon is clicked again.
