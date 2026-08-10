@@ -157,6 +157,7 @@ fn run_sync() -> anyhow::Result<()> {
         blocked: blocked.ids().to_vec(),
         excluded_countries: excluded.ids().to_vec(),
         changed: pending,
+        ..Default::default()
     };
     let merged = client().push(&key, &local)?;
     // remove exactly what we just sent; keep anything another surface wrote
@@ -190,6 +191,7 @@ fn use_key(key: &str) -> anyhow::Result<()> {
         blocked: Favorites::load(&blacklist_path()).ids().to_vec(),
         excluded_countries: Favorites::load(&excluded_path()).ids().to_vec(),
         changed: pending,
+        ..Default::default()
     };
     let stored = client().push(key, &local)?;
     // remove exactly what we just sent; keep anything another surface wrote

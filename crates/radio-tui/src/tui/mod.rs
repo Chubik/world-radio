@@ -86,6 +86,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         blacklist: data.join("blacklist.json"),
         excluded: data.join("excluded_countries.json"),
         pending: data.join("sync_pending.json"),
+        profile: data.join("profile.json"),
     };
     let worker_handle = worker::spawn(catalog, worker_paths, req_rx, msg_tx.clone());
 
@@ -127,6 +128,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.crossfade = config.crossfade;
     model.spectrum_style = config.spectrum_style;
     model.keymap = config.keybindings.clone();
+    model.profile = radio_core::sync::Profile::load(&data.join("profile.json"));
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
     }
@@ -397,6 +399,9 @@ fn run_effects(
             }
             Effect::SaveState => {
                 let _ = req_tx.send(WorkerReq::SaveState);
+            }
+            Effect::SaveProfile(profile) => {
+                let _ = req_tx.send(WorkerReq::SaveProfile(profile));
             }
             Effect::Sync => {
                 let _ = req_tx.send(WorkerReq::Sync);
