@@ -182,8 +182,9 @@ jobs:
         with:
           tag_name: v${{ needs.version.outputs.version }}
           name: r4dio v${{ needs.version.outputs.version }}
+          # a prerelease never resolves from releases/latest, which is where the
+          # macos updater reads its manifest — releases must be real releases.
           body_path: release-notes.md
-          prerelease: true
           files: |
             ${{ steps.pkg.outputs.apk }}
             SHA256SUMS-android
