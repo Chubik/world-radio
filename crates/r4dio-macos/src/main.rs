@@ -355,7 +355,8 @@ fn run(backend: backend::Backend) {
                             let _ = row.set_text(tray::update_label(&update.version));
                             // insert above the final separator, next to the account row
                             let _ = menu_handle.insert(&row, 8);
-                            let pending = handle.state::<Mutex<Option<tauri_plugin_updater::Update>>>();
+                            let pending =
+                                handle.state::<Mutex<Option<tauri_plugin_updater::Update>>>();
                             *pending.lock().unwrap() = Some(update);
                         }
                         Ok(None) => {}
