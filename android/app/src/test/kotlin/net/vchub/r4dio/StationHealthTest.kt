@@ -80,4 +80,18 @@ class StationHealthTest {
         val keep = setOf("dead1", "fav3", "alive4")
         assertEquals(setOf("dead1", "fav3"), pruneHidden(hidden, keep))
     }
+
+    @Test
+    fun hidden_uuids_unioned_into_blocked_never_get_picked() {
+        val cat = listOf(
+            Station("dead1", "Dead FM", "http://x/1", "UA", "MP3", 128),
+            Station("alive2", "Alive FM", "http://x/2", "UA", "MP3", 128),
+        )
+        val blocked = emptySet<String>()
+        val hidden = setOf("dead1")
+        repeat(20) {
+            val pick = pickForScope(Scope.ALL, cat, emptyList(), emptySet(), blocked + hidden)
+            assertEquals("alive2", pick?.uuid)
+        }
+    }
 }
