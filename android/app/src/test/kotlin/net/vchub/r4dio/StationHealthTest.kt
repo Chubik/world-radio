@@ -1,6 +1,7 @@
 package net.vchub.r4dio
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -71,5 +72,12 @@ class StationHealthTest {
         assertTrue(t.onError(blame = true))
         assertTrue(t.onError(blame = true))
         assertFalse(t.onError(blame = true))
+    }
+
+    @Test
+    fun prune_keeps_only_uuids_still_reachable() {
+        val hidden = setOf("dead1", "gone2", "fav3")
+        val keep = setOf("dead1", "fav3", "alive4")
+        assertEquals(setOf("dead1", "fav3"), pruneHidden(hidden, keep))
     }
 }

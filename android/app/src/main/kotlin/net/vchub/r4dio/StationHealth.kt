@@ -14,6 +14,8 @@ fun shouldBlame(errorCode: Int): Boolean =
         else -> false
     }
 
+fun pruneHidden(hidden: Set<String>, keep: Set<String>): Set<String> = hidden intersect keep
+
 class HealthTracker(private val budget: Int = 5) {
     private var blamesSinceSuccess = 0
 
