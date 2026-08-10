@@ -42,6 +42,10 @@ pub fn account_label(masked: &str) -> String {
     }
 }
 
+pub fn update_label(version: &str) -> String {
+    format!("Update to v{version}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +84,10 @@ mod tests {
     #[test]
     fn accelerator_is_the_combination_the_menu_advertises() {
         assert_eq!(SHUFFLE_ACCELERATOR, "Alt+Shift+R");
+    }
+
+    #[test]
+    fn update_label_names_the_version_it_installs() {
+        assert_eq!(update_label("1.17.0"), "Update to v1.17.0");
     }
 }
