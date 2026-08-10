@@ -84,6 +84,7 @@ class PlaybackService : MediaSessionService() {
     // network fetch instead of one each.
     private val refreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var current: Station? = null
+    private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
     private val artwork: ByteArray by lazy { crtArtworkPng() }
@@ -181,11 +182,19 @@ class PlaybackService : MediaSessionService() {
         val player = ExoPlayer.Builder(this).build()
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) {
+                    health.onSuccess()
+                    current?.let { st -> scope.launch { favStore.unhideDead(st.uuid) } }
+                }
                 refreshWidget(current, isPlaying)
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                Log.w("r4dio", "playback error: ${error.errorCodeName}, skipping station")
+                val blame = shouldBlame(error.errorCode)
+                Log.w("r4dio", "playback error: ${error.errorCodeName}, blame=$blame, skipping station")
+                if (health.onError(blame)) {
+                    current?.let { st -> scope.launch { favStore.hideDead(st.uuid) } }
+                }
                 shuffle()
             }
         })
@@ -237,6 +246,7 @@ class PlaybackService : MediaSessionService() {
             // was written, so a station blocked since then is still in it — read the
             // current set and filter on every read path, not only at fetch time.
             val blocked = runBlocking { favStore.currentBlocked() }
+            val hidden = runBlocking { favStore.currentHiddenDead() }
             val cached = catalogCache.read()
             when (cached.isEmpty()) {
                 true -> {
@@ -248,7 +258,7 @@ class PlaybackService : MediaSessionService() {
                         // catalogAttempted — without this the screen can stay on
                         // whatever syncNow() published first, permanently stale.
                         null -> scope.launch { refreshCustomLayout() }
-                        else -> startFrom(fetched, userExcluded, blocked)
+                        else -> startFrom(fetched, userExcluded, blocked + hidden)
                     }
                 }
                 false -> {
@@ -258,7 +268,7 @@ class PlaybackService : MediaSessionService() {
                     // Main, not run inline — is guaranteed to observe true, not a stale
                     // false read from before this attempt resolved.
                     catalogAttempted = true
-                    startFrom(cached, userExcluded, blocked)
+                    startFrom(cached, userExcluded, blocked + hidden)
                     refreshIfStale(userExcluded, blocked)
                 }
             }
@@ -291,6 +301,11 @@ class PlaybackService : MediaSessionService() {
             return fetched
         }
         runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+        runBlocking {
+            favStore.pruneHiddenDead(
+                fetched.map { it.uuid }.toSet() + favStore.currentFavUuids(),
+            )
+        }
         Log.i("r4dio", "fetched ${fetched.size} stations")
         return fetched
     }
@@ -499,8 +514,11 @@ class PlaybackService : MediaSessionService() {
             val blocked = withContext(Dispatchers.IO) {
                 runCatching { withTimeout(3000) { favStore.currentBlocked() } }.getOrDefault(emptySet<String>())
             }
+            val hidden = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentHiddenDead() } }.getOrDefault(emptySet<String>())
+            }
             val cat = withReadyCatalog()
-            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked)
+            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden)
             if (picked.usedFallback) {
                 Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
             }
