@@ -41,8 +41,15 @@
     "active": true,
     "targets": ["app", "dmg"],
     "icon": ["icons/icon.icns", "icons/icon.png"],
+    "createUpdaterArtifacts": true,
     "macOS": {
       "infoPlist": "Info.plist"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIyNUM0OEIzQ0QxNUZENTkKUldSWi9SWE5zMGhjc3NKYTcyZk1ta1lnOXhLc3VoSlR5UlIwaEVOV1hmLzVnc2h6T2ZCUkI3dm4K",
+      "endpoints": ["https://github.com/Chubik/world-radio/releases/latest/download/latest.json"]
     }
   }
 }
