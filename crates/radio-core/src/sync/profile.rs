@@ -71,37 +71,52 @@ impl Profile {
     }
 
     /// takes each field from `remote` when its stamp is newer than what's
-    /// stored locally. returns true when anything changed, so the caller
-    /// knows to re-render.
+    /// stored locally. reports per field, so the caller only pushes into the
+    /// ui what actually moved — telling it "scope changed" when only the theme
+    /// did would reset the user's current browse scope.
     pub fn apply_newer(
         &mut self,
         filter: Option<(Vec<String>, i64)>,
         scope: Option<(String, i64)>,
         theme: Option<(String, i64)>,
-    ) -> bool {
-        let mut changed = false;
+    ) -> ProfileChange {
+        let mut changed = ProfileChange::default();
         if let Some((countries, at)) = filter {
             if at > self.countries_at {
                 self.countries = countries;
                 self.countries_at = at;
-                changed = true;
+                changed.countries = true;
             }
         }
         if let Some((scope, at)) = scope {
             if at > self.scope_at {
                 self.scope = scope;
                 self.scope_at = at;
-                changed = true;
+                changed.scope = true;
             }
         }
         if let Some((theme, at)) = theme {
             if at > self.theme_at {
                 self.theme = theme;
                 self.theme_at = at;
-                changed = true;
+                changed.theme = true;
             }
         }
         changed
+    }
+}
+
+/// which profile fields a sync actually moved.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileChange {
+    pub countries: bool,
+    pub scope: bool,
+    pub theme: bool,
+}
+
+impl ProfileChange {
+    pub fn any(&self) -> bool {
+        self.countries || self.scope || self.theme
     }
 }
 
@@ -165,7 +180,8 @@ mod tests {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 10);
         let changed = p.apply_newer(Some((vec!["PL".into()], 20)), None, None);
-        assert!(changed);
+        assert!(changed.any());
+        assert!(changed.countries);
         assert_eq!(p.countries, vec!["PL".to_string()]);
         assert_eq!(p.countries_at, 20);
     }
@@ -175,7 +191,7 @@ mod tests {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 20);
         let changed = p.apply_newer(Some((vec!["PL".into()], 10)), None, None);
-        assert!(!changed);
+        assert!(!changed.any());
         assert_eq!(p.countries, vec!["UA".to_string()]);
         assert_eq!(p.countries_at, 20);
     }
@@ -186,7 +202,9 @@ mod tests {
         p.set_scope("ALL", 10);
         p.set_theme("amber-crt", 10);
         let changed = p.apply_newer(None, Some(("FAVS".into(), 20)), Some(("nord".into(), 20)));
-        assert!(changed);
+        assert!(changed.scope);
+        assert!(changed.theme);
+        assert!(!changed.countries);
         assert_eq!(p.scope, "FAVS");
         assert_eq!(p.scope_at, 20);
         assert_eq!(p.theme, "nord");
@@ -204,14 +222,32 @@ mod tests {
             Some(("FAVS".into(), 5)),
             Some(("nord".into(), 5)),
         );
-        assert!(!changed);
+        assert!(!changed.any());
     }
 
     #[test]
     fn apply_newer_with_all_none_is_a_no_op() {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 20);
-        assert!(!p.apply_newer(None, None, None));
+        assert!(!p.apply_newer(None, None, None).any());
+    }
+
+    #[test]
+    fn apply_newer_reports_only_the_field_that_moved() {
+        // a newer remote theme must not be reported as a scope change: the
+        // caller would reset the user's current browse scope from it.
+        let mut p = Profile::default();
+        p.set_countries(vec!["UA".into()], 100);
+        p.set_scope("FAVS", 100);
+        p.set_theme("amber-crt", 100);
+        let changed = p.apply_newer(
+            Some((vec!["UA".into()], 50)),
+            Some(("FAVS".into(), 50)),
+            Some(("nord".into(), 200)),
+        );
+        assert!(changed.theme);
+        assert!(!changed.scope);
+        assert!(!changed.countries);
     }
 
     #[test]

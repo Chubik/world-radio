@@ -6,7 +6,7 @@ mod profile;
 pub use client::{HistoryRecord, Lww, SyncClient, SyncData};
 pub use key::is_valid_format;
 pub use pending::{Change, Pending, Set};
-pub use profile::Profile;
+pub use profile::{Profile, ProfileChange};
 
 use std::path::{Path, PathBuf};
 

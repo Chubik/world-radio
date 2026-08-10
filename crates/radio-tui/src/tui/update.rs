@@ -187,10 +187,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             vec![]
         }
         Msg::ProfileSynced {
+            profile,
             countries,
             scope,
             theme,
-        } => apply_profile_synced(model, countries, scope, theme),
+        } => apply_profile_synced(model, profile, countries, scope, theme),
         Msg::RecheckSelected => recheck_selected(model),
         Msg::AudioStatus(s) => audio_status(model, s),
         Msg::FocusToggle => focus_toggle(model),
@@ -657,11 +658,10 @@ fn filter_apply(model: &mut Model) -> Vec<Effect> {
         apply_option(model, group, option);
         model.browse.pending_online_search = Some(Instant::now());
         let q = model.browse.filters.to_query(&model.browse.query);
-        let mut effects = vec![Effect::Search(q, model.browse.filters.clone())];
-        if group == 0 {
-            effects.push(Effect::SaveProfile(model.profile.clone()));
-        }
-        return effects;
+        return vec![
+            Effect::Search(q, model.browse.filters.clone()),
+            Effect::SaveProfile(model.profile.clone()),
+        ];
     }
     vec![]
 }
@@ -696,9 +696,7 @@ fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
     effects.push(Effect::Search(q, model.browse.filters.clone()));
-    model
-        .profile
-        .set_countries(model.browse.filters.countries.clone(), now_secs());
+    stamp_profile_from_filters(model);
     effects.push(Effect::SaveProfile(model.profile.clone()));
     effects
 }
@@ -715,10 +713,14 @@ fn status_filter_to_scope(status: StatusFilter) -> &'static str {
 
 fn apply_profile_synced(
     model: &mut Model,
+    profile: radio_core::sync::Profile,
     countries: Option<Vec<String>>,
     scope: Option<String>,
     theme: Option<String>,
 ) -> Vec<Effect> {
+    // adopt the merged profile wholesale, stamps included: a stale in-memory
+    // copy would make the very next user edit overwrite what just synced.
+    model.profile = profile;
     let mut effects = vec![];
     if let Some(countries) = countries {
         model.browse.filters.countries = countries;
@@ -738,7 +740,26 @@ fn apply_profile_synced(
     effects
 }
 
+/// the single stamp point for the two synced browse fields. every path that
+/// touches `filters.countries` or `filters.status` — set, toggle, clear —
+/// must go through it, or the change never reaches another device and a stale
+/// echo from the server puts the old value back.
+fn stamp_profile_from_filters(model: &mut Model) {
+    let now = now_secs();
+    model
+        .profile
+        .set_countries(model.browse.filters.countries.clone(), now);
+    model
+        .profile
+        .set_scope(status_filter_to_scope(model.browse.filters.status), now);
+}
+
 fn apply_option(model: &mut Model, group: usize, option: usize) {
+    mutate_option(model, group, option);
+    stamp_profile_from_filters(model);
+}
+
+fn mutate_option(model: &mut Model, group: usize, option: usize) {
     if group == 0 {
         model.browse.filters.status = match option {
             1 => StatusFilter::Favorites,
@@ -747,8 +768,6 @@ fn apply_option(model: &mut Model, group: usize, option: usize) {
             4 => StatusFilter::Dead,
             _ => StatusFilter::All,
         };
-        let scope = status_filter_to_scope(model.browse.filters.status);
-        model.profile.set_scope(scope, now_secs());
         return;
     }
     if option == 0 {
@@ -794,9 +813,13 @@ fn filter_clear(model: &mut Model, all: bool) -> Vec<Effect> {
             }
         }
     }
+    stamp_profile_from_filters(model);
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
-    vec![Effect::Search(q, model.browse.filters.clone())]
+    vec![
+        Effect::Search(q, model.browse.filters.clone()),
+        Effect::SaveProfile(model.profile.clone()),
+    ]
 }
 
 fn catalog_refresh_effect(browse: &BrowseState) -> Effect {
@@ -1265,6 +1288,53 @@ mod tests {
         m.browse.filters.bitrate_min = Some(128);
         update(&mut m, Msg::FilterClearAll);
         assert!(m.browse.filters.is_empty());
+    }
+
+    #[test]
+    fn clearing_the_country_group_stamps_and_saves_the_profile() {
+        // the defect: `c` cleared the filter in the ui but stamped nothing, so
+        // the next sync re-pushed the stale filter and the server echoed it back.
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 3,
+        };
+        let fx = update(&mut m, Msg::FilterClear);
+        assert!(m.profile.countries.is_empty());
+        assert!(m.profile.countries_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn clearing_every_filter_stamps_and_saves_the_profile() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.profile.set_scope("FAVS", 1_000);
+        let fx = update(&mut m, Msg::FilterClearAll);
+        assert!(m.profile.countries.is_empty());
+        assert_eq!(m.profile.scope, "ALL");
+        assert!(m.profile.countries_at > 1_000);
+        assert!(m.profile.scope_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn applying_option_zero_on_the_country_group_stamps_the_profile() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 0,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.profile.countries.is_empty());
+        assert!(m.profile.countries_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
     }
 
     #[test]
@@ -1946,12 +2016,21 @@ mod tests {
         assert!(m.browse.pending_online_search.is_some());
     }
 
+    fn synced_profile(countries: &[&str], at: i64) -> radio_core::sync::Profile {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(countries.iter().map(|c| c.to_string()).collect(), at);
+        p.set_scope("FAVS", at);
+        p.set_theme("nord", at);
+        p
+    }
+
     #[test]
     fn profile_synced_applies_countries_scope_and_theme_to_the_model() {
         let mut m = model();
         let fx = update(
             &mut m,
             Msg::ProfileSynced {
+                profile: synced_profile(&["PL"], 500),
                 countries: Some(vec!["PL".into()]),
                 scope: Some("FAVS".into()),
                 theme: Some("nord".into()),
@@ -1964,12 +2043,13 @@ mod tests {
     }
 
     #[test]
-    fn profile_synced_with_none_fields_leaves_the_model_untouched() {
+    fn profile_synced_with_none_fields_leaves_the_browse_state_untouched() {
         let mut m = model();
         m.browse.filters.countries = vec!["UA".into()];
         let fx = update(
             &mut m,
             Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
                 countries: None,
                 scope: None,
                 theme: None,
@@ -1977,6 +2057,35 @@ mod tests {
         );
         assert_eq!(m.browse.filters.countries, vec!["UA".to_string()]);
         assert!(fx.is_empty());
+    }
+
+    #[test]
+    fn profile_synced_adopts_the_synced_stamps_so_the_next_edit_does_not_revert_it() {
+        // the defect: the model kept a stale profile, so the very next filter
+        // edit stamped from stale data and overwrote what just synced.
+        let mut m = model();
+        let remote = synced_profile(&["PL"], 9_000);
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: remote.clone(),
+                countries: Some(vec!["PL".into()]),
+                scope: Some("FAVS".into()),
+                theme: Some("nord".into()),
+            },
+        );
+        assert_eq!(m.profile, remote);
+        assert_eq!(m.profile.countries_at, 9_000);
+        assert_eq!(m.profile.theme, "nord");
+
+        // an unrelated later edit (theme) must not roll the synced filter back
+        m.browse.focus = BrowseFocus::Filters {
+            group: 4,
+            option: 1,
+        };
+        update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.countries, vec!["PL".to_string()]);
+        assert_eq!(m.profile.scope, "FAVS");
     }
 
     #[test]
