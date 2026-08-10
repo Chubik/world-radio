@@ -63,6 +63,16 @@ No tombstones — clearing history is a local action and does not propagate (v1)
 - **Indicator:** until the Catalog/Filters screen exists, an active filter shows as a small
   pill on the home screen (pattern of the existing excluded-countries indicator): `filter: UA`.
 
+## Live propagation (added 2026-08-10, user requirement: "live відразу на всіх")
+
+Sync-on-occasion is not enough: a change made anywhere must land on every connected device
+within seconds. Mechanism: both clients already hold an SSE events connection to the server
+(mirror playback). When `Store::sync` changes an account (any field — sets or profile), the
+server emits a `profile_changed` event to that account's event stream; clients receiving it
+re-run a normal sync and apply the result through the exact same code path as a manual sync.
+No new state, no special-cased deltas — the event is only a doorbell. A device that was offline
+simply catches up on its next regular sync, as today.
+
 ## Out of scope
 
 Genre/bitrate in the filter (the JSON shape allows it later), history deletion sync, per-device

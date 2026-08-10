@@ -288,6 +288,23 @@ Implementation notes (verify each against the actual code, the line numbers move
 
 ---
 
+### Task 4: Live propagation — the doorbell event
+
+**Repos:** `sync` (emit) + `radio` CLI + Android (listen → re-sync).
+
+**Interfaces:**
+- Consumes: the existing per-account SSE events channel (mirror playback uses it today: server `src/mirror.rs`, CLI `radio_core::mirror::MirrorClient::events`, Android `MirrorClient`/`startMirrorListener`).
+- Produces: a new event type `{"type": "profile_changed"}` on the account's stream.
+
+Rules (explore the real event plumbing first — event shape, how mirror events are tagged and filtered):
+- Server: after a `/sync` that changed anything (compare merged vs stored before write, or simply always emit on `/sync` — choose ALWAYS-emit for simplicity; clients debounce), emit `profile_changed` to the account's stream. The emitting device also receives it — clients must tolerate their own echo (re-sync after own push is a harmless no-op).
+- CLI: the existing events listener thread, on `profile_changed`, sends the same message the manual sync path uses to trigger a sync — debounced to at most one queued re-sync at a time.
+- Android: same in `startMirrorListener`'s event handler — call the existing `syncNow()` (it is already idempotent), debounced.
+- Tests: server emits on sync (unit, following mirror emit tests if any); clients: event → one sync trigger, two rapid events → still one queued sync.
+- Commits: server `ring the doorbell when the account changes` (sync repo, NO push); radio `re-sync the moment the account changes anywhere`.
+
+---
+
 ## Verification after all tasks (controller, not subagents)
 
 1. Review each task, then: push `sync` main (deploys automatically; DB backup runs pre-migration) and verify `/health` + a real sync round-trip from the CLI afterwards.
