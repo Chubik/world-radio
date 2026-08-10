@@ -281,6 +281,9 @@ jobs:
       # the runner is apple silicon, so an untargeted build ships arm64 only and
       # will not launch on an intel mac — there is one macos asset for both.
       - name: build the bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: cd crates/r4dio-macos && cargo tauri build --target universal-apple-darwin
 
       - name: package
@@ -306,6 +309,22 @@ jobs:
           mv "$built_dmg" "$dmg"
           shasum -a 256 "$dmg" > "$dmg.sha"
           echo "dmg=$dmg" >> "$GITHUB_OUTPUT"
+          # updater artifacts: tauri emits a signed app.tar.gz when
+          # createUpdaterArtifacts is on; a release without them would strand
+          # every installed copy on its current version, so fail loudly.
+          built_upd="$(find target/universal-apple-darwin/release/bundle -name '*.app.tar.gz' | head -1)"
+          test -n "$built_upd" || { echo "no updater archive was built"; exit 1; }
+          test -f "$built_upd.sig" || { echo "updater archive is unsigned"; exit 1; }
+          upd="r4dio-${version}-macos-update.tar.gz"
+          mv "$built_upd" "$upd"
+          mv "$built_upd.sig" "$upd.sig"
+          url="https://github.com/Chubik/world-radio/releases/download/v${version}/${upd}"
+          jq -n --arg v "$version" --arg d "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg sig "$(cat "$upd.sig")" --arg url "$url" \
+                '{version:$v, pub_date:$d, platforms:{"darwin-aarch64":{signature:$sig,url:$url},"darwin-x86_64":{signature:$sig,url:$url}}}' \
+                > latest.json
+          jq -e '.version != "" and (.platforms["darwin-aarch64"].signature|length>0) and (.platforms["darwin-x86_64"].signature|length>0)' latest.json >/dev/null
+          echo "upd=$upd" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -316,6 +335,9 @@ jobs:
             ${{ steps.pkg.outputs.asset }}.sha
             ${{ steps.pkg.outputs.dmg }}
             ${{ steps.pkg.outputs.dmg }}.sha
+            ${{ steps.pkg.outputs.upd }}
+            ${{ steps.pkg.outputs.upd }}.sig
+            latest.json
 
   cli-release-publish:
     name: publish cli tarballs
@@ -354,6 +376,9 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.dmg
+            dist/*-update.tar.gz
+            dist/*-update.tar.gz.sig
+            dist/latest.json
             dist/SHA256SUMS
 
       - name: trigger ops deploy (site + stat + firebase)
