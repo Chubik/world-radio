@@ -100,19 +100,37 @@ fn print_key_qr(key: &str) {
     println!("key: {key}");
 }
 
-fn login() -> anyhow::Result<()> {
-    match sync::load_key() {
-        Some(key) => {
-            println!("already linked");
-            print_key_qr(&key);
-        }
-        None => {
-            let key = client().create_account()?;
-            sync::store_key(&key)?;
-            println!("account created and linked");
-            print_key_qr(&key);
-        }
+/// the key `login` should sync under: the one already stored, or a freshly
+/// created account. separated from the sync half so both branches are testable.
+fn login_key(client: &SyncClient) -> anyhow::Result<String> {
+    if let Some(key) = sync::load_key() {
+        println!("already linked");
+        return Ok(key);
     }
+    let key = client.create_account()?;
+    sync::store_key(&key)?;
+    println!("account created and linked");
+    Ok(key)
+}
+
+fn login() -> anyhow::Result<()> {
+    let client = client();
+    let key = login_key(&client)?;
+    print_key_qr(&key);
+    login_sync(&client, &key, &cli_paths())
+}
+
+/// both `login` branches end here. a first link must carry the profile in the
+/// same breath — without this the new device has nothing on disk until the user
+/// separately runs `sync run`, which is the defect this closes.
+fn login_sync(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::Result<()> {
+    let merged = push_and_apply(client, key, paths)?;
+    println!(
+        "synced: {} favourites, {} blocked, {} excluded countries",
+        merged.favs.len(),
+        merged.blocked.len(),
+        merged.excluded_countries.len()
+    );
     Ok(())
 }
 
@@ -351,6 +369,41 @@ mod tests {
             .create();
         push_and_apply(&SyncClient::new(server.url()), "r4-k", &paths).unwrap();
         assert_eq!(Profile::load(&paths.profile).scope, "favorites");
+    }
+
+    #[test]
+    fn login_pushes_the_local_profile_and_lands_the_merged_one_on_disk() {
+        // the defect: `sync login` created the account and returned, so a fresh
+        // machine had neither pushed nor pulled a profile until the user
+        // separately ran `sync run`.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        let mut p = Profile::default();
+        p.set_theme("nord", 30);
+        p.save(&paths.profile).unwrap();
+
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("PUT", "/sync")
+            .match_body(mockito::Matcher::Regex(
+                r#""theme":\{"value":"nord","at":30\}"#.into(),
+            ))
+            .with_body(
+                r#"{"favs":[],"blocked":[],
+                    "scope":{"value":"recent","at":900},
+                    "history":[{"id":"remote","at":800,"gone":false}]}"#,
+            )
+            .create();
+        login_sync(&SyncClient::new(server.url()), "r4-k", &paths).unwrap();
+
+        // pushed what this device had...
+        m.assert();
+        // ...and landed what the server merged back.
+        assert_eq!(Profile::load(&paths.profile).scope, "recent");
+        assert_eq!(
+            History::load(&paths.history).ids(),
+            vec!["remote".to_string()]
+        );
     }
 
     #[test]
