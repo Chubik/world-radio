@@ -70,6 +70,37 @@ impl Profile {
         self.theme_at = now;
     }
 
+    /// stamps settings this device already had before it ever wrote a profile,
+    /// so an upgrade publishes them instead of looking like a device that has
+    /// chosen nothing. a field whose stamp is already set was stamped by a real
+    /// user change here or arrived from another device — adoption must never
+    /// overwrite it. reports whether anything was taken up.
+    pub fn adopt_existing(
+        &mut self,
+        countries: &[String],
+        scope: &str,
+        theme: &str,
+        now: i64,
+    ) -> bool {
+        let mut adopted = false;
+        if self.countries_at == 0 && !countries.is_empty() {
+            self.countries = countries.to_vec();
+            self.countries_at = now;
+            adopted = true;
+        }
+        if self.scope_at == 0 && !scope.is_empty() {
+            self.scope = scope.to_string();
+            self.scope_at = now;
+            adopted = true;
+        }
+        if self.theme_at == 0 && !theme.is_empty() {
+            self.theme = theme.to_string();
+            self.theme_at = now;
+            adopted = true;
+        }
+        adopted
+    }
+
     /// takes each field from `remote` when its stamp is newer than what's
     /// stored locally. reports per field, so the caller only pushes into the
     /// ui what actually moved — telling it "scope changed" when only the theme
@@ -275,5 +306,44 @@ mod tests {
         p.set_theme("nord", 100);
         p.save(&path).unwrap();
         assert_eq!(Profile::load(&path), p);
+    }
+
+    // a device that had settings before this feature existed has never stamped
+    // them, so they would never be published and the account would look empty to
+    // every other device.
+    #[test]
+    fn settings_that_predate_the_profile_get_adopted() {
+        let mut p = Profile::default();
+        let adopted = p.adopt_existing(&["UA".to_string()], "favorites", "monokai", 500);
+        assert!(adopted);
+        assert_eq!(p.countries, vec!["UA".to_string()]);
+        assert_eq!(p.countries_at, 500);
+        assert_eq!(p.scope, "favorites");
+        assert_eq!(p.theme, "monokai");
+    }
+
+    // adoption is a one-off rescue of unstamped settings, never a writer that
+    // outranks a value another device stamped deliberately.
+    #[test]
+    fn adoption_never_overrides_an_already_stamped_field() {
+        let mut p = Profile::default();
+        p.set_countries(vec!["PL".to_string()], 100);
+        let adopted = p.adopt_existing(&["UA".to_string()], "all", "nord", 500);
+        assert!(
+            adopted,
+            "the unstamped theme and scope still needed adopting"
+        );
+        assert_eq!(
+            p.countries,
+            vec!["PL".to_string()],
+            "stamped value was lost"
+        );
+        assert_eq!(p.countries_at, 100, "stamp moved");
+    }
+
+    #[test]
+    fn adopting_nothing_reports_no_change() {
+        let mut p = Profile::default();
+        assert!(!p.adopt_existing(&[], "", "", 500));
     }
 }

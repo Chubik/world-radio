@@ -703,7 +703,7 @@ fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
 
 /// the browse scope travels whole: every device sharing a key must land on the
 /// same one, so all five variants map 1:1 to `sync::Scope` and back.
-fn status_filter_to_scope(status: StatusFilter) -> &'static str {
+pub(crate) fn status_filter_to_scope(status: StatusFilter) -> &'static str {
     let scope = match status {
         StatusFilter::All => radio_core::sync::Scope::All,
         StatusFilter::Favorites => radio_core::sync::Scope::Favorites,
