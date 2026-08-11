@@ -104,6 +104,28 @@ data class SyncProfile(
         return out
     }
 
+    /**
+     * the write-back guard. a sync starts from a snapshot of the profile and only
+     * writes the merged result back after the round-trip, so a field the user
+     * changed meanwhile carries a newer stamp in [stored] than in the merged
+     * result — and must survive rather than be reverted to the pre-flight value.
+     * the rule is the same last-write-wins one [applyRemote] uses, just pointed at
+     * local storage instead of the server.
+     */
+    fun keepingNewerLocal(stored: SyncProfile): SyncProfile {
+        var out = this
+        if (stored.countriesAt > out.countriesAt) {
+            out = out.copy(countries = stored.countries, countriesAt = stored.countriesAt)
+        }
+        if (stored.scopeAt > out.scopeAt) {
+            out = out.copy(scope = stored.scope, scopeAt = stored.scopeAt)
+        }
+        if (stored.themeAt > out.themeAt) {
+            out = out.copy(theme = stored.theme, themeAt = stored.themeAt)
+        }
+        return out
+    }
+
     private fun stringLww(value: String, at: Long): Lww? = when (at) {
         0L -> null
         else -> Lww(JsonPrimitive(value), at)

@@ -124,8 +124,12 @@ pub fn merge_history(local: &[Play], remote: &[HistoryRecord]) -> Option<Vec<Pla
         return None;
     }
     let local = local_history_records(local);
-    let mut by_id: std::collections::HashMap<&str, &HistoryRecord> =
-        std::collections::HashMap::new();
+    // a BTreeMap, not a HashMap: the sort below is stable, so the map's iteration
+    // order decides ties on `at`. the server merges through a BTreeMap too, and
+    // only an identical tie convention makes both sides truncate the same entry
+    // at the cap.
+    let mut by_id: std::collections::BTreeMap<&str, &HistoryRecord> =
+        std::collections::BTreeMap::new();
     for r in local.iter().chain(remote.iter()) {
         match by_id.get(r.id.as_str()) {
             Some(have) if have.at >= r.at => {}
@@ -345,6 +349,26 @@ mod tests {
         assert_eq!(merged[0].id, "remote");
         assert_eq!(merged[1].id, "local");
         assert_eq!(merged[1].at, 1_000);
+    }
+
+    // the server merges through a BTreeMap and then stable-sorts by `at`, so on a
+    // tie it emits the ids in ascending order. the client must land on the same
+    // order or the two truncate a different entry at the cap.
+    #[test]
+    fn ties_on_at_order_by_id_exactly_as_the_server_does() {
+        let remote: Vec<HistoryRecord> = ["u3", "u1", "u4", "u2"]
+            .iter()
+            .map(|id| HistoryRecord {
+                id: (*id).into(),
+                at: 500,
+                gone: false,
+            })
+            .collect();
+        for _ in 0..20 {
+            let merged = merge_history(&[], &remote).unwrap();
+            let ids: Vec<&str> = merged.iter().map(|p| p.id.as_str()).collect();
+            assert_eq!(ids, ["u1", "u2", "u3", "u4"]);
+        }
     }
 
     #[test]
