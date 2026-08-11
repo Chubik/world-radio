@@ -1215,9 +1215,9 @@ mod tests {
         m.browse.facets.countries = vec![("GB".into(), 47)];
         let fx = update(&mut m, Msg::FilterApply);
         assert_eq!(m.browse.filters.countries, vec!["GB".to_string()]);
-        assert!(fx
-            .iter()
-            .any(|e| matches!(e, Effect::Search(q, _) if q.countrycode.as_deref() == Some("GB"))));
+        assert!(fx.iter().any(
+            |e| matches!(e, Effect::Search(q, _) if q.countrycodes == vec!["GB".to_string()])
+        ));
         assert!(m.browse.pending_online_search.is_some());
     }
 

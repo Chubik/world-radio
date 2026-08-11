@@ -29,30 +29,32 @@ pub fn allowed_station(
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchQuery {
     pub name: Option<String>,
-    pub countrycode: Option<String>,
     pub countrycodes: Vec<String>,
     pub language: Option<String>,
-    pub tag: Option<String>,
-    pub codec: Option<String>,
+    pub tags: Vec<String>,
+    pub codecs: Vec<String>,
     pub bitrate_min: Option<u32>,
 }
 
 impl SearchQuery {
+    /// the remote api takes one value per field, so the params carry the first
+    /// of each list; callers that need the whole list query it country by
+    /// country and merge (see `online_search_bounded`).
     pub fn to_params(&self) -> Vec<(&'static str, String)> {
         let mut p = Vec::new();
         if let Some(v) = &self.name {
             p.push(("name", v.clone()));
         }
-        if let Some(v) = &self.countrycode {
+        if let Some(v) = self.countrycodes.first() {
             p.push(("countrycode", v.clone()));
         }
         if let Some(v) = &self.language {
             p.push(("language", v.clone()));
         }
-        if let Some(v) = &self.tag {
+        if let Some(v) = self.tags.first() {
             p.push(("tag", v.clone()));
         }
-        if let Some(v) = &self.codec {
+        if let Some(v) = self.codecs.first() {
             p.push(("codec", v.clone()));
         }
         if let Some(v) = &self.bitrate_min {
@@ -119,7 +121,7 @@ mod tests {
     fn builds_params_for_set_fields_only() {
         let q = SearchQuery {
             name: Some("jazz".into()),
-            countrycode: Some("FR".into()),
+            countrycodes: vec!["FR".into()],
             bitrate_min: Some(128),
             ..Default::default()
         };
@@ -139,8 +141,8 @@ mod tests {
     fn builds_params_for_language_tag_codec() {
         let q = SearchQuery {
             language: Some("french".into()),
-            tag: Some("jazz".into()),
-            codec: Some("MP3".into()),
+            tags: vec!["jazz".into()],
+            codecs: vec!["MP3".into()],
             ..Default::default()
         };
         let p = q.to_params();
@@ -148,5 +150,20 @@ mod tests {
         assert!(p.contains(&("tag", "jazz".to_string())));
         assert!(p.contains(&("codec", "MP3".to_string())));
         assert_eq!(p.len(), 3);
+    }
+
+    // the api takes a single value per field, so extra selections are dropped
+    // here and re-queried by the caller instead.
+    #[test]
+    fn params_carry_the_first_of_each_list() {
+        let q = SearchQuery {
+            countrycodes: vec!["UA".into(), "US".into()],
+            tags: vec!["jazz".into(), "rock".into()],
+            ..Default::default()
+        };
+        let p = q.to_params();
+        assert!(p.contains(&("countrycode", "UA".to_string())));
+        assert!(p.contains(&("tag", "jazz".to_string())));
+        assert_eq!(p.len(), 2);
     }
 }

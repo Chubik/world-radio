@@ -187,10 +187,15 @@ impl Cache {
                 params.push(Box::new(fts));
             }
         }
-        if let Some(country) = &q.countrycode {
-            if !country.is_empty() {
-                where_parts.push("countrycode = ?".to_string());
-                params.push(Box::new(country.clone()));
+        // every selected value in a group must reach the sql: keeping only the
+        // first one returned stations from one country while the user had
+        // several picked.
+        let countries: Vec<&String> = q.countrycodes.iter().filter(|c| !c.is_empty()).collect();
+        if !countries.is_empty() {
+            let marks = vec!["?"; countries.len()].join(",");
+            where_parts.push(format!("UPPER(countrycode) IN ({marks})"));
+            for c in &countries {
+                params.push(Box::new(c.to_uppercase()));
             }
         }
         if let Some(lang) = &q.language {
@@ -199,16 +204,20 @@ impl Cache {
                 params.push(Box::new(lang.clone()));
             }
         }
-        if let Some(codec) = &q.codec {
-            if !codec.is_empty() {
-                where_parts.push("codec = ?".to_string());
-                params.push(Box::new(codec.clone()));
+        let codecs: Vec<&String> = q.codecs.iter().filter(|c| !c.is_empty()).collect();
+        if !codecs.is_empty() {
+            let marks = vec!["?"; codecs.len()].join(",");
+            where_parts.push(format!("UPPER(codec) IN ({marks})"));
+            for c in &codecs {
+                params.push(Box::new(c.to_uppercase()));
             }
         }
-        if let Some(tag) = &q.tag {
-            if !tag.is_empty() {
-                where_parts.push("tags LIKE ?".to_string());
-                params.push(Box::new(format!("%{tag}%")));
+        let tags: Vec<&String> = q.tags.iter().filter(|t| !t.is_empty()).collect();
+        if !tags.is_empty() {
+            let ors: Vec<String> = tags.iter().map(|_| "tags LIKE ?".to_string()).collect();
+            where_parts.push(format!("({})", ors.join(" OR ")));
+            for t in &tags {
+                params.push(Box::new(format!("%{t}%")));
             }
         }
         if let Some(min) = q.bitrate_min {
@@ -562,6 +571,104 @@ mod tests {
             lastcheckok: 1,
             lastchecktime_iso8601: String::new(),
         }
+    }
+
+    #[test]
+    fn a_search_returns_every_selected_country() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "a".into(),
+                name: "ua one".into(),
+                countrycode: "UA".into(),
+                ..bare()
+            },
+            Station {
+                stationuuid: "b".into(),
+                name: "us one".into(),
+                countrycode: "US".into(),
+                ..bare()
+            },
+            Station {
+                stationuuid: "c".into(),
+                name: "pl one".into(),
+                countrycode: "PL".into(),
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let q = SearchQuery {
+            countrycodes: vec!["UA".into(), "US".into()],
+            ..Default::default()
+        };
+        let got = c.search(&q, &[]).unwrap();
+        let mut ids: Vec<&str> = got.iter().map(|s| s.stationuuid.as_str()).collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            vec!["a", "b"],
+            "both selected countries must come back"
+        );
+    }
+
+    #[test]
+    fn an_empty_country_list_does_not_restrict() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "a".into(),
+                name: "ua one".into(),
+                countrycode: "UA".into(),
+                ..bare()
+            },
+            Station {
+                stationuuid: "b".into(),
+                name: "pl one".into(),
+                countrycode: "PL".into(),
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let got = c.search(&SearchQuery::default(), &[]).unwrap();
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn a_search_returns_every_selected_tag_and_codec() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "a".into(),
+                name: "jazz mp3".into(),
+                tags: "jazz,smooth".into(),
+                codec: "MP3".into(),
+                ..bare()
+            },
+            Station {
+                stationuuid: "b".into(),
+                name: "rock aac".into(),
+                tags: "rock".into(),
+                codec: "AAC".into(),
+                ..bare()
+            },
+            Station {
+                stationuuid: "c".into(),
+                name: "pop ogg".into(),
+                tags: "pop".into(),
+                codec: "OGG".into(),
+                ..bare()
+            },
+        ])
+        .unwrap();
+        let q = SearchQuery {
+            tags: vec!["jazz".into(), "rock".into()],
+            codecs: vec!["MP3".into(), "AAC".into()],
+            ..Default::default()
+        };
+        let got = c.search(&q, &[]).unwrap();
+        let mut ids: Vec<&str> = got.iter().map(|s| s.stationuuid.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["a", "b"]);
     }
 
     #[test]
@@ -942,7 +1049,7 @@ mod tests {
             ])
             .unwrap();
         let q = SearchQuery {
-            countrycode: Some("GB".into()),
+            countrycodes: vec!["GB".into()],
             ..Default::default()
         };
         let rows = cache.search(&q, &[]).unwrap();
@@ -962,7 +1069,7 @@ mod tests {
             .unwrap();
         let q = SearchQuery {
             name: Some("\"jazz\"".into()),
-            countrycode: Some("GB".into()),
+            countrycodes: vec!["GB".into()],
             ..Default::default()
         };
         let rows = cache.search(&q, &[]).unwrap();
@@ -1000,7 +1107,7 @@ mod tests {
             ])
             .unwrap();
         let q = SearchQuery {
-            tag: Some("jazz".into()),
+            tags: vec!["jazz".into()],
             ..Default::default()
         };
         let rows = cache.search(&q, &[]).unwrap();
@@ -1223,7 +1330,7 @@ mod tests {
             ])
             .unwrap();
         let q = SearchQuery {
-            countrycode: Some("UA".into()),
+            countrycodes: vec!["UA".into()],
             ..Default::default()
         };
         let rows = cache.search_limited(&q, &[], Some(50)).unwrap();

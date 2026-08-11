@@ -124,11 +124,10 @@ impl BrowseFilters {
         };
         SearchQuery {
             name,
-            countrycode: self.countries.first().cloned(),
-            countrycodes: Vec::new(),
+            countrycodes: self.countries.clone(),
             language: None,
-            tag: self.tags.first().cloned(),
-            codec: self.codecs.first().cloned(),
+            tags: self.tags.clone(),
+            codecs: self.codecs.clone(),
             bitrate_min: self.bitrate_min,
         }
     }
@@ -599,21 +598,33 @@ mod tests {
     }
 
     #[test]
-    fn browse_filters_to_query_uses_first_of_each_group() {
+    fn browse_filters_to_query_carries_every_group() {
         let f = BrowseFilters {
             status: StatusFilter::All,
             countries: vec!["GB".into(), "DE".into()],
-            tags: vec!["jazz".into()],
-            codecs: vec!["MP3".into()],
+            tags: vec!["jazz".into(), "rock".into()],
+            codecs: vec!["MP3".into(), "AAC".into()],
             bitrate_min: Some(128),
             ..Default::default()
         };
         let q = f.to_query("rock");
         assert_eq!(q.name.as_deref(), Some("rock"));
-        assert_eq!(q.countrycode.as_deref(), Some("GB"));
-        assert_eq!(q.tag.as_deref(), Some("jazz"));
-        assert_eq!(q.codec.as_deref(), Some("MP3"));
+        assert_eq!(q.countrycodes, vec!["GB".to_string(), "DE".to_string()]);
+        assert_eq!(q.tags, vec!["jazz".to_string(), "rock".to_string()]);
+        assert_eq!(q.codecs, vec!["MP3".to_string(), "AAC".to_string()]);
         assert_eq!(q.bitrate_min, Some(128));
+    }
+
+    #[test]
+    fn to_query_carries_every_selected_country() {
+        let f = BrowseFilters {
+            countries: vec!["UA".into(), "US".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            f.to_query("").countrycodes,
+            vec!["UA".to_string(), "US".to_string()]
+        );
     }
 
     #[test]
