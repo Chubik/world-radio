@@ -701,14 +701,30 @@ fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
     effects
 }
 
-/// the synced scope only distinguishes "everything" from "favourites only" —
-/// the other `StatusFilter` variants (recent/blocked/dead) are local-only
-/// browsing states, not something another device should be pushed into.
+/// the browse scope travels whole: every device sharing a key must land on the
+/// same one, so all five variants map 1:1 to `sync::Scope` and back.
 fn status_filter_to_scope(status: StatusFilter) -> &'static str {
-    match status {
-        StatusFilter::Favorites => "FAVS",
-        _ => "ALL",
-    }
+    let scope = match status {
+        StatusFilter::All => radio_core::sync::Scope::All,
+        StatusFilter::Favorites => radio_core::sync::Scope::Favorites,
+        StatusFilter::Recent => radio_core::sync::Scope::Recent,
+        StatusFilter::Blocked => radio_core::sync::Scope::Blocked,
+        StatusFilter::Dead => radio_core::sync::Scope::Dead,
+    };
+    scope.as_wire()
+}
+
+/// `None` for an unrecognised value so the caller leaves the local scope alone
+/// rather than resetting the user to All.
+fn scope_to_status_filter(scope: &str) -> Option<StatusFilter> {
+    let scope = radio_core::sync::Scope::from_wire(scope)?;
+    Some(match scope {
+        radio_core::sync::Scope::All => StatusFilter::All,
+        radio_core::sync::Scope::Favorites => StatusFilter::Favorites,
+        radio_core::sync::Scope::Recent => StatusFilter::Recent,
+        radio_core::sync::Scope::Blocked => StatusFilter::Blocked,
+        radio_core::sync::Scope::Dead => StatusFilter::Dead,
+    })
 }
 
 fn apply_profile_synced(
@@ -728,11 +744,8 @@ fn apply_profile_synced(
         let q = model.browse.filters.to_query(&model.browse.query);
         effects.push(Effect::Search(q, model.browse.filters.clone()));
     }
-    if let Some(scope) = scope {
-        model.browse.filters.status = match scope.as_str() {
-            "FAVS" => StatusFilter::Favorites,
-            _ => StatusFilter::All,
-        };
+    if let Some(status) = scope.as_deref().and_then(scope_to_status_filter) {
+        model.browse.filters.status = status;
     }
     if let Some(theme) = theme {
         model.theme = Theme::from_slug(&theme);
@@ -1313,10 +1326,10 @@ mod tests {
         m.browse.filters.countries = vec!["UA".into()];
         m.browse.filters.status = StatusFilter::Favorites;
         m.profile.set_countries(vec!["UA".into()], 1_000);
-        m.profile.set_scope("FAVS", 1_000);
+        m.profile.set_scope("favorites", 1_000);
         let fx = update(&mut m, Msg::FilterClearAll);
         assert!(m.profile.countries.is_empty());
-        assert_eq!(m.profile.scope, "ALL");
+        assert_eq!(m.profile.scope, "all");
         assert!(m.profile.countries_at > 1_000);
         assert!(m.profile.scope_at > 1_000);
         assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
@@ -2019,7 +2032,7 @@ mod tests {
     fn synced_profile(countries: &[&str], at: i64) -> radio_core::sync::Profile {
         let mut p = radio_core::sync::Profile::default();
         p.set_countries(countries.iter().map(|c| c.to_string()).collect(), at);
-        p.set_scope("FAVS", at);
+        p.set_scope("favorites", at);
         p.set_theme("nord", at);
         p
     }
@@ -2032,7 +2045,7 @@ mod tests {
             Msg::ProfileSynced {
                 profile: synced_profile(&["PL"], 500),
                 countries: Some(vec!["PL".into()]),
-                scope: Some("FAVS".into()),
+                scope: Some("favorites".into()),
                 theme: Some("nord".into()),
             },
         );
@@ -2070,7 +2083,7 @@ mod tests {
             Msg::ProfileSynced {
                 profile: remote.clone(),
                 countries: Some(vec!["PL".into()]),
-                scope: Some("FAVS".into()),
+                scope: Some("favorites".into()),
                 theme: Some("nord".into()),
             },
         );
@@ -2085,7 +2098,65 @@ mod tests {
         };
         update(&mut m, Msg::FilterApply);
         assert_eq!(m.profile.countries, vec!["PL".to_string()]);
-        assert_eq!(m.profile.scope, "FAVS");
+        assert_eq!(m.profile.scope, "favorites");
+    }
+
+    #[test]
+    fn every_status_filter_round_trips_through_the_wire_scope() {
+        // the defect: recent/blocked/dead all collapsed to "all", so a device
+        // browsing dead stations pushed the other one back to everything.
+        for status in [
+            StatusFilter::All,
+            StatusFilter::Favorites,
+            StatusFilter::Recent,
+            StatusFilter::Blocked,
+            StatusFilter::Dead,
+        ] {
+            let wire = status_filter_to_scope(status);
+            assert_eq!(scope_to_status_filter(wire), Some(status), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn a_legacy_scope_string_still_maps_to_its_filter() {
+        assert_eq!(scope_to_status_filter("ALL"), Some(StatusFilter::All));
+        assert_eq!(
+            scope_to_status_filter("FAVS"),
+            Some(StatusFilter::Favorites)
+        );
+    }
+
+    #[test]
+    fn an_unknown_scope_leaves_the_browse_status_untouched() {
+        // resetting to All here would change what the user is looking at on a
+        // value written by a newer client.
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Blocked;
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: Some("something-new".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Blocked);
+    }
+
+    #[test]
+    fn a_synced_dead_scope_reaches_the_browse_status() {
+        let mut m = model();
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: Some("dead".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Dead);
     }
 
     #[test]
@@ -2110,7 +2181,7 @@ mod tests {
             option: 1,
         };
         let fx = update(&mut m, Msg::FilterApply);
-        assert_eq!(m.profile.scope, "FAVS");
+        assert_eq!(m.profile.scope, "favorites");
         assert!(m.profile.scope_at > 0);
         assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
     }
