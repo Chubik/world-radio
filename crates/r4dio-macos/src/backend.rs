@@ -13,6 +13,26 @@ pub struct Backend {
     blacklist_path: PathBuf,
     excluded_path: PathBuf,
     pending_path: PathBuf,
+    profile_path: PathBuf,
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// this app's shuffle scope is only all-or-favourites. recent/blocked/dead are
+/// real synced scopes it has no equivalent for, so they leave the panel where
+/// it is instead of being collapsed into `All` — the profile on disk still
+/// carries them for the surfaces that do.
+fn scope_from_wire(wire: &str) -> Option<Scope> {
+    match radio_core::sync::Scope::from_wire(wire)? {
+        radio_core::sync::Scope::All => Some(Scope::All),
+        radio_core::sync::Scope::Favorites => Some(Scope::Favorites),
+        _ => None,
+    }
 }
 
 impl Backend {
@@ -25,6 +45,7 @@ impl Backend {
         let blacklist_path = data.join("blacklist.json");
         let excluded_path = data.join("excluded_countries.json");
         let pending_path = data.join("sync_pending.json");
+        let profile_path = data.join("profile.json");
         let mut catalog = Catalog::load(
             cache,
             health,
@@ -42,6 +63,12 @@ impl Backend {
 
         let mut state = MiniState::new();
         state.load_stations(all, favorites);
+        // a scope synced from another device is on disk before this app starts;
+        // reading it here is what makes the panel open on the same scope.
+        if let Some(scope) = scope_from_wire(&radio_core::sync::Profile::load(&profile_path).scope)
+        {
+            state.set_scope(scope);
+        }
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
@@ -57,6 +84,7 @@ impl Backend {
             blacklist_path,
             excluded_path,
             pending_path,
+            profile_path,
         })
     }
 
@@ -114,8 +142,19 @@ impl Backend {
         }
     }
 
+    // the stamp is taken here, at the moment the user changes the scope, never
+    // at sync time — a sync-time stamp would always outrank the other device.
     pub fn set_scope(&mut self, scope: Scope) {
         self.state.set_scope(scope);
+        let wire = match scope {
+            Scope::All => radio_core::sync::Scope::All,
+            Scope::Favorites => radio_core::sync::Scope::Favorites,
+        };
+        let mut profile = radio_core::sync::Profile::load(&self.profile_path);
+        profile.set_scope(wire.as_wire(), now_secs());
+        if let Err(e) = profile.save(&self.profile_path) {
+            eprintln!("save profile failed: {e}");
+        }
     }
 
     pub fn now_is_favorite(&self) -> bool {
@@ -352,16 +391,20 @@ impl Backend {
     }
 
     pub fn sync(&mut self) -> anyhow::Result<()> {
+        use radio_core::sync::session;
+
         let Some(key) = radio_core::sync::load_key() else {
             return Ok(());
         };
-        let local = radio_core::sync::SyncData {
+        let profile = radio_core::sync::Profile::load(&self.profile_path);
+        let local = session::outgoing(session::LocalState {
             favs: self.catalog.favorite_ids().to_vec(),
             blocked: self.catalog.blacklist_ids().to_vec(),
             excluded_countries: self.catalog.excluded_country_ids().to_vec(),
             changed: self.catalog.pending.clone(),
-            ..Default::default()
-        };
+            profile: &profile,
+            plays: self.catalog.history_plays(),
+        });
         let client = radio_core::sync::SyncClient::new("https://r4dio.net");
         let merged = client.push(&key, &local)?;
         // only now: the server has the delta, so replaying it would be wrong.
@@ -371,12 +414,34 @@ impl Backend {
         self.catalog.apply_synced_blacklist(merged.blocked.clone());
         self.catalog
             .apply_synced_excluded_countries(merged.excluded_countries.clone());
+
+        let mut profile = profile;
+        let changed = session::apply_remote_profile(
+            &mut profile,
+            &merged.shuffle_filter,
+            &merged.scope,
+            &merged.theme,
+        );
+        if changed.any() {
+            profile.save(&self.profile_path)?;
+        }
+        if let Some(plays) = session::merge_history(self.catalog.history_plays(), &merged.history) {
+            self.catalog.apply_synced_history(plays);
+        }
+        // history is written by save_state, so the merge above must land before it.
         self.catalog.save_state(
             &self.fav_path,
             &self.hist_path,
             &self.blacklist_path,
             &self.excluded_path,
         )?;
+        // the synced scope is the only profile field this app has live state
+        // for; without this the merged value would sit on disk unread.
+        if changed.scope {
+            if let Some(scope) = scope_from_wire(&profile.scope) {
+                self.state.set_scope(scope);
+            }
+        }
         // remove exactly what we just sent; keep anything written to the log
         // during the round-trip (a plain overwrite would destroy it).
         radio_core::sync::Pending::clear_pushed(&pushed, &self.pending_path)?;
@@ -384,5 +449,37 @@ impl Backend {
         let favorites = catalog_src::favorite_stations(&self.catalog)?;
         self.state.load_stations(all, favorites);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_two_scopes_this_app_has_come_across_the_wire() {
+        assert_eq!(scope_from_wire("all"), Some(Scope::All));
+        assert_eq!(scope_from_wire("favorites"), Some(Scope::Favorites));
+    }
+
+    #[test]
+    fn legacy_wire_scopes_still_map() {
+        assert_eq!(scope_from_wire("ALL"), Some(Scope::All));
+        assert_eq!(scope_from_wire("FAVS"), Some(Scope::Favorites));
+    }
+
+    #[test]
+    fn a_scope_this_app_cannot_show_leaves_the_panel_alone() {
+        // collapsing these into All would move the panel off favourites just
+        // because another device opened its blocked list.
+        assert_eq!(scope_from_wire("recent"), None);
+        assert_eq!(scope_from_wire("blocked"), None);
+        assert_eq!(scope_from_wire("dead"), None);
+    }
+
+    #[test]
+    fn an_unknown_scope_leaves_the_panel_alone() {
+        assert_eq!(scope_from_wire("something-new"), None);
+        assert_eq!(scope_from_wire(""), None);
     }
 }

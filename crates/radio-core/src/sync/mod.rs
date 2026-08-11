@@ -2,11 +2,14 @@ mod client;
 pub mod key;
 mod pending;
 mod profile;
+mod scope;
+pub mod session;
 
 pub use client::{HistoryRecord, Lww, SyncClient, SyncData};
 pub use key::is_valid_format;
 pub use pending::{Change, Pending, Set};
 pub use profile::{Profile, ProfileChange};
+pub use scope::Scope;
 
 use std::path::{Path, PathBuf};
 
