@@ -40,6 +40,16 @@ pub enum Msg {
     ToggleFavoriteSelected,
     BlacklistSelected,
     ExcludedCountriesChanged(Vec<String>),
+    /// `profile` is the exact state the worker just merged and saved to disk.
+    /// the model must adopt it wholesale — keeping a stale copy means the next
+    /// user edit stamps from stale data and overwrites the synced profile.
+    /// the three options carry only the fields that actually moved.
+    ProfileSynced {
+        profile: radio_core::sync::Profile,
+        countries: Option<Vec<String>>,
+        scope: Option<String>,
+        theme: Option<String>,
+    },
     RecheckSelected,
     AudioStatus(Status),
     SearchResults(Vec<StationRow>),
@@ -64,9 +74,13 @@ pub enum Msg {
     UpdateFound(radio_core::update::Release),
     UpdateUpToDate,
     UpdateApplied(String),
-    CatalogSynced { count: usize },
+    CatalogSynced {
+        count: usize,
+    },
     CatalogSyncFailed,
-    QuickTopReady { count: usize },
+    QuickTopReady {
+        count: usize,
+    },
 }
 
 #[allow(dead_code)]
@@ -97,6 +111,7 @@ pub enum Effect {
         url: String,
     },
     SaveState,
+    SaveProfile(radio_core::sync::Profile),
     CheckUpdate,
     Update(radio_core::update::Release),
 }

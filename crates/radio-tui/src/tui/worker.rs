@@ -1,6 +1,7 @@
 use crate::tui::message::Msg;
 use crate::tui::model::{RowState, StationRow};
 use radio_core::catalog::{api, Catalog, SearchQuery, Station};
+use radio_core::sync::ProfileChange;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -28,10 +29,13 @@ pub enum WorkerReq {
     },
     ResolveAndPlay(String),
     SaveState,
+    SaveProfile(radio_core::sync::Profile),
     SyncCatalog,
     QuickTop,
     PopularSeed,
     Sync,
+    // a sync the user did not ask for, so it stays silent; see the doorbell.
+    SyncQuiet,
     SyncCreate,
     SyncLogout,
     SyncDelete,
@@ -47,6 +51,7 @@ pub struct WorkerPaths {
     pub blacklist: PathBuf,
     pub excluded: PathBuf,
     pub pending: PathBuf,
+    pub profile: PathBuf,
 }
 
 pub fn station_to_row(s: &Station, favorite: bool, hidden: bool) -> StationRow {
@@ -73,6 +78,7 @@ pub fn spawn(
     paths: WorkerPaths,
     req_rx: Receiver<WorkerReq>,
     msg_tx: Sender<Msg>,
+    resync_queued: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
     // a prior session may have quit or gone offline before its sync landed;
     // pick that delta back up rather than starting the log over.
@@ -96,7 +102,7 @@ pub fn spawn(
             let (others, last_search) = coalesce(batch);
             let mut shutdown = false;
             for req in others {
-                if handle_req(req, &mut catalog, &paths, &msg_tx) {
+                if handle_req(req, &mut catalog, &paths, &msg_tx, &resync_queued) {
                     shutdown = true;
                     break;
                 }
@@ -105,7 +111,7 @@ pub fn spawn(
                 break;
             }
             if let Some(search) = last_search {
-                handle_req(search, &mut catalog, &paths, &msg_tx);
+                handle_req(search, &mut catalog, &paths, &msg_tx, &resync_queued);
             }
         }
         save_all(&catalog, &paths);
@@ -117,6 +123,7 @@ fn handle_req(
     catalog: &mut Catalog,
     paths: &WorkerPaths,
     msg_tx: &Sender<Msg>,
+    resync_queued: &std::sync::atomic::AtomicBool,
 ) -> bool {
     match req {
         WorkerReq::Shutdown => return true,
@@ -173,11 +180,23 @@ fn handle_req(
         }
         WorkerReq::ResolveAndPlay(uuid) => handle_resolve_and_play(catalog, &uuid, msg_tx),
         WorkerReq::SaveState => save_all(catalog, paths),
+        WorkerReq::SaveProfile(profile) => {
+            if let Err(e) = profile.save(&paths.profile) {
+                crate::log_warn!("worker: failed to save profile: {e}");
+            }
+        }
         WorkerReq::SyncCatalog => handle_sync_catalog(catalog, msg_tx),
         WorkerReq::QuickTop => handle_quick_top(catalog, paths, msg_tx),
         WorkerReq::PopularSeed => handle_popular_seed(catalog, msg_tx),
         WorkerReq::Sync => {
             handle_sync(catalog, paths, msg_tx, true);
+        }
+        // triggered by the server's doorbell, not by the user: it must not
+        // announce itself. the flag is cleared only after the sync has run, so
+        // events arriving while it is in flight collapse into one re-sync.
+        WorkerReq::SyncQuiet => {
+            handle_sync(catalog, paths, msg_tx, false);
+            resync_queued.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         WorkerReq::SyncCreate => {
             match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {
@@ -282,7 +301,7 @@ fn save_state_and_health(catalog: &Catalog, paths: &WorkerPaths) {
 }
 
 fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>, announce: bool) {
-    use radio_core::sync::{self, SyncClient, SyncData};
+    use radio_core::sync::{self, session, Profile, SyncClient};
 
     let Some(key) = sync::load_key() else {
         if announce {
@@ -292,12 +311,15 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         }
         return;
     };
-    let local = SyncData {
+    let profile = Profile::load(&paths.profile);
+    let local = session::outgoing(session::LocalState {
         favs: catalog.favorite_ids().to_vec(),
         blocked: catalog.blacklist_ids().to_vec(),
         excluded_countries: catalog.excluded_country_ids().to_vec(),
         changed: catalog.pending.clone(),
-    };
+        profile: &profile,
+        plays: catalog.history_plays(),
+    });
     let client = SyncClient::new("https://r4dio.net");
     let merged = match client.push(&key, &local) {
         Ok(m) => m,
@@ -314,10 +336,30 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     catalog.apply_synced_favorites(merged.favs.clone());
     catalog.apply_synced_blacklist(merged.blocked.clone());
     catalog.apply_synced_excluded_countries(merged.excluded_countries.clone());
+
+    let mut profile = profile;
+    let changed = session::apply_remote_profile(
+        &mut profile,
+        &merged.shuffle_filter,
+        &merged.scope,
+        &merged.theme,
+    );
+    if changed.any() {
+        if let Err(e) = profile.save(&paths.profile) {
+            crate::log_warn!("worker: failed to save profile: {e}");
+        }
+    }
+    if let Some(plays) = session::merge_history(catalog.history_plays(), &merged.history) {
+        catalog.apply_synced_history(plays);
+    }
+
     save_all_after_clear(catalog, paths, &local.changed);
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
+    if changed.any() {
+        let _ = msg_tx.send(profile_synced_msg(&profile, changed));
+    }
     if announce {
         let _ = msg_tx.send(Msg::Notice(format!(
             "synced: {} favourites, {} blocked, {} excluded countries",
@@ -325,6 +367,17 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
             merged.blocked.len(),
             merged.excluded_countries.len()
         )));
+    }
+}
+
+// only the fields the merge actually moved are sent: reporting an unchanged
+// scope would reset the user's current browse scope on the receiving side.
+fn profile_synced_msg(profile: &radio_core::sync::Profile, changed: ProfileChange) -> Msg {
+    Msg::ProfileSynced {
+        profile: profile.clone(),
+        countries: changed.countries.then(|| profile.countries.clone()),
+        scope: changed.scope.then(|| profile.scope.clone()),
+        theme: changed.theme.then(|| profile.theme.clone()),
     }
 }
 
@@ -367,7 +420,7 @@ fn handle_search(
                 filters,
             )),
             StatusFilter::Recent => Msg::SearchResults(narrow(
-                resolve(catalog, catalog.history_ids(), false),
+                resolve(catalog, &catalog.history_ids(), false),
                 filters,
             )),
             StatusFilter::Blocked => Msg::SearchResults(narrow(
@@ -796,6 +849,48 @@ mod tests {
         let (others, last) = coalesce(vec![WorkerReq::SaveState, WorkerReq::LoadFacets]);
         assert_eq!(others.len(), 2);
         assert!(last.is_none());
+    }
+
+    #[test]
+    fn profile_synced_msg_reports_only_the_field_that_moved() {
+        // sending an unchanged scope resets the receiving side's browse scope.
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(vec!["UA".into()], 100);
+        p.set_scope("favorites", 100);
+        p.set_theme("nord", 200);
+        let changed = ProfileChange {
+            theme: true,
+            ..Default::default()
+        };
+        match profile_synced_msg(&p, changed) {
+            Msg::ProfileSynced {
+                countries,
+                scope,
+                theme,
+                ..
+            } => {
+                assert_eq!(countries, None);
+                assert_eq!(scope, None);
+                assert_eq!(theme, Some("nord".to_string()));
+            }
+            _ => panic!("expected ProfileSynced"),
+        }
+    }
+
+    #[test]
+    fn profile_synced_msg_carries_the_whole_profile_it_just_saved() {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(vec!["PL".into()], 300);
+        match profile_synced_msg(
+            &p,
+            ProfileChange {
+                countries: true,
+                ..Default::default()
+            },
+        ) {
+            Msg::ProfileSynced { profile, .. } => assert_eq!(profile, p),
+            _ => panic!("expected ProfileSynced"),
+        }
     }
 
     #[test]

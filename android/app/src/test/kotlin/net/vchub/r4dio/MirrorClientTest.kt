@@ -55,10 +55,52 @@ class MirrorClientTest {
                 .setBody("event: play\ndata: {\"uuid\":\"u1\",\"name\":\"One\",\"url\":\"http://x/1\",\"origin\":\"devA\",\"seq\":1}\n\n")
         )
         server.start()
-        val got = mutableListOf<MirrorEvent>()
+        val got = mutableListOf<StreamEvent>()
         clientFor(server).events("r4-k") { got.add(it) }
         assertEquals(1, got.size)
-        assertEquals("u1", got[0].uuid)
+        assertEquals("u1", (got[0] as StreamEvent.Play).event.uuid)
+        server.shutdown()
+    }
+
+    @Test
+    fun parse_stream_event_reads_the_doorbell() {
+        val c = MirrorClient()
+        assertEquals(
+            StreamEvent.ProfileChanged,
+            c.parseStreamEvent("""data: {"type":"profile_changed"}"""),
+        )
+    }
+
+    // the doorbell must never be mistaken for a play event: that would set a
+    // bogus now-playing station on every profile change.
+    @Test
+    fun the_doorbell_is_not_a_play_event() {
+        val c = MirrorClient()
+        assertNull(c.parseSseData("""data: {"type":"profile_changed"}"""))
+    }
+
+    // an event type this build does not know must be dropped, not crash or be
+    // misread — this is what lets an old client talk to a newer server.
+    @Test
+    fun an_unknown_event_type_is_dropped() {
+        val c = MirrorClient()
+        assertNull(c.parseStreamEvent("""data: {"type":"something_new"}"""))
+        assertNull(c.parseSseData("""data: {"type":"something_new"}"""))
+        assertNull(c.parseStreamEvent("data: not json at all"))
+    }
+
+    @Test
+    fun events_delivers_the_doorbell() {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("event: profile_changed\ndata: {\"type\":\"profile_changed\"}\n\n")
+        )
+        server.start()
+        val got = mutableListOf<StreamEvent>()
+        clientFor(server).events("r4-k") { got.add(it) }
+        assertEquals(listOf<StreamEvent>(StreamEvent.ProfileChanged), got)
         server.shutdown()
     }
 }

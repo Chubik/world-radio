@@ -2,6 +2,7 @@ use crate::tui::message::{Effect, Msg};
 use crate::tui::model::{
     BrowseFocus, BrowseState, Model, NowPlaying, Overlay, RowState, StationRow, StatusFilter,
 };
+use crate::tui::theme::Theme;
 use radio_audio::{FailureKind, Status};
 use std::time::{Duration, Instant};
 
@@ -185,6 +186,12 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.browse.pending_online_search = Some(Instant::now());
             vec![]
         }
+        Msg::ProfileSynced {
+            profile,
+            countries,
+            scope,
+            theme,
+        } => apply_profile_synced(model, profile, countries, scope, theme),
         Msg::RecheckSelected => recheck_selected(model),
         Msg::AudioStatus(s) => audio_status(model, s),
         Msg::FocusToggle => focus_toggle(model),
@@ -501,7 +508,11 @@ fn capture_key(model: &mut Model, chord: crate::tui::keybind::KeyChord) {
 
 fn settings_toggle(model: &mut Model) -> Vec<Effect> {
     match model.settings_cursor {
-        SETTINGS_THEME_ROW => model.theme = model.theme.next(),
+        SETTINGS_THEME_ROW => {
+            model.theme = model.theme.next();
+            model.profile.set_theme(model.theme.slug(), now_secs());
+            return vec![Effect::SaveProfile(model.profile.clone())];
+        }
         SETTINGS_CROSSFADE_ROW => {
             model.crossfade = !model.crossfade;
             return vec![Effect::SetCrossfade(model.crossfade)];
@@ -647,9 +658,19 @@ fn filter_apply(model: &mut Model) -> Vec<Effect> {
         apply_option(model, group, option);
         model.browse.pending_online_search = Some(Instant::now());
         let q = model.browse.filters.to_query(&model.browse.query);
-        return vec![Effect::Search(q, model.browse.filters.clone())];
+        return vec![
+            Effect::Search(q, model.browse.filters.clone()),
+            Effect::SaveProfile(model.profile.clone()),
+        ];
     }
     vec![]
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
@@ -675,10 +696,85 @@ fn cycle_country(model: &mut Model, option: usize) -> Vec<Effect> {
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
     effects.push(Effect::Search(q, model.browse.filters.clone()));
+    stamp_profile_from_filters(model);
+    effects.push(Effect::SaveProfile(model.profile.clone()));
     effects
 }
 
+/// the browse scope travels whole: every device sharing a key must land on the
+/// same one, so all five variants map 1:1 to `sync::Scope` and back.
+fn status_filter_to_scope(status: StatusFilter) -> &'static str {
+    let scope = match status {
+        StatusFilter::All => radio_core::sync::Scope::All,
+        StatusFilter::Favorites => radio_core::sync::Scope::Favorites,
+        StatusFilter::Recent => radio_core::sync::Scope::Recent,
+        StatusFilter::Blocked => radio_core::sync::Scope::Blocked,
+        StatusFilter::Dead => radio_core::sync::Scope::Dead,
+    };
+    scope.as_wire()
+}
+
+/// `None` for an unrecognised value so the caller leaves the local scope alone
+/// rather than resetting the user to All.
+fn scope_to_status_filter(scope: &str) -> Option<StatusFilter> {
+    let scope = radio_core::sync::Scope::from_wire(scope)?;
+    Some(match scope {
+        radio_core::sync::Scope::All => StatusFilter::All,
+        radio_core::sync::Scope::Favorites => StatusFilter::Favorites,
+        radio_core::sync::Scope::Recent => StatusFilter::Recent,
+        radio_core::sync::Scope::Blocked => StatusFilter::Blocked,
+        radio_core::sync::Scope::Dead => StatusFilter::Dead,
+    })
+}
+
+fn apply_profile_synced(
+    model: &mut Model,
+    profile: radio_core::sync::Profile,
+    countries: Option<Vec<String>>,
+    scope: Option<String>,
+    theme: Option<String>,
+) -> Vec<Effect> {
+    // adopt the merged profile wholesale, stamps included: a stale in-memory
+    // copy would make the very next user edit overwrite what just synced.
+    model.profile = profile;
+    let mut effects = vec![];
+    if let Some(countries) = countries {
+        model.browse.filters.countries = countries;
+        model.browse.pending_online_search = Some(Instant::now());
+        let q = model.browse.filters.to_query(&model.browse.query);
+        effects.push(Effect::Search(q, model.browse.filters.clone()));
+    }
+    if let Some(status) = scope.as_deref().and_then(scope_to_status_filter) {
+        model.browse.filters.status = status;
+    }
+    // only a slug this build knows, mirroring scope_to_status_filter: an unknown
+    // value leaves local state untouched rather than resetting it.
+    if let Some(theme) = theme.as_deref().and_then(Theme::try_from_slug) {
+        model.theme = theme;
+    }
+    effects
+}
+
+/// the single stamp point for the two synced browse fields. every path that
+/// touches `filters.countries` or `filters.status` — set, toggle, clear —
+/// must go through it, or the change never reaches another device and a stale
+/// echo from the server puts the old value back.
+fn stamp_profile_from_filters(model: &mut Model) {
+    let now = now_secs();
+    model
+        .profile
+        .set_countries(model.browse.filters.countries.clone(), now);
+    model
+        .profile
+        .set_scope(status_filter_to_scope(model.browse.filters.status), now);
+}
+
 fn apply_option(model: &mut Model, group: usize, option: usize) {
+    mutate_option(model, group, option);
+    stamp_profile_from_filters(model);
+}
+
+fn mutate_option(model: &mut Model, group: usize, option: usize) {
     if group == 0 {
         model.browse.filters.status = match option {
             1 => StatusFilter::Favorites,
@@ -732,9 +828,13 @@ fn filter_clear(model: &mut Model, all: bool) -> Vec<Effect> {
             }
         }
     }
+    stamp_profile_from_filters(model);
     model.browse.pending_online_search = Some(Instant::now());
     let q = model.browse.filters.to_query(&model.browse.query);
-    vec![Effect::Search(q, model.browse.filters.clone())]
+    vec![
+        Effect::Search(q, model.browse.filters.clone()),
+        Effect::SaveProfile(model.profile.clone()),
+    ]
 }
 
 fn catalog_refresh_effect(browse: &BrowseState) -> Effect {
@@ -1115,9 +1215,9 @@ mod tests {
         m.browse.facets.countries = vec![("GB".into(), 47)];
         let fx = update(&mut m, Msg::FilterApply);
         assert_eq!(m.browse.filters.countries, vec!["GB".to_string()]);
-        assert!(
-            matches!(fx.as_slice(), [Effect::Search(q, _)] if q.countrycode.as_deref() == Some("GB"))
-        );
+        assert!(fx
+            .iter()
+            .any(|e| matches!(e, Effect::Search(q, _) if q.countrycode.as_deref() == Some("GB"))));
         assert!(m.browse.pending_online_search.is_some());
     }
 
@@ -1203,6 +1303,53 @@ mod tests {
         m.browse.filters.bitrate_min = Some(128);
         update(&mut m, Msg::FilterClearAll);
         assert!(m.browse.filters.is_empty());
+    }
+
+    #[test]
+    fn clearing_the_country_group_stamps_and_saves_the_profile() {
+        // the defect: `c` cleared the filter in the ui but stamped nothing, so
+        // the next sync re-pushed the stale filter and the server echoed it back.
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 3,
+        };
+        let fx = update(&mut m, Msg::FilterClear);
+        assert!(m.profile.countries.is_empty());
+        assert!(m.profile.countries_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn clearing_every_filter_stamps_and_saves_the_profile() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.profile.set_scope("favorites", 1_000);
+        let fx = update(&mut m, Msg::FilterClearAll);
+        assert!(m.profile.countries.is_empty());
+        assert_eq!(m.profile.scope, "all");
+        assert!(m.profile.countries_at > 1_000);
+        assert!(m.profile.scope_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn applying_option_zero_on_the_country_group_stamps_the_profile() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        m.profile.set_countries(vec!["UA".into()], 1_000);
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 0,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert!(m.profile.countries.is_empty());
+        assert!(m.profile.countries_at > 1_000);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
     }
 
     #[test]
@@ -1884,6 +2031,191 @@ mod tests {
         assert!(m.browse.pending_online_search.is_some());
     }
 
+    fn synced_profile(countries: &[&str], at: i64) -> radio_core::sync::Profile {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(countries.iter().map(|c| c.to_string()).collect(), at);
+        p.set_scope("favorites", at);
+        p.set_theme("nord", at);
+        p
+    }
+
+    #[test]
+    fn profile_synced_applies_countries_scope_and_theme_to_the_model() {
+        let mut m = model();
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: synced_profile(&["PL"], 500),
+                countries: Some(vec!["PL".into()]),
+                scope: Some("favorites".into()),
+                theme: Some("nord".into()),
+            },
+        );
+        assert_eq!(m.browse.filters.countries, vec!["PL".to_string()]);
+        assert_eq!(m.browse.filters.status, StatusFilter::Favorites);
+        assert_eq!(m.theme, crate::tui::theme::Theme::Nord);
+        assert!(fx.iter().any(|e| matches!(e, Effect::Search(_, _))));
+    }
+
+    #[test]
+    fn profile_synced_with_none_fields_leaves_the_browse_state_untouched() {
+        let mut m = model();
+        m.browse.filters.countries = vec!["UA".into()];
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: None,
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.countries, vec!["UA".to_string()]);
+        assert!(fx.is_empty());
+    }
+
+    #[test]
+    fn profile_synced_adopts_the_synced_stamps_so_the_next_edit_does_not_revert_it() {
+        // the defect: the model kept a stale profile, so the very next filter
+        // edit stamped from stale data and overwrote what just synced.
+        let mut m = model();
+        let remote = synced_profile(&["PL"], 9_000);
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: remote.clone(),
+                countries: Some(vec!["PL".into()]),
+                scope: Some("favorites".into()),
+                theme: Some("nord".into()),
+            },
+        );
+        assert_eq!(m.profile, remote);
+        assert_eq!(m.profile.countries_at, 9_000);
+        assert_eq!(m.profile.theme, "nord");
+
+        // an unrelated later edit (theme) must not roll the synced filter back
+        m.browse.focus = BrowseFocus::Filters {
+            group: 4,
+            option: 1,
+        };
+        update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.countries, vec!["PL".to_string()]);
+        assert_eq!(m.profile.scope, "favorites");
+    }
+
+    #[test]
+    fn every_status_filter_round_trips_through_the_wire_scope() {
+        // the defect: recent/blocked/dead all collapsed to "all", so a device
+        // browsing dead stations pushed the other one back to everything.
+        for status in [
+            StatusFilter::All,
+            StatusFilter::Favorites,
+            StatusFilter::Recent,
+            StatusFilter::Blocked,
+            StatusFilter::Dead,
+        ] {
+            let wire = status_filter_to_scope(status);
+            assert_eq!(scope_to_status_filter(wire), Some(status), "{status:?}");
+        }
+    }
+
+    #[test]
+    fn a_legacy_scope_string_still_maps_to_its_filter() {
+        assert_eq!(scope_to_status_filter("ALL"), Some(StatusFilter::All));
+        assert_eq!(
+            scope_to_status_filter("FAVS"),
+            Some(StatusFilter::Favorites)
+        );
+    }
+
+    #[test]
+    fn an_unknown_scope_leaves_the_browse_status_untouched() {
+        // resetting to All here would change what the user is looking at on a
+        // value written by a newer client.
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Blocked;
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: Some("something-new".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Blocked);
+    }
+
+    #[test]
+    fn an_unknown_theme_leaves_the_local_theme_untouched() {
+        // a newer client publishing a theme this build does not know must not
+        // silently reset every cli on the account to the default — the theme is
+        // written back to config.toml at exit, so the reset would persist.
+        let mut m = model();
+        m.theme = crate::tui::theme::Theme::Gruvbox;
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: None,
+                theme: Some("midnight".into()),
+            },
+        );
+        assert_eq!(m.theme, crate::tui::theme::Theme::Gruvbox);
+    }
+
+    #[test]
+    fn a_synced_dead_scope_reaches_the_browse_status() {
+        let mut m = model();
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: Some("dead".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Dead);
+    }
+
+    #[test]
+    fn cycle_country_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        m.browse.facets.countries = vec![("GB".into(), 47)];
+        m.browse.focus = BrowseFocus::Filters {
+            group: 1,
+            option: 1,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.countries, vec!["GB".to_string()]);
+        assert!(m.profile.countries_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn status_scope_change_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        m.browse.focus = BrowseFocus::Filters {
+            group: 0,
+            option: 1,
+        };
+        let fx = update(&mut m, Msg::FilterApply);
+        assert_eq!(m.profile.scope, "favorites");
+        assert!(m.profile.scope_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
+    #[test]
+    fn theme_change_stamps_the_profile_and_saves_it() {
+        let mut m = model();
+        let fx = update(&mut m, Msg::SettingsToggle);
+        assert_eq!(m.profile.theme, m.theme.slug());
+        assert!(m.profile.theme_at > 0);
+        assert!(fx.iter().any(|e| matches!(e, Effect::SaveProfile(_))));
+    }
+
     fn eff_kind(e: &Effect) -> &'static str {
         match e {
             Effect::Search(_, _) => "search",
@@ -1902,6 +2234,7 @@ mod tests {
             Effect::MarkSuccess(_) => "marksuccess",
             Effect::MirrorAnnounce { .. } => "mirrorannounce",
             Effect::SaveState => "savestate",
+            Effect::SaveProfile(_) => "saveprofile",
             Effect::Sync => "sync",
             Effect::SyncCreate => "synccreate",
             Effect::SyncLogout => "synclogout",

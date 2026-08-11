@@ -84,6 +84,16 @@ class FavStore(context: Context) {
     private val keyDeviceId = stringPreferencesKey("device_id")
     private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
     private val keyKeepAwake = booleanPreferencesKey("keep_awake")
+    private val keyFilterCountries = stringSetPreferencesKey("filter_countries")
+    private val keyFilterAt = longPreferencesKey("filter_countries_at")
+    // the scope as it travels, kept beside the local enum: the desktop has scopes
+    // android cannot show, and storing only the enum would lose them and re-publish
+    // an approximation that drags the desktop off the user's chosen scope.
+    private val keyScopeWire = stringPreferencesKey("scope_wire")
+    private val keyScopeAt = longPreferencesKey("scope_at")
+    private val keyTheme = stringPreferencesKey("theme")
+    private val keyThemeAt = longPreferencesKey("theme_at")
+    private val keyHistoryPending = stringSetPreferencesKey("history_pending")
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
@@ -145,8 +155,90 @@ class FavStore(context: Context) {
         }
     }
 
-    suspend fun setScope(scope: Scope) {
-        store.edit { it[keyScope] = scope.name }
+    /**
+     * the stamp is taken here, at the moment the user changes the scope, never at
+     * sync time — a sync-time stamp would always outrank the other device. [now] is
+     * passed in so the caller's clock is the one recorded and the rule stays testable.
+     */
+    suspend fun setScope(scope: Scope, now: Long = System.currentTimeMillis() / 1000) {
+        store.edit { prefs ->
+            // through withScope so the "a same-value save must not move the stamp"
+            // rule lives in exactly one place rather than being restated here.
+            val stamped = SyncProfile(
+                scope = prefs[keyScopeWire].orEmpty(),
+                scopeAt = prefs[keyScopeAt] ?: 0L,
+            ).withScope(wireScope(scope), now)
+            prefs[keyScopeWire] = stamped.scope
+            prefs[keyScopeAt] = stamped.scopeAt
+            prefs[keyScope] = scope.name
+        }
+    }
+
+    // the filter has no editor on android by design — it is chosen on the desktop
+    // and arrives here through [applyProfile]. this device only honours it.
+    suspend fun currentFilter(): Set<String> = store.data.first()[keyFilterCountries] ?: emptySet()
+
+    suspend fun profile(): SyncProfile {
+        val prefs = store.data.first()
+        return SyncProfile(
+            // a set has no order, so the pill and the payload both need one that
+            // does not shuffle between reads.
+            countries = (prefs[keyFilterCountries] ?: emptySet()).sorted(),
+            countriesAt = prefs[keyFilterAt] ?: 0L,
+            scope = prefs[keyScopeWire].orEmpty(),
+            scopeAt = prefs[keyScopeAt] ?: 0L,
+            theme = prefs[keyTheme].orEmpty(),
+            themeAt = prefs[keyThemeAt] ?: 0L,
+        )
+    }
+
+    /**
+     * writes back what a sync round-trip took from the server. the local [keyScope]
+     * enum only moves when the synced word is one this build can show — a `recent`
+     * or `dead` from the desktop is stored and re-published verbatim, but must not
+     * approximate itself into ALL here.
+     *
+     * the stored stamps are re-read inside the transaction and run through
+     * [SyncProfile.keepingNewerLocal] rather than trusted from the caller's
+     * snapshot: [profile] was computed from a read taken before the round-trip, so
+     * a scope tapped while the request was in flight would otherwise be reverted.
+     */
+    suspend fun applyProfile(profile: SyncProfile) {
+        store.edit { prefs ->
+            val stored = SyncProfile(
+                countries = (prefs[keyFilterCountries] ?: emptySet()).sorted(),
+                countriesAt = prefs[keyFilterAt] ?: 0L,
+                scope = prefs[keyScopeWire].orEmpty(),
+                scopeAt = prefs[keyScopeAt] ?: 0L,
+                theme = prefs[keyTheme].orEmpty(),
+                themeAt = prefs[keyThemeAt] ?: 0L,
+            )
+            val next = profile.keepingNewerLocal(stored)
+            prefs[keyFilterCountries] = next.countries.toSet()
+            prefs[keyFilterAt] = next.countriesAt
+            prefs[keyScopeWire] = next.scope
+            prefs[keyScopeAt] = next.scopeAt
+            prefs[keyTheme] = next.theme
+            prefs[keyThemeAt] = next.themeAt
+            when (val local = localScope(next.scope)) {
+                null -> {}
+                else -> prefs[keyScope] = local.name
+            }
+        }
+    }
+
+    suspend fun pendingPlays(): Set<String> = store.data.first()[keyHistoryPending] ?: emptySet()
+
+    suspend fun recordPlay(uuid: String, now: Long = System.currentTimeMillis() / 1000) {
+        store.edit { prefs ->
+            prefs[keyHistoryPending] = HistoryQueue.append(prefs[keyHistoryPending] ?: emptySet(), uuid, now)
+        }
+    }
+
+    suspend fun drainPlays(pushed: List<HistoryRecord>) {
+        store.edit { prefs ->
+            prefs[keyHistoryPending] = HistoryQueue.drain(prefs[keyHistoryPending] ?: emptySet(), pushed)
+        }
     }
 
     val keepAwake: Flow<Boolean> = store.data.map { it[keyKeepAwake] ?: false }
