@@ -28,6 +28,25 @@ fun showsHiddenPill(hiddenCount: Int, scope: String): Boolean =
 fun isAllHiddenWarn(playableCount: Int, hiddenCount: Int, scope: String, catalogLoaded: Boolean): Boolean =
     catalogLoaded && playableCount == 0 && hiddenCount > 0 && scope != "favs"
 
+/** how many country codes the pill spells out before it summarises the rest. */
+private const val FILTER_PILL_CODES = 3
+
+/**
+ * the synced shuffle filter, or null when there is nothing to show. hidden in favs
+ * scope for the same reason the excluded-countries pill is: favourites bypass the
+ * filter entirely, so advertising it there would be false. the row is narrow, so a
+ * long list is cut after three codes and the rest counted.
+ */
+fun filterPillLabel(countries: List<String>, scope: String): String? {
+    if (countries.isEmpty() || scope == "favs") return null
+    val shown = countries.take(FILTER_PILL_CODES).joinToString("·")
+    val rest = countries.size - FILTER_PILL_CODES
+    return when (rest > 0) {
+        true -> "FILTER: $shown +$rest"
+        false -> "FILTER: $shown"
+    }
+}
+
 /**
  * the screen-awake toggle is a car feature: the phone is in a mount, and a screen
  * that blanks mid-drive means fumbling to see what is playing. off by default, so

@@ -2,6 +2,7 @@ package net.vchub.r4dio
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -142,5 +143,95 @@ class CatalogFilterTest {
             )
             assertEquals("ok", out.station?.uuid)
         }
+    }
+
+    @Test
+    fun empty_filter_is_unrestricted() {
+        val s = station("de1", country = "DE")
+        assertTrue(allowedStation(s, included = emptySet()))
+    }
+
+    @Test
+    fun the_filter_keeps_only_its_own_countries() {
+        assertTrue(allowedStation(station("ua1", country = "UA"), included = setOf("UA")))
+        assertFalse(allowedStation(station("de1", country = "DE"), included = setOf("UA")))
+    }
+
+    @Test
+    fun the_filter_matches_regardless_of_case() {
+        assertTrue(allowedStation(station("ua1", country = "ua"), included = setOf("UA")))
+    }
+
+    @Test
+    fun filter_restricts_all_scope_picks() {
+        val cat = listOf(
+            station("ua1", country = "UA"),
+            station("de1", country = "DE"),
+            station("pl1", country = "PL"),
+        )
+        repeat(20) {
+            val out = pickForScopeDetailed(
+                Scope.ALL,
+                cat,
+                emptyList(),
+                included = setOf("UA"),
+                rng = Random(it.toLong()),
+            )
+            assertEquals("ua1", out.station?.uuid)
+        }
+    }
+
+    @Test
+    fun pickRandom_honours_the_filter() {
+        val cat = listOf(station("ua1", country = "UA"), station("de1", country = "DE"))
+        repeat(20) {
+            assertEquals("ua1", pickRandom(cat, included = setOf("UA"), rng = Random(it.toLong()))?.uuid)
+        }
+    }
+
+    // the filter is a taste filter, exactly like an excluded country — an explicit
+    // star outranks it, same asymmetry blocking deliberately does not share.
+    @Test
+    fun favs_scope_ignores_the_filter() {
+        val cat = listOf(station("cat1", country = "UA"))
+        val favs = listOf(station("fav1", country = "DE"))
+        repeat(20) {
+            val out = pickForScopeDetailed(
+                Scope.FAVS,
+                cat,
+                favs,
+                included = setOf("UA"),
+                rng = Random(it.toLong()),
+            )
+            assertEquals("fav1", out.station?.uuid)
+            assertFalse(out.usedFallback)
+        }
+    }
+
+    // a filter that matches nothing must report the fallback rather than pretend
+    // it picked under the filter — the same honesty the favs fallback already has.
+    @Test
+    fun a_filter_matching_nothing_leaves_all_scope_with_no_pick() {
+        val cat = listOf(station("de1", country = "DE"))
+        val out = pickForScopeDetailed(Scope.ALL, cat, emptyList(), included = setOf("UA"))
+        assertNull(out.station)
+    }
+
+    // blocking still outranks the filter: an included country does not resurrect
+    // a station the user pointedly blocked.
+    @Test
+    fun a_blocked_station_in_a_filtered_country_still_never_plays() {
+        assertFalse(
+            allowedStation(station("ua1", country = "UA"), included = setOf("UA"), blocked = setOf("ua1")),
+        )
+    }
+
+    // and an excluded country still wins over an included one, so a country the
+    // user hid cannot come back through the shuffle filter.
+    @Test
+    fun an_excluded_country_beats_the_filter() {
+        assertFalse(
+            allowedStation(station("ua1", country = "UA"), userExcluded = setOf("UA"), included = setOf("UA")),
+        )
     }
 }
