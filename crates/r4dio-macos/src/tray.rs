@@ -15,6 +15,7 @@ pub const QUIT: &str = "Quit r4dio";
 // the account line doubles as the way into the account section, so it has to say
 // something even when no key is stored yet.
 pub const SIGNED_OUT: &str = "Set up sync";
+pub const SIGNED_IN: &str = "Sync";
 
 // play and add-to-favorites read the current state, because a menu that always
 // says "Play" leaves the user guessing which way it will go.
@@ -34,11 +35,13 @@ pub fn favorite_label(is_favorite: bool) -> &'static str {
 
 // the menu must never carry a full key: it is drawn over whatever the user is
 // screen-sharing or presenting. an empty mask means no account, not a blank row.
+// the row is a button into the sync screen, so it leads with the action — a bare
+// key names nothing the user can act on.
 pub fn account_label(masked: &str) -> String {
     let trimmed = masked.trim();
     match trimmed.is_empty() {
         true => SIGNED_OUT.to_string(),
-        false => trimmed.to_string(),
+        false => format!("{SIGNED_IN} · {trimmed}"),
     }
 }
 
@@ -62,9 +65,14 @@ mod tests {
         assert_eq!(favorite_label(true), "Remove from favorites");
     }
 
+    // a bare key reads as a stray string in the menu: it names no action and the
+    // user cannot tell that clicking it opens anything.
     #[test]
-    fn account_label_shows_the_masked_id() {
-        assert_eq!(account_label("r4-7K2P-····-4DF1"), "r4-7K2P-····-4DF1");
+    fn account_label_names_the_action_before_the_key() {
+        assert_eq!(
+            account_label("r4-7K2P-····-4DF1"),
+            "Sync · r4-7K2P-····-4DF1"
+        );
     }
 
     #[test]
@@ -73,12 +81,21 @@ mod tests {
         assert_eq!(account_label("   "), SIGNED_OUT);
     }
 
-    // the row is drawn over shared screens, so a mask that arrived unmasked must
-    // not be widened into a full key by this layer.
+    // the row is drawn over shared screens, so this layer may prefix the action
+    // but must never widen the key itself back into something readable.
     #[test]
-    fn account_label_does_not_lengthen_what_it_is_given() {
+    fn account_label_carries_the_key_exactly_as_masked() {
         let masked = "r4-tutg····sjza";
-        assert_eq!(account_label(masked).len(), masked.len());
+        let label = account_label(masked);
+        assert!(label.ends_with(masked), "key was altered: {label}");
+        assert_eq!(label, format!("{SIGNED_IN} · {masked}"));
+    }
+
+    #[test]
+    fn account_label_never_reveals_a_hidden_middle() {
+        let label = account_label("r4-AAAA····BBBB");
+        assert!(!label.contains("SECRET"));
+        assert_eq!(label.matches("····").count(), 1);
     }
 
     #[test]
