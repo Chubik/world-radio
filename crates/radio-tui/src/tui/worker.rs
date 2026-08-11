@@ -689,6 +689,7 @@ mod tests {
         SearchQuery {
             name: name.map(str::to_string),
             countrycode: country.map(str::to_string),
+            countrycodes: Vec::new(),
             language: None,
             tag: None,
             codec: None,
@@ -815,6 +816,7 @@ mod tests {
             SearchQuery {
                 name: Some(name.into()),
                 countrycode: None,
+                countrycodes: Vec::new(),
                 language: None,
                 tag: None,
                 codec: None,

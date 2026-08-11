@@ -1,7 +1,36 @@
+use super::station::Station;
+
+/// the one rule every surface picks by. `included` empty means unrestricted;
+/// hidden countries and blocked stations always outrank it.
+pub fn allowed_station(
+    station: &Station,
+    excluded_countries: &[String],
+    blocked: &[String],
+    included_countries: &[String],
+) -> bool {
+    let country = station.countrycode.to_uppercase();
+    if excluded_countries
+        .iter()
+        .any(|c| c.to_uppercase() == country)
+    {
+        return false;
+    }
+    if blocked.iter().any(|b| b == &station.stationuuid) {
+        return false;
+    }
+    match included_countries.is_empty() {
+        true => true,
+        false => included_countries
+            .iter()
+            .any(|c| c.to_uppercase() == country),
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchQuery {
     pub name: Option<String>,
     pub countrycode: Option<String>,
+    pub countrycodes: Vec<String>,
     pub language: Option<String>,
     pub tag: Option<String>,
     pub codec: Option<String>,
@@ -36,6 +65,55 @@ impl SearchQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `Station` does not derive Default, so every field is named here.
+    fn st(uuid: &str, country: &str) -> Station {
+        Station {
+            stationuuid: uuid.into(),
+            name: "n".into(),
+            url_resolved: "u".into(),
+            countrycode: country.into(),
+            language: String::new(),
+            tags: String::new(),
+            codec: String::new(),
+            bitrate: 0,
+            votes: 0,
+            geo_lat: None,
+            geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
+        }
+    }
+
+    #[test]
+    fn an_empty_include_set_allows_every_country() {
+        assert!(allowed_station(&st("a", "PL"), &[], &[], &[]));
+    }
+
+    #[test]
+    fn an_include_set_admits_only_its_countries() {
+        let inc = vec!["UA".to_string(), "US".to_string()];
+        assert!(allowed_station(&st("a", "UA"), &[], &[], &inc));
+        assert!(allowed_station(&st("b", "US"), &[], &[], &inc));
+        assert!(!allowed_station(&st("c", "PL"), &[], &[], &inc));
+    }
+
+    #[test]
+    fn country_matching_ignores_case() {
+        let inc = vec!["ua".to_string()];
+        assert!(allowed_station(&st("a", "UA"), &[], &[], &inc));
+    }
+
+    // a blocked station stays blocked even inside the filter, and a hidden
+    // country stays hidden even when the filter names it.
+    #[test]
+    fn blocked_and_excluded_outrank_the_include_set() {
+        let inc = vec!["UA".to_string()];
+        let blocked = vec!["a".to_string()];
+        assert!(!allowed_station(&st("a", "UA"), &[], &blocked, &inc));
+        let excluded = vec!["UA".to_string()];
+        assert!(!allowed_station(&st("b", "UA"), &excluded, &[], &inc));
+    }
 
     #[test]
     fn builds_params_for_set_fields_only() {
