@@ -34,6 +34,8 @@ pub enum WorkerReq {
     QuickTop,
     PopularSeed,
     Sync,
+    // a sync the user did not ask for, so it stays silent; see the doorbell.
+    SyncQuiet,
     SyncCreate,
     SyncLogout,
     SyncDelete,
@@ -76,6 +78,7 @@ pub fn spawn(
     paths: WorkerPaths,
     req_rx: Receiver<WorkerReq>,
     msg_tx: Sender<Msg>,
+    resync_queued: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
     // a prior session may have quit or gone offline before its sync landed;
     // pick that delta back up rather than starting the log over.
@@ -99,7 +102,7 @@ pub fn spawn(
             let (others, last_search) = coalesce(batch);
             let mut shutdown = false;
             for req in others {
-                if handle_req(req, &mut catalog, &paths, &msg_tx) {
+                if handle_req(req, &mut catalog, &paths, &msg_tx, &resync_queued) {
                     shutdown = true;
                     break;
                 }
@@ -108,7 +111,7 @@ pub fn spawn(
                 break;
             }
             if let Some(search) = last_search {
-                handle_req(search, &mut catalog, &paths, &msg_tx);
+                handle_req(search, &mut catalog, &paths, &msg_tx, &resync_queued);
             }
         }
         save_all(&catalog, &paths);
@@ -120,6 +123,7 @@ fn handle_req(
     catalog: &mut Catalog,
     paths: &WorkerPaths,
     msg_tx: &Sender<Msg>,
+    resync_queued: &std::sync::atomic::AtomicBool,
 ) -> bool {
     match req {
         WorkerReq::Shutdown => return true,
@@ -186,6 +190,13 @@ fn handle_req(
         WorkerReq::PopularSeed => handle_popular_seed(catalog, msg_tx),
         WorkerReq::Sync => {
             handle_sync(catalog, paths, msg_tx, true);
+        }
+        // triggered by the server's doorbell, not by the user: it must not
+        // announce itself. the flag is cleared only after the sync has run, so
+        // events arriving while it is in flight collapse into one re-sync.
+        WorkerReq::SyncQuiet => {
+            handle_sync(catalog, paths, msg_tx, false);
+            resync_queued.store(false, std::sync::atomic::Ordering::SeqCst);
         }
         WorkerReq::SyncCreate => {
             match radio_core::sync::SyncClient::new("https://r4dio.net").create_account() {

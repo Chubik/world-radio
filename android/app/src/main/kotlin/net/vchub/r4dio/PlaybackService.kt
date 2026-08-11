@@ -88,6 +88,9 @@ class PlaybackService : MediaSessionService() {
     private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
+    // the debounce: set while a doorbell-triggered sync is queued, cleared once
+    // it has run. a burst of events costs one re-sync, not one per event.
+    private val resyncQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     private val artwork: ByteArray by lazy { crtArtworkPng() }
     private var mirrorJob: Job? = null
     private val main = Handler(Looper.getMainLooper())
@@ -408,8 +411,10 @@ class PlaybackService : MediaSessionService() {
         Log.i("r4dio", "fav cache reconciled: $resolved/${wanted.size} resolved")
     }
 
-    private fun syncNow() {
-        scope.launch {
+    // the Job is what the doorbell debounce joins on, so the queued flag is not
+    // cleared until this sync has actually finished.
+    private fun syncNow(): Job {
+        return scope.launch {
             val key = favStore.syncKey()
             when (key) {
                 // no linked device: nothing to merge, but local settings (including the
@@ -482,10 +487,37 @@ class PlaybackService : MediaSessionService() {
                         mirrorClient.events(key) { evt ->
                             when (runBlocking { favStore.syncKey() } == key) {
                                 false -> {}
-                                true -> scope.launch { onMirrorEvent(evt, myId) }
+                                true -> onStreamEvent(evt, myId)
                             }
                         }
                         delay(3_000)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * what the account event stream does to this service. a play mirrors the
+     * other device; the doorbell queues one re-sync at a time. our own push
+     * echoes back here too, and the re-sync it causes is a no-op the server
+     * answers without ringing again, so it cannot loop.
+     */
+    private fun onStreamEvent(evt: StreamEvent, myId: String) {
+        when (evt) {
+            is StreamEvent.Play -> scope.launch { onMirrorEvent(evt.event, myId) }
+            is StreamEvent.ProfileChanged -> {
+                when (ResyncGate.claim(resyncQueued)) {
+                    false -> {}
+                    true -> scope.launch {
+                        try {
+                            // join, not just launch: the flag must stay set for
+                            // the whole sync so events arriving while it is in
+                            // flight collapse into this one.
+                            syncNow().join()
+                        } finally {
+                            ResyncGate.release(resyncQueued)
+                        }
                     }
                 }
             }
