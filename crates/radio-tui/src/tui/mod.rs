@@ -28,8 +28,34 @@ use radio_core::catalog::{Cache, Catalog, Health};
 use radio_core::paths;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant};
+
+/// what the account event stream does to this app. a play mirrors the other
+/// device; the doorbell queues a re-sync, at most one at a time — the worker
+/// clears `resync_queued` once that sync has run, so a burst of events costs
+/// one sync rather than one each.
+fn dispatch_stream_event(
+    evt: radio_core::mirror::StreamEvent,
+    msg_tx: &Sender<Msg>,
+    req_tx: &Sender<WorkerReq>,
+    resync_queued: &AtomicBool,
+) {
+    match evt {
+        radio_core::mirror::StreamEvent::Play(e) => {
+            let _ = msg_tx.send(Msg::MirrorPlay(e));
+        }
+        // our own push echoes back here too; the re-sync it causes is a no-op
+        // that the server answers without ringing again, so it cannot loop.
+        radio_core::mirror::StreamEvent::ProfileChanged => {
+            let already = resync_queued.swap(true, Ordering::SeqCst);
+            if !already {
+                let _ = req_tx.send(WorkerReq::SyncQuiet);
+            }
+        }
+    }
+}
 
 const TAP_SAMPLES: usize = 2048;
 
@@ -88,9 +114,21 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         pending: data.join("sync_pending.json"),
         profile: data.join("profile.json"),
     };
-    let worker_handle = worker::spawn(catalog, worker_paths, req_rx, msg_tx.clone());
+    // the debounce: set while a doorbell-triggered sync is queued, cleared by
+    // the worker when that sync finishes. a burst of events therefore costs one
+    // re-sync, not one per event.
+    let resync_queued = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_handle = worker::spawn(
+        catalog,
+        worker_paths,
+        req_rx,
+        msg_tx.clone(),
+        resync_queued.clone(),
+    );
 
     let mirror_tx = msg_tx.clone();
+    let mirror_req_tx = req_tx.clone();
+    let listener_queued = resync_queued.clone();
     std::thread::spawn(move || loop {
         let Some(key) = radio_core::sync::load_key() else {
             std::thread::sleep(std::time::Duration::from_secs(10));
@@ -98,12 +136,14 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         };
         let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
         let tx = mirror_tx.clone();
+        let req = mirror_req_tx.clone();
+        let queued = listener_queued.clone();
         let stream_key = key.clone();
         let _ = client.events(&key, |evt| {
             if radio_core::sync::load_key().as_deref() != Some(stream_key.as_str()) {
                 return;
             }
-            let _ = tx.send(Msg::MirrorPlay(evt));
+            dispatch_stream_event(evt, &tx, &req, &queued);
         });
         std::thread::sleep(std::time::Duration::from_secs(3));
     });
@@ -422,5 +462,83 @@ fn run_effects(
                 let _ = req_tx.send(WorkerReq::Update(rel));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use radio_core::mirror::{MirrorEvent, StreamEvent};
+
+    fn play_event() -> StreamEvent {
+        StreamEvent::Play(MirrorEvent {
+            uuid: "u1".into(),
+            name: "One".into(),
+            url: "http://x/1".into(),
+            origin: "devA".into(),
+            seq: 1,
+        })
+    }
+
+    #[test]
+    fn a_doorbell_queues_one_resync() {
+        let (msg_tx, _msg_rx) = channel::<Msg>();
+        let (req_tx, req_rx) = channel::<WorkerReq>();
+        let queued = AtomicBool::new(false);
+
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+
+        assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+        assert!(req_rx.try_recv().is_err());
+    }
+
+    // the debounce: a burst while a sync is still queued must not pile up one
+    // request per event.
+    #[test]
+    fn two_rapid_doorbells_still_queue_only_one_resync() {
+        let (msg_tx, _msg_rx) = channel::<Msg>();
+        let (req_tx, req_rx) = channel::<WorkerReq>();
+        let queued = AtomicBool::new(false);
+
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+
+        assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+        assert!(
+            req_rx.try_recv().is_err(),
+            "the burst must collapse into one"
+        );
+    }
+
+    // once the worker has run that sync it clears the flag, and the next event
+    // must be able to queue again — otherwise live updates stop after the first.
+    #[test]
+    fn a_doorbell_after_the_sync_ran_queues_again() {
+        let (msg_tx, _msg_rx) = channel::<Msg>();
+        let (req_tx, req_rx) = channel::<WorkerReq>();
+        let queued = AtomicBool::new(false);
+
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+        assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+
+        // what WorkerReq::SyncQuiet does when the worker finishes it.
+        queued.store(false, Ordering::SeqCst);
+
+        dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
+        assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+    }
+
+    #[test]
+    fn a_play_event_mirrors_and_never_queues_a_resync() {
+        let (msg_tx, msg_rx) = channel::<Msg>();
+        let (req_tx, req_rx) = channel::<WorkerReq>();
+        let queued = AtomicBool::new(false);
+
+        dispatch_stream_event(play_event(), &msg_tx, &req_tx, &queued);
+
+        assert!(matches!(msg_rx.try_recv(), Ok(Msg::MirrorPlay(_))));
+        assert!(req_rx.try_recv().is_err(), "a play must not trigger a sync");
+        assert!(!queued.load(Ordering::SeqCst));
     }
 }

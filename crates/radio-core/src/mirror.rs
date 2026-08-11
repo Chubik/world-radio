@@ -31,9 +31,29 @@ fn seed_from_time_pid() -> u32 {
         .wrapping_add(std::process::id())
 }
 
+/// what a `data:` line on the account stream can be. anything else — an
+/// unknown event type from a newer server, a keep-alive — parses to `None` and
+/// is dropped, which is what keeps this client working against any server.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StreamEvent {
+    Play(MirrorEvent),
+    ProfileChanged,
+}
+
 pub fn parse_sse_data(line: &str) -> Option<MirrorEvent> {
+    match parse_stream_event(line) {
+        Some(StreamEvent::Play(e)) => Some(e),
+        _ => None,
+    }
+}
+
+pub fn parse_stream_event(line: &str) -> Option<StreamEvent> {
     let json = line.strip_prefix("data:")?.trim();
-    serde_json::from_str(json).ok()
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) == Some("profile_changed") {
+        return Some(StreamEvent::ProfileChanged);
+    }
+    serde_json::from_value(v).ok().map(StreamEvent::Play)
 }
 
 pub struct MirrorClient {
@@ -88,7 +108,7 @@ impl MirrorClient {
         Ok(resp.seq)
     }
 
-    pub fn events<F: FnMut(MirrorEvent)>(&self, key: &str, mut on_event: F) -> anyhow::Result<()> {
+    pub fn events<F: FnMut(StreamEvent)>(&self, key: &str, mut on_event: F) -> anyhow::Result<()> {
         let resp = self
             .client
             .get(format!("{}/events", self.base_url))
@@ -98,7 +118,7 @@ impl MirrorClient {
         let reader = BufReader::new(resp);
         for line in reader.lines() {
             let line = line?;
-            if let Some(evt) = parse_sse_data(&line) {
+            if let Some(evt) = parse_stream_event(&line) {
                 on_event(evt);
             }
         }
@@ -124,6 +144,37 @@ mod tests {
         assert!(parse_sse_data("event: play").is_none());
         assert!(parse_sse_data(": keep-alive").is_none());
         assert!(parse_sse_data("").is_none());
+    }
+
+    #[test]
+    fn parse_stream_event_reads_the_doorbell() {
+        let line = r#"data: {"type":"profile_changed"}"#;
+        assert_eq!(parse_stream_event(line), Some(StreamEvent::ProfileChanged));
+    }
+
+    #[test]
+    fn parse_stream_event_still_reads_a_play() {
+        let line = r#"data: {"uuid":"u1","name":"One","url":"http://x/1","origin":"devA","seq":3}"#;
+        match parse_stream_event(line).unwrap() {
+            StreamEvent::Play(e) => assert_eq!(e.uuid, "u1"),
+            other => panic!("expected a play event, got {other:?}"),
+        }
+    }
+
+    // the doorbell must never be mistaken for a play event: that would set a
+    // bogus now-playing station on every profile change.
+    #[test]
+    fn the_doorbell_is_not_a_play_event() {
+        assert!(parse_sse_data(r#"data: {"type":"profile_changed"}"#).is_none());
+    }
+
+    // an event type this build does not know must be dropped, not crash or be
+    // misread — this is what lets an old client talk to a newer server.
+    #[test]
+    fn an_unknown_event_type_is_dropped() {
+        assert!(parse_stream_event(r#"data: {"type":"something_new"}"#).is_none());
+        assert!(parse_sse_data(r#"data: {"type":"something_new"}"#).is_none());
+        assert!(parse_stream_event("data: not json at all").is_none());
     }
 
     #[test]
