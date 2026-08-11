@@ -125,6 +125,7 @@ impl BrowseFilters {
         SearchQuery {
             name,
             countrycode: self.countries.first().cloned(),
+            countrycodes: Vec::new(),
             language: None,
             tag: self.tags.first().cloned(),
             codec: self.codecs.first().cloned(),
