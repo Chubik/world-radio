@@ -62,6 +62,11 @@ async function poll() {
 }
 
 function wire() {
+  // the build never changes while the app runs, so it is fetched once here
+  // rather than on every poll.
+  invoke("app_version").then((v) => {
+    $("ver").textContent = v;
+  });
   $("primary").addEventListener("click", () => invoke("shuffle").then(poll));
   $("play").addEventListener("click", () => {
     const cmd = lastPhase === "playing" ? "stop" : "resume";

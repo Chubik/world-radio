@@ -393,6 +393,7 @@ fn run(backend: backend::Backend) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_version,
             commands::shuffle,
             commands::play_last,
             commands::resume,
