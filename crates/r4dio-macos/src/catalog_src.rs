@@ -172,7 +172,7 @@ pub fn stations_in_country(catalog: &Catalog, code: &str) -> anyhow::Result<Stat
     bounded(
         catalog,
         &radio_core::catalog::SearchQuery {
-            countrycode: Some(code.to_uppercase()),
+            countrycodes: vec![code.to_uppercase()],
             ..Default::default()
         },
     )
