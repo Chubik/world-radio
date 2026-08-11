@@ -33,15 +33,23 @@ pub fn favorite_label(is_favorite: bool) -> &'static str {
     }
 }
 
-// the menu must never carry a full key: it is drawn over whatever the user is
-// screen-sharing or presenting. an empty mask means no account, not a blank row.
-// the row is a button into the sync screen, so it leads with the action — a bare
-// key names nothing the user can act on.
+// the row is a button into the sync screen and says so. the key never appears
+// here: the menu is drawn over whatever the user is screen-sharing, and a key
+// nobody can copy from a menu item earns nothing by being shown. an empty mask
+// means no account yet, which is a different offer.
 pub fn account_label(masked: &str) -> String {
-    let trimmed = masked.trim();
-    match trimmed.is_empty() {
+    match masked.trim().is_empty() {
         true => SIGNED_OUT.to_string(),
-        false => format!("{SIGNED_IN} · {trimmed}"),
+        false => SIGNED_IN.to_string(),
+    }
+}
+
+/// the running build, for the panel's brand row. empty in, empty out — a
+/// version-less build shows nothing rather than a bare "v".
+pub fn version_label(version: &str) -> String {
+    match version.trim().is_empty() {
+        true => String::new(),
+        false => format!("v{version}"),
     }
 }
 
@@ -65,13 +73,16 @@ mod tests {
         assert_eq!(favorite_label(true), "Remove from favorites");
     }
 
-    // a bare key reads as a stray string in the menu: it names no action and the
-    // user cannot tell that clicking it opens anything.
+    // the key names nothing the user can act on and is visible to anyone
+    // watching a shared screen, so the row carries the action alone. the key
+    // itself belongs in the sync screen, where it can be copied.
     #[test]
-    fn account_label_names_the_action_before_the_key() {
-        assert_eq!(
-            account_label("r4-7K2P-····-4DF1"),
-            "Sync · r4-7K2P-····-4DF1"
+    fn account_label_names_the_action_and_never_the_key() {
+        let label = account_label("r4-7K2P-····-4DF1");
+        assert_eq!(label, "Sync");
+        assert!(
+            !label.contains("r4-"),
+            "the key must not reach the menu: {label}"
         );
     }
 
@@ -81,21 +92,16 @@ mod tests {
         assert_eq!(account_label("   "), SIGNED_OUT);
     }
 
-    // the row is drawn over shared screens, so this layer may prefix the action
-    // but must never widen the key itself back into something readable.
+    // the menu is drawn over whatever the user is screen-sharing, so no part of
+    // the key may reach it — not even a masked one.
     #[test]
-    fn account_label_carries_the_key_exactly_as_masked() {
-        let masked = "r4-tutg····sjza";
-        let label = account_label(masked);
-        assert!(label.ends_with(masked), "key was altered: {label}");
-        assert_eq!(label, format!("{SIGNED_IN} · {masked}"));
-    }
-
-    #[test]
-    fn account_label_never_reveals_a_hidden_middle() {
-        let label = account_label("r4-AAAA····BBBB");
-        assert!(!label.contains("SECRET"));
-        assert_eq!(label.matches("····").count(), 1);
+    fn account_label_leaks_no_part_of_the_key() {
+        for key in ["r4-tutg····sjza", "r4-AAAA····BBBB", "r4-7K2P-····-4DF1"] {
+            let label = account_label(key);
+            assert_eq!(label, SIGNED_IN);
+            assert!(!label.contains("····"), "mask leaked: {label}");
+            assert!(!label.contains("r4-"), "key leaked: {label}");
+        }
     }
 
     #[test]
@@ -106,5 +112,12 @@ mod tests {
     #[test]
     fn update_label_names_the_version_it_installs() {
         assert_eq!(update_label("1.17.0"), "Update to v1.17.0");
+    }
+
+    // the panel shows which build is running, small, next to the brand mark.
+    #[test]
+    fn version_label_is_the_running_build() {
+        assert_eq!(version_label("1.18.1"), "v1.18.1");
+        assert_eq!(version_label(""), "");
     }
 }

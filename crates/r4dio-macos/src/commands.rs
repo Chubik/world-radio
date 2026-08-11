@@ -39,6 +39,13 @@ fn scope_str(scope: Scope) -> &'static str {
 
 pub type Shared = Mutex<Backend>;
 
+// the panel prints which build is running. it never changes while the app is
+// up, so it is fetched once rather than ridden along with the state poll.
+#[tauri::command]
+pub fn app_version() -> String {
+    crate::tray::version_label(env!("CARGO_PKG_VERSION"))
+}
+
 #[tauri::command]
 pub fn shuffle(state: tauri::State<Shared>) {
     state.lock().unwrap().shuffle();

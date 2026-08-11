@@ -31,6 +31,9 @@ body { display: flex; justify-content: flex-end; padding: 8px 14px 14px; }
 .head { gap: 8px; }
 .mark { font-weight: 700; font-size: 11px; letter-spacing: -.01em; color: var(--fg); white-space: nowrap; }
 .mark i { color: var(--hi); font-style: normal; }
+/* the running build, deliberately the quietest thing on the row: it is for
+   answering "which version am i on", not for reading at a glance. */
+.ver { margin-left: 5px; font-size: 8px; font-style: normal; font-weight: 400; color: var(--dim); letter-spacing: 0; }
 .state { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; letter-spacing: .1em; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .state.ok { color: var(--ok); } .state.warn { color: var(--warn); }
