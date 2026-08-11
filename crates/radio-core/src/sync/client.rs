@@ -1,6 +1,23 @@
 use crate::sync::Pending;
 use serde::{Deserialize, Serialize};
 
+/// a last-write-wins field: `value` is opaque to the transport (the server
+/// never inspects it), `at` is the client-side unix time of the change.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Lww {
+    pub value: serde_json::Value,
+    pub at: i64,
+}
+
+/// one play-history entry: `id` is the station uuid, `at` is when it was
+/// played, `gone` marks a removal the same way favourites/blocked do.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryRecord {
+    pub id: String,
+    pub at: i64,
+    pub gone: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SyncData {
     pub favs: Vec<String>,
@@ -11,6 +28,16 @@ pub struct SyncData {
     // byte-identical to the old format for an unchanged device.
     #[serde(default, skip_serializing_if = "Pending::is_empty")]
     pub changed: Pending,
+    // the listening profile. optional/empty and skipped on serialize so a
+    // pre-upgrade server still accepts this payload unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shuffle_filter: Option<Lww>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<Lww>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<Lww>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<HistoryRecord>,
 }
 
 pub struct SyncClient {
@@ -189,5 +216,55 @@ mod tests {
         // older server response with no excluded_countries must still parse
         let d: SyncData = serde_json::from_str("{\"favs\":[],\"blocked\":[]}").unwrap();
         assert!(d.excluded_countries.is_empty());
+    }
+
+    #[test]
+    fn syncdata_omits_profile_fields_when_unset() {
+        // a pre-upgrade server must see a byte-identical payload to before
+        let d = SyncData::default();
+        let j = serde_json::to_string(&d).unwrap();
+        assert!(!j.contains("shuffle_filter"), "{j}");
+        assert!(!j.contains("\"scope\""), "{j}");
+        assert!(!j.contains("\"theme\""), "{j}");
+        assert!(!j.contains("history"), "{j}");
+    }
+
+    #[test]
+    fn syncdata_serializes_profile_fields_when_set() {
+        let d = SyncData {
+            shuffle_filter: Some(Lww {
+                value: serde_json::json!({"countries": ["UA"]}),
+                at: 10,
+            }),
+            scope: Some(Lww {
+                value: serde_json::json!("FAVS"),
+                at: 20,
+            }),
+            theme: Some(Lww {
+                value: serde_json::json!("nord"),
+                at: 30,
+            }),
+            history: vec![HistoryRecord {
+                id: "s1".into(),
+                at: 40,
+                gone: false,
+            }],
+            ..Default::default()
+        };
+        let j = serde_json::to_string(&d).unwrap();
+        assert!(j.contains("\"shuffle_filter\":{\"value\":{\"countries\":[\"UA\"]},\"at\":10}"));
+        assert!(j.contains("\"scope\":{\"value\":\"FAVS\",\"at\":20}"));
+        assert!(j.contains("\"theme\":{\"value\":\"nord\",\"at\":30}"));
+        assert!(j.contains("\"history\":[{\"id\":\"s1\",\"at\":40,\"gone\":false}]"));
+    }
+
+    #[test]
+    fn syncdata_deserializes_without_profile_fields() {
+        // an old server response has none of the new keys at all
+        let d: SyncData = serde_json::from_str("{\"favs\":[],\"blocked\":[]}").unwrap();
+        assert!(d.shuffle_filter.is_none());
+        assert!(d.scope.is_none());
+        assert!(d.theme.is_none());
+        assert!(d.history.is_empty());
     }
 }

@@ -383,6 +383,7 @@ pub struct Model {
     pub catalog_loading: bool,
     pub catalog_count: Option<usize>,
     pub autoplay_first_pending: bool,
+    pub profile: radio_core::sync::Profile,
 }
 
 impl Model {
@@ -416,6 +417,7 @@ impl Model {
             catalog_loading: false,
             catalog_count: None,
             autoplay_first_pending: false,
+            profile: radio_core::sync::Profile::default(),
         }
     }
 

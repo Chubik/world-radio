@@ -12,7 +12,7 @@ pub use api::{resolve, RadioBrowser};
 pub use cache::{text_is_excluded, Cache};
 pub use catalog::Catalog;
 pub use facets::Facets;
-pub use favorites::{Favorites, History};
+pub use favorites::{Favorites, History, Play};
 pub use filter::SearchQuery;
 pub use health::Health;
 pub use station::{codec_is_unstable, Station};

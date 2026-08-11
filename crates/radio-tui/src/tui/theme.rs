@@ -61,23 +61,33 @@ impl Theme {
         }
     }
 
-    pub fn from_slug(s: &str) -> Theme {
+    /// `None` for a slug this build does not know, so a caller that already has a
+    /// theme can keep it. the synced path must use this one: a value written by a
+    /// newer client is not a reason to reset what the user is looking at.
+    pub fn try_from_slug(s: &str) -> Option<Theme> {
         match s {
-            "tube-glow" => Theme::TubeGlow,
-            "hifi-paper" => Theme::HifiPaper,
-            "shortwave-green" => Theme::ShortwaveGreen,
-            "cyber-neon" => Theme::CyberNeon,
-            "atomic-terminal" => Theme::AtomicTerminal,
-            "mainframe-blue" => Theme::MainframeBlue,
-            "nord" => Theme::Nord,
-            "gruvbox" => Theme::Gruvbox,
-            "dracula" => Theme::Dracula,
-            "solarized" => Theme::Solarized,
-            "catppuccin" => Theme::Catppuccin,
-            "rose-pine" => Theme::RosePine,
-            "monokai" => Theme::Monokai,
-            _ => Theme::AmberCrt,
+            "amber-crt" => Some(Theme::AmberCrt),
+            "tube-glow" => Some(Theme::TubeGlow),
+            "hifi-paper" => Some(Theme::HifiPaper),
+            "shortwave-green" => Some(Theme::ShortwaveGreen),
+            "cyber-neon" => Some(Theme::CyberNeon),
+            "atomic-terminal" => Some(Theme::AtomicTerminal),
+            "mainframe-blue" => Some(Theme::MainframeBlue),
+            "nord" => Some(Theme::Nord),
+            "gruvbox" => Some(Theme::Gruvbox),
+            "dracula" => Some(Theme::Dracula),
+            "solarized" => Some(Theme::Solarized),
+            "catppuccin" => Some(Theme::Catppuccin),
+            "rose-pine" => Some(Theme::RosePine),
+            "monokai" => Some(Theme::Monokai),
+            _ => None,
         }
+    }
+
+    /// startup only: the config file has to resolve to some theme, and an absent
+    /// or hand-edited value falls back to the default.
+    pub fn from_slug(s: &str) -> Theme {
+        Theme::try_from_slug(s).unwrap_or(Theme::AmberCrt)
     }
 
     pub fn next(self) -> Theme {
@@ -424,7 +434,14 @@ mod tests {
     fn theme_slug_roundtrips_all() {
         for t in ALL_THEMES {
             assert_eq!(Theme::from_slug(t.slug()), t);
+            assert_eq!(Theme::try_from_slug(t.slug()), Some(t));
         }
+    }
+
+    #[test]
+    fn try_from_slug_rejects_an_unknown_slug() {
+        assert_eq!(Theme::try_from_slug("midnight"), None);
+        assert_eq!(Theme::try_from_slug(""), None);
     }
 
     #[test]

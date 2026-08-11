@@ -2,17 +2,49 @@ package net.vchub.r4dio
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/** a last-write-wins field: [value] is opaque to the transport, [at] is the
+ *  client-side unix time of the change. */
+@Serializable
+data class Lww(val value: JsonElement, val at: Long)
+
+/** one play-history entry: [id] is the station uuid, [gone] marks a removal
+ *  the same way favourites and blocked do. */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+@Serializable
+data class HistoryRecord(
+    val id: String,
+    val at: Long,
+    @kotlinx.serialization.EncodeDefault
+    val gone: Boolean = false,
+)
+
+/**
+ * the four profile fields are nullable/empty and never encoded when unset, so a
+ * device that has never touched them sends a payload byte-identical to the
+ * pre-profile format — see [SyncProfile.outgoing], which is the only place that
+ * decides whether they are set.
+ */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
 @Serializable
 data class SyncData(
     val favs: List<String>,
     val blocked: List<String>,
+    // always on the wire, unlike the four below: the pre-profile payload carried
+    // it unconditionally and the server's own client still does.
+    @kotlinx.serialization.EncodeDefault
     @kotlinx.serialization.SerialName("excluded_countries")
     val excluded_countries: List<String> = emptyList(),
+    @kotlinx.serialization.SerialName("shuffle_filter")
+    val shuffle_filter: Lww? = null,
+    val scope: Lww? = null,
+    val theme: Lww? = null,
+    val history: List<HistoryRecord> = emptyList(),
 )
 
 class SyncClient(
