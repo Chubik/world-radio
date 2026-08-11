@@ -168,7 +168,20 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.crossfade = config.crossfade;
     model.spectrum_style = config.spectrum_style;
     model.keymap = config.keybindings.clone();
-    model.profile = radio_core::sync::Profile::load(&data.join("profile.json"));
+    let profile_path = data.join("profile.json");
+    model.profile = radio_core::sync::Profile::load(&profile_path);
+    // settings chosen before this build existed were never stamped, so without
+    // this they would never be published and every other device would see an
+    // account with no filter at all.
+    let adopted = model.profile.adopt_existing(
+        &model.browse.filters.countries,
+        update::status_filter_to_scope(model.browse.filters.status),
+        model.theme.slug(),
+        now_secs,
+    );
+    if adopted {
+        let _ = model.profile.save(&profile_path);
+    }
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
     }
