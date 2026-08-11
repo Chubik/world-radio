@@ -34,16 +34,23 @@ fun isExcluded(station: Station): Boolean {
  * this station again", while excluding a country is a broad taste filter that an
  * explicit favourite is allowed to override (see fetchByUuids and FavLogic.pickFav).
  * That asymmetry is deliberate — do not collapse the two filters into one rule.
+ *
+ * [included] is the synced shuffle filter and belongs on the taste side: an empty
+ * set means unrestricted, and a favourite outranks it exactly as it outranks
+ * [userExcluded]. an excluded country still wins over an included one, so a country
+ * the user hid cannot come back through the filter.
  */
 fun allowedStation(
     station: Station,
     userExcluded: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
+    included: Set<String> = emptySet(),
 ): Boolean =
     station.url.isNotBlank() &&
         station.uuid !in blocked &&
         !isExcluded(station) &&
-        station.country.uppercase() !in userExcluded
+        station.country.uppercase() !in userExcluded &&
+        (included.isEmpty() || station.country.uppercase() in included)
 
 // the api can include a country but not exclude one, so exclusions are applied
 // here — over-fetching is what keeps the kept list a full `target` afterwards.
@@ -59,8 +66,9 @@ fun pickRandom(
     userExcluded: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
+    included: Set<String> = emptySet(),
 ): Station? {
-    val playable = stations.filter { allowedStation(it, userExcluded, blocked) }
+    val playable = stations.filter { allowedStation(it, userExcluded, blocked, included) }
     if (playable.isEmpty()) return null
     return playable[rng.nextInt(playable.size)]
 }
@@ -80,11 +88,15 @@ fun pickForScopeDetailed(
     userExcluded: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
+    included: Set<String> = emptySet(),
 ): ScopePick =
     when (scope) {
-        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng), false)
+        Scope.ALL -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng, included), false)
+        // the favs arm gets no filter — a star outranks a taste filter, same as it
+        // outranks an excluded country. the fallback below is a catalogue pick, so
+        // it does take the filter.
         Scope.FAVS -> when (val fav = FavLogic.pickFav(favs, blocked, rng)) {
-            null -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng), true)
+            null -> ScopePick(pickRandom(catalog, userExcluded, blocked, rng, included), true)
             else -> ScopePick(fav, false)
         }
     }
@@ -96,7 +108,8 @@ fun pickForScope(
     userExcluded: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
     rng: Random = Random.Default,
-): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, blocked, rng).station
+    included: Set<String> = emptySet(),
+): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, blocked, rng, included).station
 
 class Catalog(
     private val client: OkHttpClient = OkHttpClient(),

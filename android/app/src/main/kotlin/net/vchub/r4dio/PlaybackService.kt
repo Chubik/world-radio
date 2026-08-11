@@ -40,6 +40,7 @@ const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
 const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
 const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
 const val EXTRA_CATALOG_LOADED = "net.vchub.r4dio.EXTRA_CATALOG_LOADED"
+const val EXTRA_FILTER_COUNTRIES = "net.vchub.r4dio.EXTRA_FILTER_COUNTRIES"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -137,9 +138,10 @@ class PlaybackService : MediaSessionService() {
         val sc = favStore.currentScope()
         val hidden = favStore.currentExcluded()
         val blocked = favStore.currentBlocked()
+        val included = favStore.currentFilter()
         // count what the user could actually reach, so the screen can tell
         // "your filters hid everything" apart from "the catalogue is empty"
-        val playable = stations.count { allowedStation(it, hidden, blocked) }
+        val playable = stations.count { allowedStation(it, hidden, blocked, included) }
         // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
         // ordering, so playableCount can be 0 just because the catalogue has not
         // landed yet. this flag is attempted-ness, not station presence, never a
@@ -153,6 +155,7 @@ class PlaybackService : MediaSessionService() {
             putInt(EXTRA_HIDDEN_COUNT, hidden.size)
             putInt(EXTRA_PLAYABLE_COUNT, playable)
             putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
+            putStringArray(EXTRA_FILTER_COUNTRIES, included.sorted().toTypedArray())
         }
         session?.setSessionExtras(extras)
     }
@@ -247,6 +250,7 @@ class PlaybackService : MediaSessionService() {
             // current set and filter on every read path, not only at fetch time.
             val blocked = runBlocking { favStore.currentBlocked() }
             val hidden = runBlocking { favStore.currentHiddenDead() }
+            val included = runBlocking { favStore.currentFilter() }
             val cached = catalogCache.read()
             when (cached.isEmpty()) {
                 true -> {
@@ -258,7 +262,7 @@ class PlaybackService : MediaSessionService() {
                         // catalogAttempted — without this the screen can stay on
                         // whatever syncNow() published first, permanently stale.
                         null -> scope.launch { refreshCustomLayout() }
-                        else -> startFrom(fetched, userExcluded, blocked + hidden)
+                        else -> startFrom(fetched, userExcluded, blocked + hidden, included)
                     }
                 }
                 false -> {
@@ -268,15 +272,20 @@ class PlaybackService : MediaSessionService() {
                     // Main, not run inline — is guaranteed to observe true, not a stale
                     // false read from before this attempt resolved.
                     catalogAttempted = true
-                    startFrom(cached, userExcluded, blocked + hidden)
+                    startFrom(cached, userExcluded, blocked + hidden, included)
                     refreshIfStale(userExcluded, blocked)
                 }
             }
         }
     }
 
-    private fun startFrom(list: List<Station>, userExcluded: Set<String>, blocked: Set<String>) {
-        val pick = pickRandom(list, userExcluded, blocked)
+    private fun startFrom(
+        list: List<Station>,
+        userExcluded: Set<String>,
+        blocked: Set<String>,
+        included: Set<String>,
+    ) {
+        val pick = pickRandom(list, userExcluded, blocked, included = included)
         when (pick) {
             // catalogue loaded but the user's filters left nothing playable: the
             // screen is still on its initial idle state, so it needs the fresh
@@ -413,10 +422,13 @@ class PlaybackService : MediaSessionService() {
                     refreshCustomLayout()
                 }
                 else -> {
-                    val local = SyncData(
+                    val profile = favStore.profile()
+                    val plays = HistoryQueue.records(favStore.pendingPlays())
+                    val local = profile.outgoing(
                         favs = favStore.currentFavUuids().toList(),
                         blocked = favStore.currentBlocked().toList(),
-                        excluded_countries = favStore.currentExcluded().toList(),
+                        excluded = favStore.currentExcluded().toList(),
+                        plays = plays,
                     )
                     val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
                     favStore.applyMerged(
@@ -424,6 +436,14 @@ class PlaybackService : MediaSessionService() {
                         merged.blocked.toSet(),
                         merged.excluded_countries.toSet(),
                     )
+                    // drain exactly what was sent, so a station played during the
+                    // round-trip stays queued for the next push.
+                    favStore.drainPlays(plays)
+                    val nextProfile = profile.applyRemote(merged)
+                    when (nextProfile == profile) {
+                        true -> {}
+                        false -> favStore.applyProfile(nextProfile)
+                    }
                     reconcileFavCache()
                     // setExcluded()/applyMerged() already reset the sync stamp when the
                     // excluded set actually changed — this is what acts on that reset
@@ -517,8 +537,11 @@ class PlaybackService : MediaSessionService() {
             val hidden = withContext(Dispatchers.IO) {
                 runCatching { withTimeout(3000) { favStore.currentHiddenDead() } }.getOrDefault(emptySet<String>())
             }
+            val included = withContext(Dispatchers.IO) {
+                runCatching { withTimeout(3000) { favStore.currentFilter() } }.getOrDefault(emptySet<String>())
+            }
             val cat = withReadyCatalog()
-            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden)
+            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden, included = included)
             if (picked.usedFallback) {
                 Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
             }
@@ -581,7 +604,13 @@ class PlaybackService : MediaSessionService() {
         when (started.isFailure) {
             true -> Log.w("r4dio", "cannot play ${pick.name}: ${started.exceptionOrNull()?.message}")
             false -> {
-                scope.launch { refreshCustomLayout() }
+                // the stamp is the moment it played, taken here and never rewritten at
+                // sync time — re-stamping would make every local entry outrank every
+                // remote one and pin them all at the top of the cap.
+                scope.launch {
+                    favStore.recordPlay(pick.uuid, nowSecs())
+                    refreshCustomLayout()
+                }
                 mirrorAnnounce(pick)
             }
         }

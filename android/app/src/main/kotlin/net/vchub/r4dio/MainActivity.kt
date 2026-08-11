@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
     private var hiddenCount = 0
     private var playableCount = 0
     private var catalogLoaded = false
+    private var filterCountries: List<String> = emptyList()
     private var released = false
     private val favStore by lazy { FavStore(this) }
 
@@ -155,6 +156,7 @@ class MainActivity : ComponentActivity() {
         hiddenCount = extras.getInt(EXTRA_HIDDEN_COUNT, 0)
         playableCount = extras.getInt(EXTRA_PLAYABLE_COUNT, 0)
         catalogLoaded = extras.getBoolean(EXTRA_CATALOG_LOADED, false)
+        filterCountries = extras.getStringArray(EXTRA_FILTER_COUNTRIES)?.toList() ?: emptyList()
     }
 
     /** the two reasons shuffle has nothing to pick, each with its own message. */
@@ -170,6 +172,7 @@ class MainActivity : ComponentActivity() {
         renderStation(c)
         renderScope()
         renderHidden()
+        renderFilter()
         renderFav()
         renderHero()
         renderPlayButton(c?.isPlaying ?: false)
@@ -239,6 +242,17 @@ class MainActivity : ComponentActivity() {
                 pill.visibility = View.VISIBLE
             }
             false -> pill.visibility = View.GONE
+        }
+    }
+
+    private fun renderFilter() {
+        val pill = findViewById<TextView>(R.id.filter_pill)
+        when (val label = filterPillLabel(filterCountries, scope)) {
+            null -> pill.visibility = View.GONE
+            else -> {
+                pill.text = label
+                pill.visibility = View.VISIBLE
+            }
         }
     }
 

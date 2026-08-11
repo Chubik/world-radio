@@ -2,6 +2,7 @@ package net.vchub.r4dio
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,6 +87,35 @@ class HomeStateTest {
     @Test
     fun no_warn_when_playable_without_a_loaded_catalogue_is_impossible_in_practice() {
         assertFalse(isAllHiddenWarn(playableCount = 5, hiddenCount = 3, scope = "all", catalogLoaded = false))
+    }
+
+    @Test
+    fun no_filter_means_no_filter_pill() {
+        assertNull(filterPillLabel(emptyList(), scope = "all"))
+    }
+
+    @Test
+    fun the_filter_pill_names_the_countries() {
+        assertEquals("FILTER: UA", filterPillLabel(listOf("UA"), scope = "all"))
+        assertEquals("FILTER: UA·PL", filterPillLabel(listOf("UA", "PL"), scope = "all"))
+        assertEquals("FILTER: UA·PL·DE", filterPillLabel(listOf("UA", "PL", "DE"), scope = "all"))
+    }
+
+    // a long list would push the scope pill off the row, so it counts the rest
+    @Test
+    fun a_long_filter_is_summarised_after_three_codes() {
+        assertEquals("FILTER: UA·PL·DE +1", filterPillLabel(listOf("UA", "PL", "DE", "FR"), scope = "all"))
+        assertEquals(
+            "FILTER: UA·PL·DE +3",
+            filterPillLabel(listOf("UA", "PL", "DE", "FR", "IT", "ES"), scope = "all"),
+        )
+    }
+
+    // favourites bypass the filter (FavLogic.pickFav ignores it), exactly as they
+    // bypass the excluded countries — advertising it there would be a lie.
+    @Test
+    fun the_filter_pill_is_hidden_in_favs_scope() {
+        assertNull(filterPillLabel(listOf("UA"), scope = "favs"))
     }
 
     @Test

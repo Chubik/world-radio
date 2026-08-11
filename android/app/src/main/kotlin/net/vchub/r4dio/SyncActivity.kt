@@ -91,15 +91,32 @@ class SyncActivity : ComponentActivity() {
 
     private suspend fun linkAndMerge(key: String) {
         favStore.setSyncKey(key)
-        val local = SyncData(
+        val profile = favStore.profile()
+        val plays = HistoryQueue.records(favStore.pendingPlays())
+        val local = profile.outgoing(
             favs = favStore.currentFavUuids().toList(),
             blocked = favStore.currentBlocked().toList(),
-            excluded_countries = favStore.currentExcluded().toList(),
+            excluded = favStore.currentExcluded().toList(),
+            plays = plays,
         )
         val server = withContext(Dispatchers.IO) { syncClient.pull(key) } ?: SyncData(emptyList(), emptyList())
+        // the id lists union; the profile does not — it is last-write-wins, so the
+        // newer side of each field wins and the merged profile is what gets pushed.
         val merged = SyncMerge.mergedData(local, server)
         favStore.applyMerged(merged.favs.toSet(), merged.blocked.toSet(), merged.excluded_countries.toSet())
-        withContext(Dispatchers.IO) { syncClient.push(key, merged) }
+        val nextProfile = profile.applyRemote(server)
+        when (nextProfile == profile) {
+            true -> {}
+            false -> favStore.applyProfile(nextProfile)
+        }
+        val push = nextProfile.outgoing(
+            favs = merged.favs,
+            blocked = merged.blocked,
+            excluded = merged.excluded_countries,
+            plays = plays,
+        )
+        withContext(Dispatchers.IO) { syncClient.push(key, push) }
+        favStore.drainPlays(plays)
         // linking a device can pull in a different excluded-country set than this
         // device had; applyMerged() already reset the sync stamp if so, but only the
         // running service's syncNow()/refreshIfStale() acts on that reset.
