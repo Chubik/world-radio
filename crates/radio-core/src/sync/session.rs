@@ -296,6 +296,27 @@ mod tests {
     }
 
     #[test]
+    fn local_history_records_are_stable_across_two_syncs() {
+        // the defect: re-stamping every local id at sync time made all of them
+        // outrank every remote play and pin them at the top of the cap, so a
+        // station played on another device could never reach this one.
+        let plays = vec![
+            Play {
+                id: "u1".into(),
+                at: 1_700_000_000,
+            },
+            Play {
+                id: "u2".into(),
+                at: 1_600_000_000,
+            },
+        ];
+        let once = local_history_records(&plays);
+        assert_eq!(once[0].at, 1_700_000_000);
+        assert_eq!(once[1].at, 1_600_000_000);
+        assert_eq!(once, local_history_records(&plays), "must not re-stamp");
+    }
+
+    #[test]
     fn merge_history_with_nothing_remote_is_none() {
         assert!(merge_history(
             &[Play {
