@@ -747,8 +747,10 @@ fn apply_profile_synced(
     if let Some(status) = scope.as_deref().and_then(scope_to_status_filter) {
         model.browse.filters.status = status;
     }
-    if let Some(theme) = theme {
-        model.theme = Theme::from_slug(&theme);
+    // only a slug this build knows, mirroring scope_to_status_filter: an unknown
+    // value leaves local state untouched rather than resetting it.
+    if let Some(theme) = theme.as_deref().and_then(Theme::try_from_slug) {
+        model.theme = theme;
     }
     effects
 }
@@ -2142,6 +2144,25 @@ mod tests {
             },
         );
         assert_eq!(m.browse.filters.status, StatusFilter::Blocked);
+    }
+
+    #[test]
+    fn an_unknown_theme_leaves_the_local_theme_untouched() {
+        // a newer client publishing a theme this build does not know must not
+        // silently reset every cli on the account to the default — the theme is
+        // written back to config.toml at exit, so the reset would persist.
+        let mut m = model();
+        m.theme = crate::tui::theme::Theme::Gruvbox;
+        update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: None,
+                theme: Some("midnight".into()),
+            },
+        );
+        assert_eq!(m.theme, crate::tui::theme::Theme::Gruvbox);
     }
 
     #[test]

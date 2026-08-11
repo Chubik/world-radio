@@ -197,16 +197,30 @@ class FavStore(context: Context) {
      * enum only moves when the synced word is one this build can show — a `recent`
      * or `dead` from the desktop is stored and re-published verbatim, but must not
      * approximate itself into ALL here.
+     *
+     * the stored stamps are re-read inside the transaction and run through
+     * [SyncProfile.keepingNewerLocal] rather than trusted from the caller's
+     * snapshot: [profile] was computed from a read taken before the round-trip, so
+     * a scope tapped while the request was in flight would otherwise be reverted.
      */
     suspend fun applyProfile(profile: SyncProfile) {
         store.edit { prefs ->
-            prefs[keyFilterCountries] = profile.countries.toSet()
-            prefs[keyFilterAt] = profile.countriesAt
-            prefs[keyScopeWire] = profile.scope
-            prefs[keyScopeAt] = profile.scopeAt
-            prefs[keyTheme] = profile.theme
-            prefs[keyThemeAt] = profile.themeAt
-            when (val local = localScope(profile.scope)) {
+            val stored = SyncProfile(
+                countries = (prefs[keyFilterCountries] ?: emptySet()).sorted(),
+                countriesAt = prefs[keyFilterAt] ?: 0L,
+                scope = prefs[keyScopeWire].orEmpty(),
+                scopeAt = prefs[keyScopeAt] ?: 0L,
+                theme = prefs[keyTheme].orEmpty(),
+                themeAt = prefs[keyThemeAt] ?: 0L,
+            )
+            val next = profile.keepingNewerLocal(stored)
+            prefs[keyFilterCountries] = next.countries.toSet()
+            prefs[keyFilterAt] = next.countriesAt
+            prefs[keyScopeWire] = next.scope
+            prefs[keyScopeAt] = next.scopeAt
+            prefs[keyTheme] = next.theme
+            prefs[keyThemeAt] = next.themeAt
+            when (val local = localScope(next.scope)) {
                 null -> {}
                 else -> prefs[keyScope] = local.name
             }

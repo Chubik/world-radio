@@ -154,6 +154,49 @@ class ProfileSyncTest {
         assertTrue(body, body.contains(""""scope":{"value":"dead","at":20}"""))
     }
 
+    // the defect: the profile written back after a sync came from a snapshot taken
+    // before the round-trip, so a scope tapped while the request was in flight was
+    // silently reverted to what the phone had held a second earlier.
+    @Test
+    fun a_scope_tapped_during_the_round_trip_survives_the_write_back() {
+        val sent = SyncProfile(scope = "all", scopeAt = 10)
+        val merged = sent.applyRemote(dataWith(scope = Lww(JsonPrimitive("all"), 10)))
+        val tappedMeanwhile = SyncProfile(scope = "favorites", scopeAt = 50)
+        val written = merged.keepingNewerLocal(tappedMeanwhile)
+        assertEquals("favorites", written.scope)
+        assertEquals(50L, written.scopeAt)
+    }
+
+    // and the ordinary case is untouched: nothing moved locally, so the merged
+    // profile is written whole.
+    @Test
+    fun an_untouched_field_takes_the_merged_value() {
+        val merged = SyncProfile(scope = "recent", scopeAt = 40, theme = "nord", themeAt = 40)
+        val stored = SyncProfile(scope = "all", scopeAt = 10, theme = "amber-crt", themeAt = 10)
+        assertEquals(merged, merged.keepingNewerLocal(stored))
+    }
+
+    // every field, not just the one android can edit: a future editor gets the
+    // same protection for free rather than re-introducing the bug.
+    @Test
+    fun each_field_keeps_whichever_stamp_is_newer() {
+        val merged = SyncProfile(
+            countries = listOf("PL"), countriesAt = 40,
+            scope = "recent", scopeAt = 10,
+            theme = "nord", themeAt = 40,
+        )
+        val stored = SyncProfile(
+            countries = listOf("UA"), countriesAt = 10,
+            scope = "favorites", scopeAt = 50,
+            theme = "gruvbox", themeAt = 10,
+        )
+        val written = merged.keepingNewerLocal(stored)
+        assertEquals(listOf("PL"), written.countries)
+        assertEquals("favorites", written.scope)
+        assertEquals(50L, written.scopeAt)
+        assertEquals("nord", written.theme)
+    }
+
     @Test
     fun setting_the_scope_stamps_the_change() {
         val p = SyncProfile().withScope("favorites", 50)

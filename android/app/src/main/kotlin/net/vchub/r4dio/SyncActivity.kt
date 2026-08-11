@@ -115,8 +115,13 @@ class SyncActivity : ComponentActivity() {
             excluded = merged.excluded_countries,
             plays = plays,
         )
-        withContext(Dispatchers.IO) { syncClient.push(key, push) }
-        favStore.drainPlays(plays)
+        val pushed = withContext(Dispatchers.IO) { syncClient.push(key, push) }
+        // only drop what the server actually took: a failed push must leave the
+        // plays queued for the next sync rather than losing them.
+        when (pushed) {
+            null -> {}
+            else -> favStore.drainPlays(plays)
+        }
         // linking a device can pull in a different excluded-country set than this
         // device had; applyMerged() already reset the sync stamp if so, but only the
         // running service's syncNow()/refreshIfStale() acts on that reset.

@@ -721,6 +721,9 @@ class PlaybackService : MediaSessionService() {
                         favStore.setScope(next)
                         refreshCustomLayout()
                         refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
+                        // the scope is carried by the account: setScope stamps it, and
+                        // only this call takes it to the other devices.
+                        syncNow()
                         shuffle()
                     }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
