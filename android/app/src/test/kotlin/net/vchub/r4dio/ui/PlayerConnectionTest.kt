@@ -93,4 +93,21 @@ class PlayerConnectionTest {
         conn.send("net.vchub.r4dio.TOGGLE")
         assertEquals(listOf("net.vchub.r4dio.TOGGLE"), second.sent)
     }
+
+    @Test
+    fun release_before_connect_does_not_throw() {
+        val conn = PlayerConnection { }
+        conn.release()
+    }
+
+    @Test
+    fun a_second_release_does_not_throw() {
+        val handle = FakeHandle()
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        conn.release()
+        conn.release()
+    }
 }
