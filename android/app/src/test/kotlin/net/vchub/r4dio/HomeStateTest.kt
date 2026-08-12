@@ -111,11 +111,25 @@ class HomeStateTest {
         )
     }
 
-    // favourites bypass the filter (FavLogic.pickFav ignores it), exactly as they
-    // bypass the excluded countries — advertising it there would be a lie.
+    // favourites bypass the filter (FavLogic.pickFav ignores it), so it is not in
+    // force there — but hiding it taught the user that a filter they had set had
+    // vanished. it stays on screen and is shown as not applying instead.
     @Test
-    fun the_filter_pill_is_hidden_in_favs_scope() {
-        assertNull(filterPillLabel(listOf("UA"), scope = "favs"))
+    fun the_filter_pill_still_shows_in_favs_scope() {
+        assertEquals("FILTER: UA", filterPillLabel(listOf("UA"), scope = "favs"))
+    }
+
+    @Test
+    fun the_filter_is_in_force_only_outside_favs_scope() {
+        assertTrue(filterIsInForce(listOf("UA"), scope = "all"))
+        assertFalse(filterIsInForce(listOf("UA"), scope = "favs"))
+    }
+
+    // with no filter set there is nothing to be in force, in either scope.
+    @Test
+    fun an_empty_filter_is_never_in_force() {
+        assertFalse(filterIsInForce(emptyList(), scope = "all"))
+        assertFalse(filterIsInForce(emptyList(), scope = "favs"))
     }
 
     @Test

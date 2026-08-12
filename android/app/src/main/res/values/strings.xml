@@ -66,4 +66,8 @@
     <string name="widget_cd_shuffle">shuffle</string>
     <string name="widget_cd_toggle">play or pause</string>
     <string name="widget_description">Shuffle a random station from the home screen</string>
+    <string name="filter_clear_title">Play the whole world again?</string>
+    <string name="filter_clear_body">Shuffle is limited to %1$s right now. Clearing brings back every country — on this phone and every device on your account.</string>
+    <string name="filter_clear_yes">Play everywhere</string>
+    <string name="filter_clear_no">Keep %1$s</string>
 </resources>
