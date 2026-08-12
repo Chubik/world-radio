@@ -51,6 +51,28 @@ fun filterPillLabel(countries: List<String>, scope: String): String? {
 }
 
 /**
+ * how many stations the phone holds. the catalogue used to be either "the top-1000"
+ * or nothing; it now grows in the background and when a filter pulls a country in,
+ * so a silent partial catalogue would leave the user guessing what shuffle can even
+ * reach. a trailing "+" says more is still coming.
+ *
+ * grouped with a space rather than a comma or a dot — both read as a decimal point
+ * somewhere, and this is read at a glance.
+ */
+fun catalogueLabel(held: Int, growing: Boolean): String {
+    if (held <= 0) return ""
+    val grouped = held.toString()
+        .reversed()
+        .chunked(3)
+        .joinToString(" ")
+        .reversed()
+    return when (growing) {
+        true -> "$grouped STATIONS +"
+        false -> "$grouped STATIONS"
+    }
+}
+
+/**
  * whether the filter actually decides what plays. favourites bypass it entirely
  * (FavLogic.pickFav ignores it, exactly as it ignores excluded countries), so in
  * favs scope a set filter is real but dormant — and the pill has to say so.
