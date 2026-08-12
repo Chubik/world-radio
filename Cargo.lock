@@ -3478,6 +3478,7 @@ version = "1.4.5"
 dependencies = [
  "anyhow",
  "fastrand",
+ "mockito",
  "qrcode",
  "radio-audio",
  "radio-core",

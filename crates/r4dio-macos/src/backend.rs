@@ -673,7 +673,14 @@ impl Backend {
         let Some(key) = radio_core::sync::load_key() else {
             return Ok(());
         };
-        let result = self.sync_inner(&key);
+        self.sync_with_key(&key)
+    }
+
+    /// the key is a parameter so a test can drive the whole of `sync` against a
+    /// stub server without a key in the real data dir — the invariant above is
+    /// only worth anything if something exercises it end to end.
+    fn sync_with_key(&mut self, key: &str) -> anyhow::Result<()> {
+        let result = self.sync_inner(key);
         let profile = radio_core::sync::Profile::load(&self.profile_path);
         seed_from_profile(&mut self.state, &profile, self.catalog.blacklist_ids());
         result
@@ -747,6 +754,47 @@ mod tests {
             applying_mirror: false,
             mirrored_now: false,
         }
+    }
+
+    /// a backend wired to a stub sync server that answers the push with a
+    /// `UA` filter, so `Backend::sync` can be driven end to end. `R4DIO_SYNC_URL`
+    /// is the seam `SyncClient::new` already honours; it is process-wide, so
+    /// these tests hold a lock rather than running concurrently.
+    ///
+    /// the returned server and mock must stay alive for the call — dropping the
+    /// server closes the port and the push fails for the wrong reason.
+    fn syncing_backend() -> (
+        Backend,
+        PathBuf,
+        mockito::ServerGuard,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
+        // `R4DIO_SYNC_URL` is process-wide state, so only one of these may run at
+        // a time; the guard is returned so it is held for the whole test.
+        static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut server = mockito::Server::new();
+        let _mock = server
+            .mock("PUT", "/sync")
+            .with_header("content-type", "application/json")
+            .with_body(
+                // `value` is an object with `countries`, not a bare array — that
+                // is the shape `session::remote_lww_filter` reads.
+                r#"{"favs":[],"blocked":[],"excluded_countries":[],
+                    "shuffle_filter":{"value":{"countries":["UA"]},"at":9999999999},
+                    "scope":{"value":"all","at":1},
+                    "theme":{"value":"","at":0},"history":[]}"#,
+            )
+            .create();
+        std::env::set_var("R4DIO_SYNC_URL", server.url());
+
+        // leaked deliberately: the mock must answer for the whole call, and it is
+        // owned by the server guard that the caller keeps alive.
+        std::mem::forget(_mock);
+        let b = test_backend();
+        let dir = b.profile_path.parent().unwrap().to_path_buf();
+        (b, dir, server, lock)
     }
 
     fn mirror(uuid: &str, origin: &str, seq: u64) -> radio_core::mirror::MirrorEvent {
@@ -999,59 +1047,68 @@ mod tests {
     /// followed anyway.
     #[test]
     fn a_failure_after_the_profile_is_written_still_reaches_the_pool() {
-        let dir =
-            std::env::temp_dir().join(format!("r4dio-seed-after-fail-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let profile_path = dir.join("profile.json");
+        let (mut b, dir, _server, _lock) = syncing_backend();
 
-        let mut state = MiniState::new();
-        state.load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
-        seed_from_profile(&mut state, &radio_core::sync::Profile::default(), &[]);
-        assert_eq!(state.active_stations().len(), 2, "unfiltered to begin with");
+        // the pending log is where the post-write failure comes from: a directory
+        // cannot be overwritten by a file, so `Pending::clear_pushed` — which runs
+        // *after* profile.save has already put the new filter on disk — fails for
+        // real, with a real io error, on the real code path. nothing is stubbed
+        // out of `sync` itself.
+        std::fs::create_dir_all(&b.pending_path).unwrap();
 
-        // exactly what sync does: the merged profile reaches disk...
-        let mut profile = radio_core::sync::Profile::default();
-        profile.set_countries(vec!["UA".into()], 100);
-        profile.save(&profile_path).unwrap();
-        // ...and then a later step fails, so sync_inner returns Err.
-        let post_write: anyhow::Result<()> = Err(anyhow::anyhow!("disk full"));
-
-        // the wrapper's contract: seed from what is on disk regardless.
-        let on_disk = radio_core::sync::Profile::load(&profile_path);
-        seed_from_profile(&mut state, &on_disk, &[]);
-
-        assert!(post_write.is_err(), "the post-write step really failed");
+        b.state
+            .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
         assert_eq!(
-            state.active_stations().len(),
-            1,
-            "the filter reached disk but never the pool — the user would still hear PL"
+            b.state.active_stations().len(),
+            2,
+            "unfiltered to begin with"
         );
-        assert_eq!(state.active_stations()[0].uuid, "a");
+
+        let err = b
+            .sync_with_key("r4-test")
+            .expect_err("the post-write step must really fail");
+
+        assert!(
+            b.profile_path.exists(),
+            "precondition: the merged filter reached disk before the failure ({err})"
+        );
+        assert_eq!(
+            radio_core::sync::Profile::load(&b.profile_path).countries,
+            vec!["UA".to_string()],
+            "precondition: the filter on disk is the merged one"
+        );
+        // the invariant: the filter that reached disk also reached the live pick
+        // state, even though sync returned Err. without it the user shuffles and
+        // still hears PL until the app is relaunched.
+        assert_eq!(
+            b.state.filter(),
+            ["UA".to_string()],
+            "the filter reached disk but never the pick state — the user would still hear PL"
+        );
+        // and it really governs the picks, not just a field: the sync legitimately
+        // reloads the pool from the (empty) test catalogue, so it is re-populated
+        // here to show the seeded filter cutting it down.
+        b.state
+            .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        assert_eq!(b.state.active_stations().len(), 1);
+        assert_eq!(b.state.active_stations()[0].uuid, "a");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `sync` must re-seed on the error path, not only the happy one. this reads
-    /// the source, because the failure it guards needs a full sync round-trip to
-    /// reproduce and the ordering is the whole invariant.
+    // the same invariant on the happy path, so a fix that only ever seeds on
+    // failure would not pass either.
     #[test]
-    fn sync_seeds_outside_the_fallible_body() {
-        let src = include_str!("backend.rs");
-        let body = src
-            .split("pub fn sync(&mut self) -> anyhow::Result<()> {")
-            .nth(1)
-            .expect("sync must exist");
-        let seed = body.find("seed_from_profile").expect("sync must seed");
-        let ret = body
-            .find("\n        result")
-            .expect("sync must return the inner result");
-        assert!(
-            seed < ret,
-            "the seed must run before sync returns, so an Err from the merge cannot skip it"
-        );
-        assert!(
-            !body[..seed].contains('?'),
-            "no `?` may sit between entering sync and the seed, or a failure would skip it"
-        );
+    fn a_successful_sync_reaches_the_pool_too() {
+        let (mut b, dir, _server, _lock) = syncing_backend();
+
+        b.sync_with_key("r4-test").expect("this sync must succeed");
+
+        assert_eq!(b.state.filter(), ["UA".to_string()]);
+        b.state
+            .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        assert_eq!(b.state.active_stations().len(), 1);
+        assert_eq!(b.state.active_stations()[0].uuid, "a");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // the echo guard's second half. the silent branch starts no audio but does
