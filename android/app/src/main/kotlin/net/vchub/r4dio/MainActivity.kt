@@ -1,6 +1,7 @@
 package net.vchub.r4dio
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -73,6 +74,21 @@ class MainActivity : ComponentActivity() {
         findViewById<View>(R.id.btn_sync).setOnClickListener {
             startActivity(Intent(this, SyncActivity::class.java))
         }
+        // the filter is shared across every device on the account, so clearing it
+        // is not a local view toggle — it is confirmed rather than done on a tap
+        // that is easy to make by accident reaching for the screen in a car.
+        findViewById<View?>(R.id.filter_pill)?.setOnClickListener {
+            if (filterCountries.isEmpty()) {
+                return@setOnClickListener
+            }
+            val codes = filterCountries.joinToString("·")
+            AlertDialog.Builder(this, R.style.R4dioDialog)
+                .setTitle(R.string.filter_clear_title)
+                .setMessage(getString(R.string.filter_clear_body, codes))
+                .setPositiveButton(R.string.filter_clear_yes) { _, _ -> send(CMD_CLEAR_FILTER) }
+                .setNegativeButton(getString(R.string.filter_clear_no, codes), null)
+                .show()
+        }
         findViewById<View>(R.id.awake_pill).setOnClickListener {
             lifecycleScope.launch {
                 val next = nextKeepAwake(favStore.currentKeepAwake())
@@ -82,7 +98,9 @@ class MainActivity : ComponentActivity() {
         }
         // android grants this one only from its own settings screen, so the pill
         // opens that rather than pretending it can ask here.
-        findViewById<View>(R.id.overlay_pill).setOnClickListener {
+        // null in landscape, which carries a shorter pill row: every pill lookup
+        // here is optional for that reason, not because the id might be missing.
+        findViewById<View?>(R.id.overlay_pill)?.setOnClickListener {
             if (canDrawOverlay(this)) {
                 Toast.makeText(this, R.string.home_overlay_desc, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -132,7 +150,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyOverlayPill(on: Boolean) {
-        findViewById<TextView>(R.id.overlay_pill).apply {
+        findViewById<TextView?>(R.id.overlay_pill)?.apply {
             setText(if (on) R.string.home_overlay_on else R.string.home_overlay_off)
             setTextColor(getColor(if (on) R.color.amber_hi else R.color.dim))
             setBackgroundResource(if (on) R.drawable.bg_pill_on else R.drawable.bg_pill)
@@ -286,12 +304,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderFilter() {
-        val pill = findViewById<TextView>(R.id.filter_pill)
+        val pill = findViewById<TextView?>(R.id.filter_pill) ?: return
         when (val label = filterPillLabel(filterCountries, scope)) {
             null -> pill.visibility = View.GONE
             else -> {
+                val inForce = filterIsInForce(filterCountries, scope)
                 pill.text = label
                 pill.visibility = View.VISIBLE
+                // dimmed rather than hidden while favourites bypass it: the filter
+                // is still set, and a pill that vanished read as "it is gone".
+                pill.setBackgroundResource(if (inForce) R.drawable.bg_pill_on else R.drawable.bg_pill)
+                pill.setTextColor(getColor(if (inForce) R.color.amber_hi else R.color.dim))
             }
         }
     }
