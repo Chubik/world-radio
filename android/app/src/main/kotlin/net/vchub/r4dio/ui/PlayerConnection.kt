@@ -13,11 +13,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import net.vchub.r4dio.PlaybackService
 
-/** the service packs country/codec/bitrate into one artist string. */
-internal fun parseArtist(artist: String): Pair<String, String> {
-    val parts = artist.split(" · ")
-    val country = parts.getOrNull(0).orEmpty()
-    val codec = parts.getOrNull(1).orEmpty()
+/** splits the packed artist string ("SA · MP3 · 128k") into country and codec. */
+internal fun parseArtist(artist: String?): Pair<String?, String?> {
+    val parts = artist?.split("·")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+    val country = parts.getOrNull(0)
+    val codec = parts.getOrNull(1)
     return country to codec
 }
 
@@ -87,7 +87,11 @@ class PlayerConnection(
 
     internal fun onMetadata(station: String, artist: String) {
         val (country, codec) = parseArtist(artist)
-        _state.value = _state.value.copy(stationName = station, country = country, codec = codec)
+        _state.value = _state.value.copy(
+            stationName = station,
+            country = country.orEmpty(),
+            codec = codec.orEmpty(),
+        )
     }
 }
 
