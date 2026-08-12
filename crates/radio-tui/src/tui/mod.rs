@@ -64,7 +64,9 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     let data = paths::ensure_data_dir()?;
     logger::init(&data.join("world-radio.log"));
     let config = Config::load(&data.join("config.toml"));
-    let theme = Theme::from_slug(&config.theme);
+    // the profile owns the theme now; this is only the fallback the seeding
+    // below keeps when the profile has not chosen one.
+    let theme = Theme::from_slug("");
     let tier = detect_tier();
     let glyphs = pick_glyphs(&config, no_emoji_flag, tier);
 
@@ -162,7 +164,6 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.browse.facets_loading = true;
     model.browse.loading = true;
     model.browse.query = config.query.clone();
-    model.browse.filters = config.filters.clone();
     model.browse.excluded_countries = excluded_countries;
     model.fft_divisor = config.fft_divisor;
     model.crossfade = config.crossfade;
@@ -172,16 +173,19 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.profile = radio_core::sync::Profile::load(&profile_path);
     // settings chosen before this build existed were never stamped, so without
     // this they would never be published and every other device would see an
-    // account with no filter at all.
+    // account with no filter at all. a field the profile already stamped is
+    // never touched, so this cannot undo what another device chose.
+    let legacy = config.legacy_settings();
     let adopted = model.profile.adopt_existing(
-        &model.browse.filters.countries,
-        update::status_filter_to_scope(model.browse.filters.status),
-        model.theme.slug(),
+        &legacy.countries,
+        legacy.scope.as_deref().unwrap_or(""),
+        legacy.theme.as_deref().unwrap_or(""),
         now_secs,
     );
     if adopted {
         let _ = model.profile.save(&profile_path);
     }
+    seed_from_profile(&mut model);
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
     }
@@ -242,8 +246,37 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         ColorTier::Truecolor => !model.glyphs.emoji_flags,
         ColorTier::Ansi16 => config.no_emoji,
     };
-    let out_cfg = Config {
-        theme: model.theme.slug().to_string(),
+    exit_config(&model, no_emoji).save(&data.join("config.toml"));
+    let restore_result = restore_terminal(&mut terminal);
+    // state is saved on every mutation, so exit does not wait for the worker;
+    // signal shutdown best-effort and return immediately.
+    let _ = req_tx.send(WorkerReq::Shutdown);
+    drop(worker_handle);
+    loop_result.and(restore_result)
+}
+
+/// pushes the profile into the ui at startup. this is the only seed for the
+/// filter, the scope and the theme — the defect this replaces read them from
+/// `config.toml`, which a sync could never update. a value the profile has not
+/// chosen, or one this build does not recognise, leaves the default in place
+/// rather than resetting the user.
+fn seed_from_profile(model: &mut Model) {
+    model.browse.filters.countries = model.profile.countries.clone();
+    if let Some(status) = update::scope_to_status_filter(&model.profile.scope) {
+        model.browse.filters.status = status;
+    }
+    if let Some(theme) = Theme::try_from_slug(&model.profile.theme) {
+        model.theme = theme;
+    }
+}
+
+/// what exit is still allowed to write. the filter, the scope and the theme are
+/// deliberately absent: writing them here is exactly what used to overwrite the
+/// values a sync had just brought in.
+fn exit_config(model: &Model, no_emoji: bool) -> Config {
+    Config {
+        legacy_theme: None,
+        legacy_filters: None,
         no_emoji,
         last_station: model.now.uuid.clone(),
         query: model.browse.query.clone(),
@@ -251,15 +284,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         crossfade: model.crossfade,
         spectrum_style: model.spectrum_style,
         keybindings: model.keymap.clone(),
-        filters: model.browse.filters.clone(),
-    };
-    out_cfg.save(&data.join("config.toml"));
-    let restore_result = restore_terminal(&mut terminal);
-    // state is saved on every mutation, so exit does not wait for the worker;
-    // signal shutdown best-effort and return immediately.
-    let _ = req_tx.send(WorkerReq::Shutdown);
-    drop(worker_handle);
-    loop_result.and(restore_result)
+    }
 }
 
 fn install_panic_hook() {
@@ -540,6 +565,165 @@ mod tests {
 
         dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
         assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+    }
+
+    fn profile_with(countries: &[&str], scope: &str, theme: &str) -> radio_core::sync::Profile {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(countries.iter().map(|c| c.to_string()).collect(), 100);
+        p.set_scope(scope, 100);
+        p.set_theme(theme, 100);
+        p
+    }
+
+    // the whole defect: device b changed the filter while this tui was closed,
+    // the sync wrote it into profile.json, and launching must show that value —
+    // not whatever config.toml happened to hold.
+    #[test]
+    fn startup_seeds_the_filter_and_scope_from_the_profile() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&["PL", "DE"], "favorites", "nord");
+        seed_from_profile(&mut model);
+        assert_eq!(
+            model.browse.filters.countries,
+            vec!["PL".to_string(), "DE".to_string()]
+        );
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Favorites
+        );
+    }
+
+    #[test]
+    fn startup_takes_the_theme_from_the_profile() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&[], "all", "monokai");
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Monokai);
+    }
+
+    // an unset or unknown profile theme must leave the built-in default in
+    // place rather than blanking the ui.
+    #[test]
+    fn an_empty_profile_theme_keeps_the_default() {
+        let mut model = Model::new(Theme::Nord, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = radio_core::sync::Profile::default();
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Nord);
+        assert!(model.browse.filters.countries.is_empty());
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::All
+        );
+    }
+
+    #[test]
+    fn an_unknown_profile_theme_keeps_the_default() {
+        let mut model = Model::new(Theme::Nord, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&[], "all", "midnight");
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Nord);
+    }
+
+    // an unrecognised scope must not reset the user to "all".
+    #[test]
+    fn an_unknown_profile_scope_keeps_the_default() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.filters.status = crate::tui::model::StatusFilter::Dead;
+        model.profile = profile_with(&[], "nonsense", "");
+        seed_from_profile(&mut model);
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Dead
+        );
+    }
+
+    // a fresh install has nothing to rescue: adoption must stamp nothing, or the
+    // new device would publish empty settings over another device's real ones.
+    #[test]
+    fn a_fresh_install_adopts_nothing() {
+        let mut profile = radio_core::sync::Profile::default();
+        let legacy = Config::default().legacy_settings();
+        let adopted = profile.adopt_existing(
+            &legacy.countries,
+            legacy.scope.as_deref().unwrap_or(""),
+            legacy.theme.as_deref().unwrap_or(""),
+            999,
+        );
+        assert!(!adopted);
+        assert_eq!(profile, radio_core::sync::Profile::default());
+    }
+
+    // the end-to-end shape of the defect: an old config still says UA/monokai,
+    // a sync has already put device b's choice in the profile, and a whole
+    // launch-then-exit cycle must show device b's values and write back neither.
+    #[test]
+    fn a_synced_filter_survives_a_launch_that_still_has_an_old_config() {
+        let old = Config::from_toml_str(
+            "theme = \"monokai\"\n[filters]\nstatus = \"all\"\ncountries = [\"UA\"]\n",
+        )
+        .unwrap();
+        let mut model = Model::new(Theme::from_slug(""), ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&["PL", "DE"], "favorites", "nord");
+
+        let legacy = old.legacy_settings();
+        let adopted = model.profile.adopt_existing(
+            &legacy.countries,
+            legacy.scope.as_deref().unwrap_or(""),
+            legacy.theme.as_deref().unwrap_or(""),
+            999,
+        );
+        assert!(!adopted, "already-stamped fields must not be adopted");
+        seed_from_profile(&mut model);
+
+        assert_eq!(
+            model.browse.filters.countries,
+            vec!["PL".to_string(), "DE".to_string()],
+            "the ui took the stale config filter"
+        );
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Favorites
+        );
+        assert_eq!(model.theme, Theme::Nord);
+        assert_eq!(model.profile.countries_at, 100, "the stamp moved");
+
+        let out = exit_config(&model, false).to_toml_string();
+        assert!(
+            !out.contains("UA"),
+            "exit resurrected the old filter: {out}"
+        );
+        assert!(!out.contains("PL"), "exit wrote the filter back: {out}");
+    }
+
+    // the clobber this task removes: exiting used to write the filter and the
+    // theme back into config.toml, so the next launch read the stale copy.
+    #[test]
+    fn the_exit_write_carries_neither_the_filter_nor_the_theme() {
+        let mut model = Model::new(Theme::Monokai, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.filters.countries = vec!["UA".into()];
+        model.browse.filters.status = crate::tui::model::StatusFilter::Favorites;
+        let out = exit_config(&model, false).to_toml_string();
+        assert!(!out.contains("[filters]"), "filters were written: {out}");
+        assert!(!out.contains("UA"), "countries were written: {out}");
+        assert!(!out.contains("monokai"), "theme was written: {out}");
+    }
+
+    // everything else the exit write owns must survive the split.
+    #[test]
+    fn the_exit_write_still_carries_the_view_settings() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.query = "jazz".into();
+        model.fft_divisor = 7.0;
+        model.crossfade = false;
+        model.spectrum_style = crate::tui::model::SpectrumStyle::Wave;
+        model.now.uuid = Some("uuid-1".into());
+        let cfg = exit_config(&model, true);
+        assert_eq!(cfg.query, "jazz");
+        assert_eq!(cfg.fft_divisor, 7.0);
+        assert!(!cfg.crossfade);
+        assert_eq!(cfg.spectrum_style, crate::tui::model::SpectrumStyle::Wave);
+        assert_eq!(cfg.last_station.as_deref(), Some("uuid-1"));
+        assert!(cfg.no_emoji);
     }
 
     #[test]
