@@ -177,6 +177,7 @@ struct CliPaths {
     pending: std::path::PathBuf,
     profile: std::path::PathBuf,
     history: std::path::PathBuf,
+    config: std::path::PathBuf,
 }
 
 fn cli_paths() -> CliPaths {
@@ -187,6 +188,7 @@ fn cli_paths() -> CliPaths {
         pending: pending_path(),
         profile: profile_path(),
         history: history_path(),
+        config: paths::data_dir().join("config.toml"),
     }
 }
 
@@ -194,7 +196,12 @@ fn cli_paths() -> CliPaths {
 /// `sync use` differ only in their message, so they share this: a first link
 /// that skipped the profile would leave the new device without it entirely.
 fn push_and_apply(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::Result<SyncData> {
-    let profile = Profile::load(&paths.profile);
+    let mut profile = Profile::load(&paths.profile);
+    // adopt before the payload is built, not only in the tui. a device that
+    // syncs before it ever opens the tui would otherwise publish nothing, take
+    // whatever another device chose, and lose its own filter and theme.
+    let legacy = sync::legacy_settings(&paths.config);
+    sync::adopt_legacy(&mut profile, &legacy, &paths.profile);
     let history = History::load(&paths.history);
     let local = session::outgoing(session::LocalState {
         favs: Favorites::load(&paths.fav).ids().to_vec(),
@@ -212,7 +219,6 @@ fn push_and_apply(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::R
     favorites_from(merged.blocked.clone()).save(&paths.blacklist)?;
     favorites_from(merged.excluded_countries.clone()).save(&paths.excluded)?;
 
-    let mut profile = profile;
     let changed = session::apply_remote_profile(
         &mut profile,
         &merged.shuffle_filter,
@@ -288,6 +294,7 @@ mod tests {
             pending: dir.join("sync_pending.json"),
             profile: dir.join("profile.json"),
             history: dir.join("history.json"),
+            config: dir.join("config.toml"),
         }
     }
 
@@ -403,6 +410,65 @@ mod tests {
         assert_eq!(
             History::load(&paths.history).ids(),
             vec!["remote".to_string()]
+        );
+    }
+
+    // the milder half of the same defect: a device that syncs before it ever
+    // opens the tui published nothing, so the account adopted the *other*
+    // device's filter and this machine's own choice never left it. adoption has
+    // to happen wherever config.toml is readable before the payload is built,
+    // not only in the tui.
+    #[test]
+    fn a_cli_sync_before_the_first_tui_launch_publishes_the_legacy_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::write(
+            &paths.config,
+            "theme = \"monokai\"\n[filters]\nstatus = \"favorites\"\ncountries = [\"UA\"]\n",
+        )
+        .unwrap();
+
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("PUT", "/sync")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#""countries":\["UA"\]"#.into()),
+                mockito::Matcher::Regex(r#""scope":\{"value":"favorites""#.into()),
+                mockito::Matcher::Regex(r#""theme":\{"value":"monokai""#.into()),
+            ]))
+            .with_body(r#"{"favs":[],"blocked":[]}"#)
+            .create();
+        push_and_apply(&SyncClient::new(server.url()), "r4-k", &paths).unwrap();
+
+        m.assert();
+        // and the adoption is persisted, so the tui does not have to redo it.
+        let landed = Profile::load(&paths.profile);
+        assert_eq!(landed.countries, vec!["UA".to_string()]);
+        assert_eq!(landed.scope, "favorites");
+        assert_eq!(landed.theme, "monokai");
+    }
+
+    // adoption must never outrank a value another device stamped: a profile
+    // that already carries a filter keeps it, whatever the old config says.
+    #[test]
+    fn a_cli_sync_never_adopts_over_a_stamped_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::write(&paths.config, "[filters]\ncountries = [\"UA\"]\n").unwrap();
+        let mut p = Profile::default();
+        p.set_countries(vec!["PL".into()], 900);
+        p.save(&paths.profile).unwrap();
+
+        let mut server = mockito::Server::new();
+        server
+            .mock("PUT", "/sync")
+            .with_body(r#"{"favs":[],"blocked":[]}"#)
+            .create();
+        push_and_apply(&SyncClient::new(server.url()), "r4-k", &paths).unwrap();
+
+        assert_eq!(
+            Profile::load(&paths.profile).countries,
+            vec!["PL".to_string()]
         );
     }
 

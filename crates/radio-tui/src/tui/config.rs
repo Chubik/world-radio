@@ -1,26 +1,14 @@
 use crate::tui::keybind::Keymap;
-use crate::tui::model::{BrowseFilters, SpectrumStyle};
+use crate::tui::model::SpectrumStyle;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// what an upgrade can still rescue out of a pre-profile `config.toml`. every
-/// field is optional because "absent" and "set to the default" must stay
-/// distinguishable: adoption may only stamp what the user actually chose.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LegacySettings {
-    pub countries: Vec<String>,
-    pub scope: Option<String>,
-    pub theme: Option<String>,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
+/// machine-local settings only. `theme` and `[filters]` are deliberately absent:
+/// `profile.json` owns them from this build on, and an old file that still
+/// carries them is read by `radio_core::sync::legacy_settings` — the one reader
+/// every surface shares — never from here.
 pub struct Config {
-    // read-only migration carriers: an old config still holds these, a new one
-    // never writes them. profile.json owns both from this build on.
-    #[serde(default, skip_serializing, rename = "theme")]
-    pub legacy_theme: Option<String>,
-    #[serde(default, skip_serializing, rename = "filters")]
-    pub legacy_filters: Option<BrowseFilters>,
     #[serde(default)]
     pub no_emoji: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,8 +36,6 @@ fn default_divisor() -> f32 {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            legacy_theme: None,
-            legacy_filters: None,
             no_emoji: false,
             last_station: None,
             query: String::new(),
@@ -62,19 +48,6 @@ impl Default for Config {
 }
 
 impl Config {
-    /// what this config can still hand to an unstamped profile, once. a value
-    /// the file never carried stays `None` so adoption cannot stamp a default
-    /// over a choice another device made.
-    pub fn legacy_settings(&self) -> LegacySettings {
-        let filters = self.legacy_filters.as_ref();
-        LegacySettings {
-            countries: filters.map(|f| f.countries.clone()).unwrap_or_default(),
-            scope: filters
-                .map(|f| crate::tui::update::status_filter_to_scope(f.status).to_string()),
-            theme: self.legacy_theme.clone(),
-        }
-    }
-
     pub fn from_toml_str(s: &str) -> anyhow::Result<Config> {
         let cfg: Config = toml::from_str(s)?;
         Ok(cfg)
@@ -111,21 +84,26 @@ mod tests {
     #[test]
     fn parse_defaults_when_missing_fields() {
         let cfg = Config::from_toml_str("").unwrap();
-        assert_eq!(cfg.legacy_settings(), LegacySettings::default());
         assert!(!cfg.no_emoji);
+        assert!(cfg.crossfade);
     }
 
+    // an old file still carries `theme` and `[filters]`. this struct must parse
+    // straight past them rather than erroring out, or a machine due for the
+    // migration would fall back to defaults for its real settings too.
     #[test]
-    fn parse_reads_no_emoji() {
-        let cfg = Config::from_toml_str("theme = \"cyber-neon\"\nno_emoji = true\n").unwrap();
-        assert_eq!(cfg.legacy_theme.as_deref(), Some("cyber-neon"));
+    fn an_old_config_still_parses_its_machine_local_keys() {
+        let cfg = Config::from_toml_str(
+            "theme = \"cyber-neon\"\nno_emoji = true\n[filters]\nstatus = \"all\"\n",
+        )
+        .unwrap();
         assert!(cfg.no_emoji);
     }
 
     #[test]
     fn missing_file_yields_defaults() {
         let cfg = Config::load(std::path::Path::new("/no/such/config.toml"));
-        assert_eq!(cfg.legacy_settings(), LegacySettings::default());
+        assert!(!cfg.no_emoji);
         assert!(cfg.crossfade);
     }
 
@@ -135,8 +113,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "not = [valid").unwrap();
-        let cfg = Config::load(&path);
-        assert_eq!(cfg.legacy_settings(), LegacySettings::default());
+        assert!(Config::load(&path).crossfade);
     }
 
     #[test]
@@ -168,43 +145,6 @@ mod tests {
         assert_eq!(back.fft_divisor, 4.0);
         assert!(!back.crossfade);
         assert_eq!(back.spectrum_style, SpectrumStyle::Wave);
-    }
-
-    // an old config still carrying filters and a theme must hand them over
-    // exactly once, and must not resurrect them afterwards.
-    #[test]
-    fn an_old_config_hands_its_settings_to_the_profile() {
-        let raw = r#"
-theme = "monokai"
-[filters]
-status = "all"
-countries = ["UA"]
-"#;
-        let cfg: Config = toml::from_str(raw).unwrap();
-        let legacy = cfg.legacy_settings();
-        assert_eq!(legacy.countries, vec!["UA".to_string()]);
-        assert_eq!(legacy.theme.as_deref(), Some("monokai"));
-    }
-
-    #[test]
-    fn an_old_config_hands_over_its_scope_too() {
-        let raw = r#"
-[filters]
-status = "favorites"
-"#;
-        let cfg: Config = toml::from_str(raw).unwrap();
-        assert_eq!(cfg.legacy_settings().scope.as_deref(), Some("favorites"));
-    }
-
-    // a config that never had a [filters] table must not claim a scope, or
-    // adoption would stamp "all" over a scope another device chose.
-    #[test]
-    fn a_config_without_filters_claims_no_scope() {
-        let cfg: Config = toml::from_str("theme = \"nord\"\n").unwrap();
-        let legacy = cfg.legacy_settings();
-        assert!(legacy.countries.is_empty());
-        assert_eq!(legacy.scope, None);
-        assert_eq!(legacy.theme.as_deref(), Some("nord"));
     }
 
     #[test]
