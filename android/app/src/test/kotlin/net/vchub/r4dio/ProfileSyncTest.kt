@@ -333,4 +333,26 @@ class ProfileSyncTest {
         val p = SyncProfile(countries = listOf("UA"), countriesAt = 20, scope = "all", scopeAt = 20)
         assertFalse(p.applyRemote(dataWith(filter = lwwCountries(listOf("PL"), 5))) != p)
     }
+
+    @Test
+    fun setting_the_theme_stamps_the_change() {
+        val p = SyncProfile().withTheme("nord", 50)
+        assertEquals("nord", p.theme)
+        assertEquals(50L, p.themeAt)
+    }
+
+    // a same-value save must not move the stamp, or an idle device would win
+    // every race against a device that actually changed something.
+    @Test
+    fun setting_the_same_theme_does_not_move_the_stamp() {
+        val p = SyncProfile(theme = "nord", themeAt = 10).withTheme("nord", 99)
+        assertEquals(10L, p.themeAt)
+    }
+
+    @Test
+    fun a_locally_set_theme_is_sent() {
+        val sent = SyncProfile().withTheme("dracula", 50)
+            .outgoing(favs = emptyList(), blocked = emptyList(), excluded = emptyList(), plays = emptyList())
+        assertEquals(50L, sent.theme?.at)
+    }
 }
