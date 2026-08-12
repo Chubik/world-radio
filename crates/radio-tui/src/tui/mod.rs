@@ -64,7 +64,9 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     let data = paths::ensure_data_dir()?;
     logger::init(&data.join("world-radio.log"));
     let config = Config::load(&data.join("config.toml"));
-    let theme = Theme::from_slug(&config.theme);
+    // the profile owns the theme now; this is only the fallback the seeding
+    // below keeps when the profile has not chosen one.
+    let theme = Theme::from_slug("");
     let tier = detect_tier();
     let glyphs = pick_glyphs(&config, no_emoji_flag, tier);
 
@@ -162,13 +164,27 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     model.browse.facets_loading = true;
     model.browse.loading = true;
     model.browse.query = config.query.clone();
-    model.browse.filters = config.filters.clone();
     model.browse.excluded_countries = excluded_countries;
     model.fft_divisor = config.fft_divisor;
     model.crossfade = config.crossfade;
     model.spectrum_style = config.spectrum_style;
     model.keymap = config.keybindings.clone();
-    model.profile = radio_core::sync::Profile::load(&data.join("profile.json"));
+    let profile_path = data.join("profile.json");
+    model.profile = radio_core::sync::Profile::load(&profile_path);
+    // settings chosen before this build existed were never stamped, so without
+    // this they would never be published and every other device would see an
+    // account with no filter at all. a field the profile already stamped is
+    // never touched, so this cannot undo what another device chose.
+    let legacy = radio_core::sync::legacy_settings(&data.join("config.toml"));
+    let unwritten =
+        radio_core::sync::adopt_legacy_at(&mut model.profile, &legacy, &profile_path, now_secs);
+    // two separate reasons to keep the legacy keys, and the second is the one
+    // that was missing: adoption also takes nothing when a sync already stamped
+    // the profile from *another* device, and dropping the keys then destroys
+    // this machine's only copy of its own filter and theme.
+    let migration_pending =
+        unwritten || !radio_core::sync::migration_settled(&model.profile, &legacy);
+    seed_from_profile(&mut model);
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
     }
@@ -229,8 +245,43 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         ColorTier::Truecolor => !model.glyphs.emoji_flags,
         ColorTier::Ansi16 => config.no_emoji,
     };
-    let out_cfg = Config {
-        theme: model.theme.slug().to_string(),
+    // rewriting the config drops the legacy keys. until the profile carries a
+    // value for every field the config still holds, they are the user's only
+    // remaining copy — leave them.
+    match migration_pending {
+        true => {
+            crate::log_warn!("startup: keeping the legacy config keys, the profile is unstamped")
+        }
+        false => exit_config(&model, no_emoji).save(&data.join("config.toml")),
+    }
+    let restore_result = restore_terminal(&mut terminal);
+    // state is saved on every mutation, so exit does not wait for the worker;
+    // signal shutdown best-effort and return immediately.
+    let _ = req_tx.send(WorkerReq::Shutdown);
+    drop(worker_handle);
+    loop_result.and(restore_result)
+}
+
+/// pushes the profile into the ui at startup. this is the only seed for the
+/// filter, the scope and the theme — the defect this replaces read them from
+/// `config.toml`, which a sync could never update. a value the profile has not
+/// chosen, or one this build does not recognise, leaves the default in place
+/// rather than resetting the user.
+fn seed_from_profile(model: &mut Model) {
+    model.browse.filters.countries = model.profile.countries.clone();
+    if let Some(status) = update::scope_to_status_filter(&model.profile.scope) {
+        model.browse.filters.status = status;
+    }
+    if let Some(theme) = Theme::try_from_slug(&model.profile.theme) {
+        model.theme = theme;
+    }
+}
+
+/// what exit is still allowed to write. the filter, the scope and the theme are
+/// deliberately absent: writing them here is exactly what used to overwrite the
+/// values a sync had just brought in.
+fn exit_config(model: &Model, no_emoji: bool) -> Config {
+    Config {
         no_emoji,
         last_station: model.now.uuid.clone(),
         query: model.browse.query.clone(),
@@ -238,15 +289,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         crossfade: model.crossfade,
         spectrum_style: model.spectrum_style,
         keybindings: model.keymap.clone(),
-        filters: model.browse.filters.clone(),
-    };
-    out_cfg.save(&data.join("config.toml"));
-    let restore_result = restore_terminal(&mut terminal);
-    // state is saved on every mutation, so exit does not wait for the worker;
-    // signal shutdown best-effort and return immediately.
-    let _ = req_tx.send(WorkerReq::Shutdown);
-    drop(worker_handle);
-    loop_result.and(restore_result)
+    }
 }
 
 fn install_panic_hook() {
@@ -527,6 +570,311 @@ mod tests {
 
         dispatch_stream_event(StreamEvent::ProfileChanged, &msg_tx, &req_tx, &queued);
         assert!(matches!(req_rx.try_recv(), Ok(WorkerReq::SyncQuiet)));
+    }
+
+    fn profile_with(countries: &[&str], scope: &str, theme: &str) -> radio_core::sync::Profile {
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(countries.iter().map(|c| c.to_string()).collect(), 100);
+        p.set_scope(scope, 100);
+        p.set_theme(theme, 100);
+        p
+    }
+
+    fn legacy_of(raw: &str) -> radio_core::sync::LegacySettings {
+        radio_core::sync::legacy_settings_from_toml(raw)
+    }
+
+    const OLD_CONFIG: &str =
+        "theme = \"monokai\"\n[filters]\nstatus = \"all\"\ncountries = [\"UA\"]\n";
+
+    /// the exact gate `run` applies before it lets exit rewrite `config.toml`,
+    /// so a test reads the real condition rather than a restatement that could
+    /// drift from it.
+    fn migration_pending(
+        profile: &mut radio_core::sync::Profile,
+        legacy: &radio_core::sync::LegacySettings,
+        profile_path: &std::path::Path,
+        now: i64,
+    ) -> bool {
+        let unwritten = radio_core::sync::adopt_legacy_at(profile, legacy, profile_path, now);
+        unwritten || !radio_core::sync::migration_settled(profile, legacy)
+    }
+
+    // a successful adoption is written and the config is then free to drop the
+    // legacy keys.
+    #[test]
+    fn a_written_adoption_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        let mut profile = radio_core::sync::Profile::default();
+
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(!pending);
+        assert_eq!(
+            radio_core::sync::Profile::load(&path).countries,
+            vec!["UA".to_string()],
+            "the adoption never reached the disk"
+        );
+    }
+
+    // the unrecoverable path: the profile could not be written, so the legacy
+    // values exist nowhere but config.toml and the config must keep them.
+    #[test]
+    fn an_unwritable_profile_leaves_the_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        // a file where the parent directory must be: create_dir_all fails, so
+        // the save fails for a real filesystem reason.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let path = blocker.join("profile.json");
+        let mut profile = radio_core::sync::Profile::default();
+
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(pending, "a failed migration save must be reported");
+    }
+
+    // nothing to adopt is not a failure: the config may still be rewritten.
+    #[test]
+    fn adopting_nothing_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut profile = radio_core::sync::Profile::default();
+        assert!(!migration_pending(
+            &mut profile,
+            &radio_core::sync::LegacySettings::default(),
+            &dir.path().join("profile.json"),
+            500
+        ));
+    }
+
+    // an already-stamped profile has nothing to adopt, so a save that would
+    // fail is never attempted and the config is still free to be rewritten.
+    #[test]
+    fn an_already_migrated_device_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        // already carrying the config's own values, and already marked as
+        // migrated, so there is nothing to adopt and the unwritable path is
+        // never even reached.
+        let mut profile = profile_with(&["UA"], "all", "monokai");
+        profile.migrated = true;
+
+        let pending = migration_pending(
+            &mut profile,
+            &legacy_of(OLD_CONFIG),
+            &blocker.join("profile.json"),
+            500,
+        );
+
+        assert!(!pending, "a doomed save must not be attempted at all");
+        assert_eq!(
+            profile.countries,
+            vec!["UA".to_string()],
+            "stamped value lost"
+        );
+    }
+
+    // the unrecoverable data loss this fix removes.
+    //
+    // the mac app (or `sync run`) syncs before the tui is ever opened on this
+    // machine. it publishes nothing, the server answers with device b's filter
+    // and theme, and profile.save stamps countries_at and theme_at. the tui then
+    // opens: adoption correctly refuses to outrank device b, so it returns
+    // "adopted nothing" — which the old gate read as "already migrated" and let
+    // exit rewrite config.toml without [filters] or theme. this machine's own UA
+    // filter and monokai theme were then gone from both files, unrecoverably.
+    //
+    // the scope was never stamped by that sync, so the config is still the only
+    // copy of something and the keys must stay.
+    #[test]
+    fn a_sync_before_the_first_tui_launch_does_not_drop_the_legacy_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        // exactly what apply_remote_profile leaves behind: device b's filter and
+        // theme stamped, the scope untouched.
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["PL".into()], 900);
+        profile.set_theme("cyber-neon", 900);
+        profile.save(&path).unwrap();
+
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(
+            pending,
+            "exit would rewrite config.toml and destroy this machine's only copy of its settings"
+        );
+    }
+
+    // and once the migration really has settled — every field the config carries
+    // is stamped in the profile — the keys must finally be dropped, or the gate
+    // would keep a stale copy alive for ever and re-adopt it after a reset.
+    #[test]
+    fn a_fully_stamped_profile_finally_releases_the_legacy_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        // the profile carries what the config was rescuing, so the config has
+        // stopped being anyone's only copy.
+        let mut profile = profile_with(&["UA"], "all", "monokai");
+
+        assert!(!migration_pending(
+            &mut profile,
+            &legacy_of(OLD_CONFIG),
+            &path,
+            500
+        ));
+    }
+
+    // the whole defect: device b changed the filter while this tui was closed,
+    // the sync wrote it into profile.json, and launching must show that value —
+    // not whatever config.toml happened to hold.
+    #[test]
+    fn startup_seeds_the_filter_and_scope_from_the_profile() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&["PL", "DE"], "favorites", "nord");
+        seed_from_profile(&mut model);
+        assert_eq!(
+            model.browse.filters.countries,
+            vec!["PL".to_string(), "DE".to_string()]
+        );
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Favorites
+        );
+    }
+
+    #[test]
+    fn startup_takes_the_theme_from_the_profile() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&[], "all", "monokai");
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Monokai);
+    }
+
+    // an unset or unknown profile theme must leave the built-in default in
+    // place rather than blanking the ui.
+    #[test]
+    fn an_empty_profile_theme_keeps_the_default() {
+        let mut model = Model::new(Theme::Nord, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = radio_core::sync::Profile::default();
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Nord);
+        assert!(model.browse.filters.countries.is_empty());
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::All
+        );
+    }
+
+    #[test]
+    fn an_unknown_profile_theme_keeps_the_default() {
+        let mut model = Model::new(Theme::Nord, ColorTier::Truecolor, Glyphs::ascii());
+        model.profile = profile_with(&[], "all", "midnight");
+        seed_from_profile(&mut model);
+        assert_eq!(model.theme, Theme::Nord);
+    }
+
+    // an unrecognised scope must not reset the user to "all".
+    #[test]
+    fn an_unknown_profile_scope_keeps_the_default() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.filters.status = crate::tui::model::StatusFilter::Dead;
+        model.profile = profile_with(&[], "nonsense", "");
+        seed_from_profile(&mut model);
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Dead
+        );
+    }
+
+    // a fresh install has nothing to rescue: adoption must stamp nothing, or the
+    // new device would publish empty settings over another device's real ones.
+    #[test]
+    fn a_fresh_install_adopts_nothing() {
+        let mut profile = radio_core::sync::Profile::default();
+        let legacy = radio_core::sync::LegacySettings::default();
+        let adopted = profile.adopt_existing(
+            &legacy.countries,
+            legacy.scope.as_deref().unwrap_or(""),
+            legacy.theme.as_deref().unwrap_or(""),
+            999,
+        );
+        assert!(!adopted);
+        assert_eq!(profile, radio_core::sync::Profile::default());
+    }
+
+    // the end-to-end shape of the defect: an old config still says UA/monokai,
+    // a sync has already put device b's choice in the profile, and a whole
+    // launch-then-exit cycle must show device b's values and write back neither.
+    #[test]
+    fn a_synced_filter_survives_a_launch_that_still_has_an_old_config() {
+        let mut model = Model::new(Theme::from_slug(""), ColorTier::Truecolor, Glyphs::ascii());
+        // fully stamped by device b: filter, scope and theme.
+        model.profile = profile_with(&["PL", "DE"], "favorites", "nord");
+
+        // whether exit may then drop the legacy keys is a separate question,
+        // answered by migration_settled and its own tests; this one is about
+        // which values the ui takes.
+        let legacy = legacy_of(OLD_CONFIG);
+        let adopted = model.profile.adopt_existing(
+            &legacy.countries,
+            legacy.scope.as_deref().unwrap_or(""),
+            legacy.theme.as_deref().unwrap_or(""),
+            999,
+        );
+        assert!(!adopted, "already-stamped fields must not be adopted");
+        seed_from_profile(&mut model);
+
+        assert_eq!(
+            model.browse.filters.countries,
+            vec!["PL".to_string(), "DE".to_string()],
+            "the ui took the stale config filter"
+        );
+        assert_eq!(
+            model.browse.filters.status,
+            crate::tui::model::StatusFilter::Favorites
+        );
+        assert_eq!(model.theme, Theme::Nord);
+        assert_eq!(model.profile.countries_at, 100, "the stamp moved");
+
+        let out = exit_config(&model, false).to_toml_string();
+        assert!(
+            !out.contains("UA"),
+            "exit resurrected the old filter: {out}"
+        );
+        assert!(!out.contains("PL"), "exit wrote the filter back: {out}");
+    }
+
+    // the clobber this task removes: exiting used to write the filter and the
+    // theme back into config.toml, so the next launch read the stale copy.
+    #[test]
+    fn the_exit_write_carries_neither_the_filter_nor_the_theme() {
+        let mut model = Model::new(Theme::Monokai, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.filters.countries = vec!["UA".into()];
+        model.browse.filters.status = crate::tui::model::StatusFilter::Favorites;
+        let out = exit_config(&model, false).to_toml_string();
+        assert!(!out.contains("[filters]"), "filters were written: {out}");
+        assert!(!out.contains("UA"), "countries were written: {out}");
+        assert!(!out.contains("monokai"), "theme was written: {out}");
+    }
+
+    // everything else the exit write owns must survive the split.
+    #[test]
+    fn the_exit_write_still_carries_the_view_settings() {
+        let mut model = Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::ascii());
+        model.browse.query = "jazz".into();
+        model.fft_divisor = 7.0;
+        model.crossfade = false;
+        model.spectrum_style = crate::tui::model::SpectrumStyle::Wave;
+        model.now.uuid = Some("uuid-1".into());
+        let cfg = exit_config(&model, true);
+        assert_eq!(cfg.query, "jazz");
+        assert_eq!(cfg.fft_divisor, 7.0);
+        assert!(!cfg.crossfade);
+        assert_eq!(cfg.spectrum_style, crate::tui::model::SpectrumStyle::Wave);
+        assert_eq!(cfg.last_station.as_deref(), Some("uuid-1"));
+        assert!(cfg.no_emoji);
     }
 
     #[test]

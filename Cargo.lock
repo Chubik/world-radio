@@ -3478,6 +3478,7 @@ version = "1.4.5"
 dependencies = [
  "anyhow",
  "fastrand",
+ "mockito",
  "qrcode",
  "radio-audio",
  "radio-core",
@@ -3488,6 +3489,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-positioner",
  "tauri-plugin-updater",
+ "tempfile",
 ]
 
 [[package]]
@@ -3520,6 +3522,7 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 1.0.69",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]

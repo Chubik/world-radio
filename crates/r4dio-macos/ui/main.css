@@ -34,6 +34,16 @@
   padding: 8px 10px; border-top: 1px solid var(--rule);
 }
 
+/* the row sits directly above the counts and outranks them in colour: it names
+   what shuffle is limited *to*, while they count what it is kept *out of*.
+   display:none when empty so an unfiltered sidebar keeps its old shape — with
+   the row hidden, .acct's margin-top:auto still pins the counts to the bottom. */
+.filtrow {
+  font-size: 10px; color: var(--fg); letter-spacing: .04em;
+  padding: 8px 10px 0; margin-top: auto;
+}
+.filtrow.hidden { display: none; }
+
 .content {
   flex: 1; min-width: 0; overflow-y: auto; padding: 26px 30px;
   background-image: radial-gradient(120% 50% at 50% -10%, rgba(212,154,58,.06), transparent 60%);

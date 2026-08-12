@@ -93,8 +93,8 @@ fn search_cli(cli: &Cli) -> anyhow::Result<()> {
 
     let query = SearchQuery {
         name: cli.name.clone(),
-        countrycode: cli.country.clone(),
-        tag: cli.tag.clone(),
+        countrycodes: cli.country.clone().into_iter().collect(),
+        tags: cli.tag.clone().into_iter().collect(),
         bitrate_min: cli.bitrate_min,
         ..Default::default()
     };

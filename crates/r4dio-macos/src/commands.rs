@@ -3,13 +3,6 @@ use crate::state::{Phase, Scope};
 use serde::Serialize;
 use std::sync::Mutex;
 
-fn parse_scope(s: &str) -> Scope {
-    match s {
-        "favorites" => Scope::Favorites,
-        _ => Scope::All,
-    }
-}
-
 #[derive(Serialize)]
 pub struct NowState {
     pub station: Option<String>,
@@ -19,6 +12,10 @@ pub struct NowState {
     pub scope: String,
     pub is_favorite: bool,
     pub meta: String,
+    /// the country filter this device listens under, already worded. it rides
+    /// the state poll rather than a command of its own so it cannot lag a scope
+    /// switch — the label is hidden in favourites, which the same poll carries.
+    pub filter: String,
 }
 
 fn phase_str(phase: Phase) -> &'static str {
@@ -38,6 +35,13 @@ fn scope_str(scope: Scope) -> &'static str {
 }
 
 pub type Shared = Mutex<Backend>;
+
+// the panel prints which build is running. it never changes while the app is
+// up, so it is fetched once rather than ridden along with the state poll.
+#[tauri::command]
+pub fn app_version() -> String {
+    crate::tray::version_label(env!("CARGO_PKG_VERSION"))
+}
 
 #[tauri::command]
 pub fn shuffle(state: tauri::State<Shared>) {
@@ -64,9 +68,15 @@ pub fn set_volume(state: tauri::State<Shared>, v: f32) {
     state.lock().unwrap().set_volume(v);
 }
 
+/// an unrecognised value leaves the panel where it is rather than snapping it to
+/// All — the window only ever sends the two it draws, so anything else is a bug
+/// or a newer client, and neither is a reason to move the user off favourites.
 #[tauri::command]
 pub fn set_scope(state: tauri::State<Shared>, scope: String) {
-    state.lock().unwrap().set_scope(parse_scope(&scope));
+    let Some(scope) = crate::backend::scope_from_wire(&scope) else {
+        return;
+    };
+    state.lock().unwrap().set_scope(scope);
 }
 
 #[tauri::command]
@@ -90,6 +100,7 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
             .as_ref()
             .map(|n| crate::state::meta_label(&n.country, &n.codec, n.bitrate))
             .unwrap_or_default(),
+        filter: crate::tray::filter_label(b.state.filter(), b.state.scope),
     }
 }
 
@@ -189,6 +200,11 @@ pub fn favourite_ids(state: tauri::State<Shared>) -> Vec<String> {
 pub struct FilterCounts {
     pub excluded: u32,
     pub blocked: u32,
+    /// the countries shuffle is limited *to*, as opposed to `excluded`, which
+    /// counts the ones it is kept *out of*. the two read alike and mean the
+    /// opposite, so the window names this one rather than leaving the user to
+    /// infer a narrowed pool from a count of the setting it is not.
+    pub filter: String,
 }
 
 #[tauri::command]
@@ -209,9 +225,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_scope_maps_known_and_defaults_to_all() {
-        assert_eq!(parse_scope("favorites"), Scope::Favorites);
-        assert_eq!(parse_scope("all"), Scope::All);
-        assert_eq!(parse_scope("garbage"), Scope::All);
+    fn the_window_sends_the_two_scopes_this_app_has() {
+        assert_eq!(
+            crate::backend::scope_from_wire("favorites"),
+            Some(Scope::Favorites)
+        );
+        assert_eq!(crate::backend::scope_from_wire("all"), Some(Scope::All));
+    }
+
+    // a value only a newer client knows must leave the panel where it is; the
+    // old parser turned every unknown string into All and moved the user off
+    // favourites.
+    #[test]
+    fn an_unknown_scope_moves_nothing() {
+        assert_eq!(crate::backend::scope_from_wire("garbage"), None);
+        assert_eq!(crate::backend::scope_from_wire(""), None);
+    }
+
+    // recent/blocked/dead are real synced scopes with no panel equivalent, so
+    // they must not collapse into All either.
+    #[test]
+    fn a_scope_the_panel_cannot_show_moves_nothing() {
+        assert_eq!(crate::backend::scope_from_wire("recent"), None);
+        assert_eq!(crate::backend::scope_from_wire("blocked"), None);
+        assert_eq!(crate::backend::scope_from_wire("dead"), None);
+    }
+
+    // both windows read the label off a serialised field; a rename would leave
+    // the row permanently blank rather than fail, so the wire name is pinned.
+    #[test]
+    fn both_windows_receive_the_filter_under_the_name_they_read() {
+        let now = NowState {
+            station: None,
+            track: String::new(),
+            phase: "idle".into(),
+            volume: 0.8,
+            scope: "all".into(),
+            is_favorite: false,
+            meta: String::new(),
+            filter: crate::tray::filter_label(&["UA".to_string()], Scope::All),
+        };
+        let json = serde_json::to_value(&now).unwrap();
+        assert_eq!(json["filter"], "FILTER: UA");
+
+        let counts = FilterCounts {
+            excluded: 0,
+            blocked: 0,
+            filter: crate::tray::filter_label(&["UA".to_string(), "PL".to_string()], Scope::All),
+        };
+        let json = serde_json::to_value(&counts).unwrap();
+        assert_eq!(json["filter"], "FILTER: UA·PL");
     }
 }

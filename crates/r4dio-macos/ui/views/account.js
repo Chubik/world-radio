@@ -9,7 +9,10 @@ const SIGNED_OUT = "signed_out";
 const REVEAL = "reveal";
 const SIGNED_IN = "signed_in";
 
-export function mountAccount(host) {
+// `onFilters` is how the sidebar hears that a sync or a sign-in brought a new
+// country filter down from another device. without it the filter row would keep
+// naming the old countries until the window was hidden and reopened.
+export function mountAccount(host, onFilters = () => {}) {
   let view = SIGNED_OUT;
   let state = { signed_in: false, masked: "", favourites: 0 };
   let freshKey = null;
@@ -112,6 +115,8 @@ export function mountAccount(host) {
         signingIn = false;
         busy = false;
         await refresh();
+        // signing in pulls the account's filter down with it.
+        onFilters();
       } catch (e) {
         field.value = "";
         busy = false;
@@ -213,8 +218,34 @@ export function mountAccount(host) {
     card.appendChild(el("div", "qrhint", "scan to sign in on another device"));
 
     const msg = el("p", "note dim", "");
+    const now = el("button", "btn primary", "⟳ Sync now");
     const out = el("button", "btn ghost", "Sign out");
     const del = el("button", "btn danger", "Delete account");
+
+    // the app follows the account live, but a device that was offline has
+    // nothing to follow — this is how the user asks for the catch-up by hand.
+    now.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true;
+      note(msg, "syncing…", "dim");
+      now.disabled = true;
+      try {
+        await invoke("sync");
+        note(msg, "synced", "ok");
+      } catch (e) {
+        note(msg, String(e), "err");
+      }
+      busy = false;
+      now.disabled = false;
+      // a sync can change the favourite count on this card and the country
+      // filter the sidebar names, so both are re-read rather than just the card.
+      try {
+        state = await invoke("account_state");
+      } catch {
+        // a stale count is better than dropping the user out of a signed-in view.
+      }
+      onFilters();
+    });
 
     out.addEventListener("click", async () => {
       try {
@@ -237,7 +268,7 @@ export function mountAccount(host) {
       }
     });
 
-    card.append(out, del, msg);
+    card.append(now, out, del, msg);
     root.appendChild(card);
     drawQr(canvas);
   }

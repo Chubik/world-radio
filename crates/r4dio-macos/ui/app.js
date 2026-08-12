@@ -50,6 +50,12 @@ function render(s) {
     seg.classList.toggle("on", seg.dataset.scope === s.scope)
   );
 
+  // the backend words this one — an empty string is "no filter to announce",
+  // which has to hide the row rather than draw an empty pill.
+  const filter = $("filter");
+  filter.textContent = s.filter || "";
+  filter.classList.toggle("hidden", !s.filter);
+
   lastPhase = s.phase;
 }
 
@@ -62,6 +68,11 @@ async function poll() {
 }
 
 function wire() {
+  // the build never changes while the app runs, so it is fetched once here
+  // rather than on every poll.
+  invoke("app_version").then((v) => {
+    $("ver").textContent = v;
+  });
   $("primary").addEventListener("click", () => invoke("shuffle").then(poll));
   $("play").addEventListener("click", () => {
     const cmd = lastPhase === "playing" ? "stop" : "resume";

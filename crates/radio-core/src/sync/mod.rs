@@ -1,5 +1,6 @@
 mod client;
 pub mod key;
+mod legacy;
 mod pending;
 mod profile;
 mod scope;
@@ -7,11 +8,24 @@ pub mod session;
 
 pub use client::{HistoryRecord, Lww, SyncClient, SyncData};
 pub use key::is_valid_format;
+pub use legacy::{
+    adopt_legacy, adopt_legacy_at, legacy_settings, legacy_settings_from_toml, migration_settled,
+    LegacySettings,
+};
 pub use pending::{Change, Pending, Set};
 pub use profile::{Profile, ProfileChange};
 pub use scope::Scope;
 
 use std::path::{Path, PathBuf};
+
+/// the clock every profile stamp is taken from, so no surface can drift onto a
+/// different unit and make its writes outrank or lose to everyone else's.
+pub fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 pub fn key_path() -> PathBuf {
     crate::paths::data_dir().join("sync_key")

@@ -511,13 +511,47 @@ fn ingest_and_persist(
     catalog.save_health(health_path)
 }
 
+/// the remote api takes one country per call, so a multi-country filter has to
+/// be asked for country by country — one call would answer the first country
+/// only and the rest would never reach the catalogue.
+fn fanned_queries(q: &SearchQuery) -> Vec<SearchQuery> {
+    match q.countrycodes.len() > 1 {
+        false => vec![q.clone()],
+        true => q
+            .countrycodes
+            .iter()
+            .map(|c| SearchQuery {
+                countrycodes: vec![c.clone()],
+                ..q.clone()
+            })
+            .collect(),
+    }
+}
+
+fn merge_unique(batches: Vec<Vec<Station>>) -> Vec<Station> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for batch in batches {
+        for s in batch {
+            if seen.insert(s.stationuuid.clone()) {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
 fn online_search_bounded(
     catalog: &mut Catalog,
     q: &SearchQuery,
     health_path: &std::path::Path,
 ) -> anyhow::Result<Vec<StationRow>> {
     let rb = api::resolve_with_timeout(4);
-    let stations = rb.search(q)?;
+    let mut batches = Vec::new();
+    for sub in fanned_queries(q) {
+        batches.push(rb.search(&sub)?);
+    }
+    let stations = merge_unique(batches);
     ingest_and_persist(catalog, &stations, health_path)?;
     let filtered = catalog.search_offline_filtered(q)?;
     Ok(rows_from(catalog, &filtered))
@@ -688,12 +722,46 @@ mod tests {
     fn q_with(name: Option<&str>, country: Option<&str>) -> SearchQuery {
         SearchQuery {
             name: name.map(str::to_string),
-            countrycode: country.map(str::to_string),
+            countrycodes: country.map(str::to_string).into_iter().collect(),
             language: None,
-            tag: None,
-            codec: None,
+            tags: Vec::new(),
+            codecs: Vec::new(),
             bitrate_min: None,
         }
+    }
+
+    #[test]
+    fn two_countries_fan_out_into_one_call_each() {
+        let q = SearchQuery {
+            name: Some("jazz".into()),
+            countrycodes: vec!["UA".into(), "US".into()],
+            ..Default::default()
+        };
+        let fanned = fanned_queries(&q);
+        assert_eq!(fanned.len(), 2);
+        assert_eq!(fanned[0].countrycodes, vec!["UA".to_string()]);
+        assert_eq!(fanned[1].countrycodes, vec!["US".to_string()]);
+        // the rest of the filter rides along on every call
+        assert_eq!(fanned[1].name.as_deref(), Some("jazz"));
+    }
+
+    #[test]
+    fn one_country_or_none_stays_a_single_call() {
+        let one = SearchQuery {
+            countrycodes: vec!["UA".into()],
+            ..Default::default()
+        };
+        assert_eq!(fanned_queries(&one).len(), 1);
+        assert_eq!(fanned_queries(&SearchQuery::default()).len(), 1);
+    }
+
+    #[test]
+    fn merged_results_hold_no_duplicate_uuids() {
+        let ua = vec![station("shared"), station("ua-only")];
+        let us = vec![station("shared"), station("us-only")];
+        let merged = merge_unique(vec![ua, us]);
+        let ids: Vec<&str> = merged.iter().map(|s| s.stationuuid.as_str()).collect();
+        assert_eq!(ids, vec!["shared", "ua-only", "us-only"]);
     }
 
     #[test]
@@ -814,10 +882,10 @@ mod tests {
         WorkerReq::Search(
             SearchQuery {
                 name: Some(name.into()),
-                countrycode: None,
+                countrycodes: Vec::new(),
                 language: None,
-                tag: None,
-                codec: None,
+                tags: Vec::new(),
+                codecs: Vec::new(),
                 bitrate_min: None,
             },
             crate::tui::model::BrowseFilters::default(),
