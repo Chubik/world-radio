@@ -662,6 +662,11 @@ class PlaybackService : MediaSessionService() {
                 applyingMirror = false
             }
             else -> {
+                // announced even though nothing starts playing: the other device
+                // changed station, and that is worth seeing. announced before
+                // `current` moves, since the previous station is what decides
+                // whether this is a change at all.
+                announceStation(station)
                 current = station
                 // mirror events carry no country/codec/bitrate, so meta has nothing to
                 // show — refreshWidget's widgetMetaLabel call resolves to "" on its own.
