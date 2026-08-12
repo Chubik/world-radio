@@ -49,6 +49,8 @@ android {
     }
 
     testOptions {
+        // android.util.Log throws in unit tests unless stubbed; CatalogCache logs on
+        // its recovery paths, and those tests assert recovery, not logging.
         unitTests.isReturnDefaultValues = true
         unitTests {
             isIncludeAndroidResources = true
