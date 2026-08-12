@@ -87,10 +87,30 @@
                         android:fontFamily="@font/ibm_plex_mono" android:maxLines="1" android:ellipsize="end" />
                 </LinearLayout>
 
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">
+                <!-- the landscape panel is narrower than the portrait one and now
+                     carries two more pills, so the row scrolls rather than cutting
+                     the last one in half. no scrollbar: it is a status row, and a
+                     bar over it would read as another control. -->
+                <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" android:scrollbars="none"
+                    android:fillViewport="true">
 
-                    <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical">
+
+                    <TextView android:id="@+id/catalogue_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/dim" android:textSize="9.5sp"
+                        android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                        android:maxLines="1" android:ellipsize="end" />
+
+                    <!-- the filter belongs here most of all: landscape is the car
+                         mount, and a filter you cannot see is one you cannot undo. -->
+                    <TextView android:id="@+id/filter_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/amber_hi" android:textSize="9.5sp"
+                        android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                        android:maxLines="1" android:ellipsize="end"
+                        android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                        android:background="@drawable/bg_pill_on" />
 
                     <TextView android:id="@+id/hidden_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp" android:visibility="gone" android:textColor="@color/amber_hi" android:textSize="9.5sp"
@@ -113,7 +133,18 @@
                         android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
                         android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
                         android:background="@drawable/bg_pill" />
+
+                    <!-- the overlay is a driving feature, so it has to be reachable
+                         in the orientation people drive in. -->
+                    <TextView android:id="@+id/overlay_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp" android:text="@string/home_overlay_off"
+                        android:contentDescription="@string/home_overlay_desc"
+                        android:textColor="@color/dim" android:textSize="9.5sp"
+                        android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                        android:paddingStart="9dp" android:paddingEnd="9dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                        android:background="@drawable/bg_pill" />
                 </LinearLayout>
+                </HorizontalScrollView>
             </LinearLayout>
         </LinearLayout>
 
