@@ -58,3 +58,33 @@ private val PALETTES: Map<String, Palette> = mapOf(
  * than silently resetting the user's choice.
  */
 fun paletteFor(slug: String): Palette? = PALETTES[slug]
+
+/**
+ * the surface a panel sits on, one step off the background. derived rather
+ * than a tenth slot so the 14 palettes stay a faithful copy of the cli's nine
+ * roles. the factor reproduces today's @color/panel from amber-crt to within
+ * one unit per channel (#1B1610 against #1B1510).
+ */
+fun Palette.panel(): Long = blend(bg, peak, 0.025f)
+
+/**
+ * the hairline between panels — the cli has no such role, so it is derived.
+ * reproduces today's @color/rule (#392B1A against #3A2C17).
+ */
+fun Palette.rule(): Long = blend(bg, dim, 0.40f)
+
+/**
+ * secondary text: dimmer than fg, brighter than dim. blended toward peak
+ * rather than fg because today's @color/mute is a near-neutral, not a
+ * saturated amber; this reproduces it as #8A8066 against #8A7F64.
+ */
+fun Palette.mute(): Long = blend(bg, peak, 0.50f)
+
+private fun blend(a: Long, b: Long, t: Float): Long {
+    fun ch(shift: Int): Long {
+        val av = (a shr shift) and 0xFF
+        val bv = (b shr shift) and 0xFF
+        return Math.round(av + ((bv - av) * t)).toLong() and 0xFF
+    }
+    return OPAQUE or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+}
