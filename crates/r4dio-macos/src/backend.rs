@@ -258,7 +258,7 @@ impl Backend {
     }
 
     pub fn shuffle_favourites(&mut self) {
-        if let Some(pick) = crate::state::pick_random(self.state.favorites()) {
+        if let Some(pick) = crate::state::pick_from(&self.state.playable_favorites()) {
             self.play_pick(pick);
         }
     }

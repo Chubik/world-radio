@@ -25,10 +25,6 @@ pub fn meta_label(country: &str, codec: &str, bitrate: u32) -> String {
     parts.join(" · ")
 }
 
-pub fn pick_random(stations: &[StationPick]) -> Option<StationPick> {
-    pick_from(&stations.iter().collect::<Vec<&StationPick>>())
-}
-
 /// a station with no url cannot be played, so it is never picked — a pool of
 /// only those must report nothing rather than hand back an unplayable row.
 pub fn pick_from(stations: &[&StationPick]) -> Option<StationPick> {
@@ -112,10 +108,20 @@ impl MiniState {
         self.all = all;
     }
 
-    // the window shuffles favourites regardless of the panel's scope, so it reads
-    // the list directly rather than switching scope as a side effect.
-    pub fn favorites(&self) -> &[StationPick] {
-        &self.favorites
+    /// the favourites the ★ button may actually land on — it shuffles them
+    /// regardless of the panel's scope, so it reads this rather than switching
+    /// scope as a side effect. blocked ones are gone: without that, this button
+    /// would play a station the user blocked on another device even though the
+    /// FAVS scope will not. there is deliberately no unfiltered accessor.
+    /// that button bypasses the scope, so without this it would play a station
+    /// the user blocked on another device even though the FAVS scope will not.
+    pub fn playable_favorites(&self) -> Vec<&StationPick> {
+        self.favorites
+            .iter()
+            .filter(|s| {
+                radio_core::catalog::allowed_row(&s.uuid, &s.country, &[], &self.blocked, &[])
+            })
+            .collect()
     }
 
     /// the country filter this device is listening under. empty means
@@ -137,24 +143,27 @@ impl MiniState {
 
     /// the pool shuffle draws from. the filter is applied here rather than baked
     /// into `all`, so a filter arriving from another device narrows the pool
-    /// without reloading the catalogue. favourites come back untouched: an
-    /// explicit star outranks a broad taste filter, matching android.
+    /// without reloading the catalogue.
+    ///
+    /// the two arms are deliberately asymmetric, matching android: a star
+    /// outranks a broad taste filter, so favourites take no country filter — but
+    /// blocking is a pointed "never this one", so it applies to both.
+    ///
+    /// `excluded_countries` is empty in both arms because the lists were built by
+    /// `catalog_src`, whose query already dropped excluded countries in sql.
+    /// passing them again would be redundant, not safer — do not "fix" this by
+    /// filling it in without first moving that cut off the query.
     pub fn active_stations(&self) -> Vec<&StationPick> {
+        let allowed = |s: &&StationPick, included: &[String]| {
+            radio_core::catalog::allowed_row(&s.uuid, &s.country, &[], &self.blocked, included)
+        };
         match self.scope {
             Scope::All => self
                 .all
                 .iter()
-                .filter(|s| {
-                    radio_core::catalog::allowed_row(
-                        &s.uuid,
-                        &s.country,
-                        &[],
-                        &self.blocked,
-                        &self.filter,
-                    )
-                })
+                .filter(|s| allowed(s, &self.filter))
                 .collect(),
-            Scope::Favorites => self.favorites.iter().collect(),
+            Scope::Favorites => self.favorites.iter().filter(|s| allowed(s, &[])).collect(),
         }
     }
 
@@ -262,6 +271,52 @@ mod tests {
         assert_eq!(s.pick_shuffle().unwrap().uuid, "f");
     }
 
+    // blocking is a pointed "never this one", so it beats a star — unlike an
+    // excluded country, which a star outranks. android pins the same asymmetry
+    // in CatalogFilterTest.blocking_beats_favouriting.
+    #[test]
+    fn blocking_beats_favouriting() {
+        let mut s = MiniState::new();
+        s.set_favorites(vec![st_in("f1", "UA"), st_in("f2", "UA")]);
+        s.set_blocked(vec!["f1".into()]);
+        s.set_scope(Scope::Favorites);
+        for _ in 0..20 {
+            assert_eq!(s.pick_shuffle().unwrap().uuid, "f2");
+        }
+    }
+
+    // the ★ button bypasses the scope, so it needs the block check of its own.
+    #[test]
+    fn the_favourites_button_never_lands_on_a_blocked_star() {
+        let mut s = MiniState::new();
+        s.set_favorites(vec![st_in("f1", "UA"), st_in("f2", "UA")]);
+        s.set_blocked(vec!["f1".into()]);
+        // deliberately left on ALL: this button ignores the panel's scope.
+        for _ in 0..20 {
+            assert_eq!(pick_from(&s.playable_favorites()).unwrap().uuid, "f2");
+        }
+    }
+
+    // a star outranks a taste filter on this button too.
+    #[test]
+    fn the_favourites_button_ignores_the_country_filter() {
+        let mut s = MiniState::new();
+        s.set_favorites(vec![st_in("f", "PL")]);
+        s.set_filter(vec!["UA".into()]);
+        assert_eq!(pick_from(&s.playable_favorites()).unwrap().uuid, "f");
+    }
+
+    // every favourite blocked leaves nothing to play rather than falling back
+    // to one of them.
+    #[test]
+    fn every_favourite_blocked_leaves_nothing_to_pick() {
+        let mut s = MiniState::new();
+        s.set_favorites(vec![st_in("f1", "UA"), st_in("f2", "UA")]);
+        s.set_blocked(vec!["f1".into(), "f2".into()]);
+        s.set_scope(Scope::Favorites);
+        assert!(s.pick_shuffle().is_none());
+    }
+
     #[test]
     fn the_country_filter_ignores_case() {
         let mut s = MiniState::new();
@@ -273,20 +328,20 @@ mod tests {
 
     #[test]
     fn pick_returns_none_for_empty() {
-        assert!(pick_random(&[]).is_none());
+        assert!(pick_from(&[]).is_none());
     }
 
     #[test]
     fn pick_skips_stations_without_url() {
-        let list = vec![st("a", ""), st("b", "http://x")];
-        let p = pick_random(&list).unwrap();
+        let list = [st("a", ""), st("b", "http://x")];
+        let p = pick_from(&list.iter().collect::<Vec<&StationPick>>()).unwrap();
         assert_eq!(p.uuid, "b");
     }
 
     #[test]
     fn pick_returns_a_playable_one() {
-        let list = vec![st("a", "http://a"), st("b", "http://b")];
-        let p = pick_random(&list).unwrap();
+        let list = [st("a", "http://a"), st("b", "http://b")];
+        let p = pick_from(&list.iter().collect::<Vec<&StationPick>>()).unwrap();
         assert!(p.uuid == "a" || p.uuid == "b");
         assert!(!p.url.is_empty());
     }
@@ -354,8 +409,8 @@ mod tests {
     fn favorites_are_readable_without_switching_scope() {
         let mut m = MiniState::new();
         m.load_stations(vec![st("a", "http://a")], vec![st("f", "http://f")]);
-        assert_eq!(m.favorites().len(), 1);
-        assert_eq!(m.favorites()[0].uuid, "f");
+        assert_eq!(m.playable_favorites().len(), 1);
+        assert_eq!(m.playable_favorites()[0].uuid, "f");
         // reading the list must not move the panel off the ALL scope.
         assert_eq!(m.scope, Scope::All);
     }
