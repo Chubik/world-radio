@@ -577,6 +577,9 @@ impl Backend {
         crate::commands::FilterCounts {
             excluded: self.catalog.excluded_country_ids().len() as u32,
             blocked: self.catalog.blacklist_ids().len() as u32,
+            // the library window browses the whole catalogue and has no scope of
+            // its own, so the filter is worded as the ALL scope always sees it.
+            filter: crate::tray::filter_label(self.state.filter(), crate::state::Scope::All),
         }
     }
 

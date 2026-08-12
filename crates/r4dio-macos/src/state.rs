@@ -131,7 +131,6 @@ impl MiniState {
 
     /// what the window shows the user they are filtered to. a filter in effect
     /// and a filter unapplied look identical without it.
-    #[allow(dead_code)]
     pub fn filter(&self) -> &[String] {
         &self.filter
     }
