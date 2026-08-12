@@ -1,5 +1,6 @@
 package net.vchub.r4dio
 
+import android.util.Log
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -48,6 +49,20 @@ class MirrorClient(
     private val baseUrl: String = "https://r4dio.net",
     private val client: OkHttpClient = OkHttpClient(),
 ) {
+    /**
+     * the stream is idle between events — often for hours — so it needs its own
+     * client with no read timeout. okhttp's default of 10s tears the connection
+     * down mid-wait, and the reconnect loop then papers over it: the phone
+     * reconnects endlessly and can miss the very event it is waiting for, which
+     * is why a filter changed on the desktop only landed after an app restart.
+     */
+    private val streamClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonType = "application/json".toMediaType()
 
@@ -81,11 +96,14 @@ class MirrorClient(
             .get()
             .build()
         runCatching {
-            client.newCall(req).execute().use { resp ->
+            streamClient.newCall(req).execute().use { resp ->
                 when (resp.isSuccessful) {
-                    false -> {}
+                    // a refused stream is why live updates stop arriving; without
+                    // this the phone just quietly falls back to sync-on-launch.
+                    false -> Log.w("r4dio", "event stream refused: ${resp.code}")
                     true -> {
                         val source = resp.body?.source() ?: return
+                        Log.i("r4dio", "event stream open")
                         while (true) {
                             val line = source.readUtf8Line() ?: break
                             val evt = parseStreamEvent(line)
@@ -94,10 +112,11 @@ class MirrorClient(
                                 else -> onEvent(evt)
                             }
                         }
+                        Log.i("r4dio", "event stream closed by the server")
                     }
                 }
             }
-        }
+        }.onFailure { Log.w("r4dio", "event stream dropped: ${it.message}") }
     }
 
     fun parseSseData(line: String): MirrorEvent? =

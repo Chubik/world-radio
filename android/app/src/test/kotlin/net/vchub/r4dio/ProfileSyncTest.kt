@@ -212,6 +212,38 @@ class ProfileSyncTest {
         assertEquals(50L, p.scopeAt)
     }
 
+    // clearing the filter on the phone must travel: the filter is one shared
+    // setting, so a device that clears it is making a decision for the account.
+    @Test
+    fun clearing_the_filter_stamps_the_change_so_it_wins_the_merge() {
+        val p = SyncProfile(countries = listOf("UA"), countriesAt = 10).withCountries(emptyList(), 50)
+        assertEquals(emptyList<String>(), p.countries)
+        assertEquals(50L, p.countriesAt)
+    }
+
+    // a cleared filter is a real value, not an absence: it must go on the wire,
+    // or the desktop's older "UA" would simply win and come straight back.
+    @Test
+    fun a_cleared_filter_is_still_sent() {
+        val sent = SyncProfile(countries = listOf("UA"), countriesAt = 10)
+            .withCountries(emptyList(), 50)
+            .outgoing(favs = emptyList(), blocked = emptyList(), excluded = emptyList(), plays = emptyList())
+        assertEquals(50L, sent.shuffle_filter?.at)
+    }
+
+    @Test
+    fun setting_the_same_filter_does_not_move_the_stamp() {
+        val p = SyncProfile(countries = listOf("UA"), countriesAt = 10).withCountries(listOf("UA"), 99)
+        assertEquals(10L, p.countriesAt)
+    }
+
+    // the pick path compares against `station.country.uppercase()`, so a filter
+    // set locally has to be normalised exactly as a remote one is.
+    @Test
+    fun a_locally_set_filter_is_normalised() {
+        assertEquals(listOf("UA"), SyncProfile().withCountries(listOf("ua"), 50).countries)
+    }
+
     // the filter arrives lowercase from a client that did not normalise it; the
     // pick path compares against `station.country.uppercase()`, so a lowercase
     // code stored verbatim would silently match nothing at all.

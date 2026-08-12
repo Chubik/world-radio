@@ -63,6 +63,13 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="6dp" android:orientation="horizontal" android:gravity="center_vertical">
 
+                <!-- how big the catalogue has grown. sits in the space the spacer
+                     used to hold, so the pills on the right keep their places. -->
+                <TextView android:id="@+id/catalogue_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:visibility="gone" android:textColor="@color/dim" android:textSize="9.5sp"
+                    android:fontFamily="@font/ibm_plex_mono" android:letterSpacing="0.1"
+                    android:maxLines="1" android:ellipsize="end" />
+
                 <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
 
                 <TextView android:id="@+id/filter_pill" android:layout_width="wrap_content" android:layout_height="wrap_content"

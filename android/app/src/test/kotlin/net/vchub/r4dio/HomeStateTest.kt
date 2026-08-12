@@ -111,11 +111,52 @@ class HomeStateTest {
         )
     }
 
-    // favourites bypass the filter (FavLogic.pickFav ignores it), exactly as they
-    // bypass the excluded countries — advertising it there would be a lie.
+    // favourites bypass the filter (FavLogic.pickFav ignores it), so it is not in
+    // force there — but hiding it taught the user that a filter they had set had
+    // vanished. it stays on screen and is shown as not applying instead.
     @Test
-    fun the_filter_pill_is_hidden_in_favs_scope() {
-        assertNull(filterPillLabel(listOf("UA"), scope = "favs"))
+    fun the_filter_pill_still_shows_in_favs_scope() {
+        assertEquals("FILTER: UA", filterPillLabel(listOf("UA"), scope = "favs"))
+    }
+
+    @Test
+    fun the_filter_is_in_force_only_outside_favs_scope() {
+        assertTrue(filterIsInForce(listOf("UA"), scope = "all"))
+        assertFalse(filterIsInForce(listOf("UA"), scope = "favs"))
+    }
+
+    // with no filter set there is nothing to be in force, in either scope.
+    @Test
+    fun an_empty_filter_is_never_in_force() {
+        assertFalse(filterIsInForce(emptyList(), scope = "all"))
+        assertFalse(filterIsInForce(emptyList(), scope = "favs"))
+    }
+
+    // the catalogue is no longer either "the top-1000" or "everything" — it grows,
+    // and the user asked to be able to see where it has got to.
+    @Test
+    fun the_pill_names_how_many_stations_are_held() {
+        assertEquals("1 240 STATIONS", catalogueLabel(1240, growing = false))
+    }
+
+    @Test
+    fun a_growing_catalogue_says_so() {
+        assertEquals("1 240 STATIONS +", catalogueLabel(1240, growing = true))
+    }
+
+    // before the first fetch resolves there is no number worth showing.
+    @Test
+    fun an_unknown_count_shows_nothing() {
+        assertEquals("", catalogueLabel(0, growing = false))
+    }
+
+    // the separator is a space, not a comma or a dot: this screen is read at a
+    // glance in a car, and both of those read as decimals in some locales.
+    @Test
+    fun thousands_are_grouped_with_a_space() {
+        assertEquals("999 STATIONS", catalogueLabel(999, growing = false))
+        assertEquals("1 000 STATIONS", catalogueLabel(1000, growing = false))
+        assertEquals("20 000 STATIONS", catalogueLabel(20000, growing = false))
     }
 
     @Test
