@@ -737,22 +737,32 @@ fn apply_profile_synced(
     // adopt the merged profile wholesale, stamps included: a stale in-memory
     // copy would make the very next user edit overwrite what just synced.
     model.profile = profile;
-    let mut effects = vec![];
+    let mut moved = false;
     if let Some(countries) = countries {
         model.browse.filters.countries = countries;
-        model.browse.pending_online_search = Some(Instant::now());
-        let q = model.browse.filters.to_query(&model.browse.query);
-        effects.push(Effect::Search(q, model.browse.filters.clone()));
+        moved = true;
     }
     if let Some(status) = scope.as_deref().and_then(scope_to_status_filter) {
         model.browse.filters.status = status;
+        moved = true;
     }
     // only a slug this build knows, mirroring scope_to_status_filter: an unknown
     // value leaves local state untouched rather than resetting it.
     if let Some(theme) = theme.as_deref().and_then(Theme::try_from_slug) {
         model.theme = theme;
     }
-    effects
+    // one re-search for anything that moved the row source. the scope arm used
+    // to emit nothing, so a favs tap on the phone moved the sidebar highlight
+    // and left the old station list on screen — scope selects the whole row
+    // source (`handle_search` branches on it), so it needs the search as much as
+    // the country filter does. the same change made locally always re-searches;
+    // sync must not disagree with local input.
+    if !moved {
+        return vec![];
+    }
+    model.browse.pending_online_search = Some(Instant::now());
+    let q = model.browse.filters.to_query(&model.browse.query);
+    vec![Effect::Search(q, model.browse.filters.clone())]
 }
 
 /// the single stamp point for the two synced browse fields. every path that
@@ -2062,6 +2072,76 @@ mod tests {
             fx.iter().any(|e| matches!(e, Effect::Search(..))),
             "a synced filter must trigger a re-search: {fx:?}"
         );
+    }
+
+    // the same defect one arm over: scope selects the entire row source — favs,
+    // recent, blocked, dead each come from a different list — so a scope tapped
+    // on the phone moved only the sidebar highlight and left the previous
+    // stations on screen until the user touched something.
+    #[test]
+    fn a_synced_scope_redraws_the_list() {
+        let mut m = model();
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: {
+                    let mut p = radio_core::sync::Profile::default();
+                    p.set_scope("favorites", 100);
+                    p
+                },
+                countries: None,
+                scope: Some("favorites".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Favorites);
+        let searched = fx.iter().find_map(|e| match e {
+            Effect::Search(_, filters) => Some(filters),
+            _ => None,
+        });
+        let filters = searched.expect(
+            "a synced scope must trigger a re-search, or the sidebar moves and the list does not",
+        );
+        // the search must carry the new scope: a re-search on the old row source
+        // would redraw the very stations the scope just left behind.
+        assert_eq!(filters.status, StatusFilter::Favorites);
+    }
+
+    // the theme is the one synced field that changes nothing about which rows
+    // are shown, so it must not cost a search.
+    #[test]
+    fn a_synced_theme_alone_does_not_re_search() {
+        let mut m = model();
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: None,
+                theme: Some("nord".into()),
+            },
+        );
+        assert_eq!(m.theme, crate::tui::theme::Theme::Nord);
+        assert!(fx.is_empty(), "the theme must not cost a search: {fx:?}");
+    }
+
+    // an unknown scope leaves the browse status alone, so it must not re-search
+    // either — the search would be identical to the one already on screen.
+    #[test]
+    fn an_unknown_synced_scope_does_not_re_search() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Blocked;
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: radio_core::sync::Profile::default(),
+                countries: None,
+                scope: Some("something-new".into()),
+                theme: None,
+            },
+        );
+        assert_eq!(m.browse.filters.status, StatusFilter::Blocked);
+        assert!(fx.is_empty(), "nothing moved: {fx:?}");
     }
 
     #[test]

@@ -18,6 +18,16 @@ pub struct Profile {
     pub theme: String,
     #[serde(default)]
     pub theme_at: i64,
+    /// set once **this device** has run the legacy migration, so a launch that
+    /// has nothing left to adopt stops rewriting this file every time.
+    ///
+    /// it does not decide whether `config.toml` may drop its legacy keys —
+    /// `migration_settled` answers that from the stamps, because what protects
+    /// the user is the values having landed somewhere, not the migration having
+    /// been attempted. it never travels on the wire: it is a fact about this
+    /// disk, not about the account.
+    #[serde(default)]
+    pub migrated: bool,
 }
 
 impl Profile {

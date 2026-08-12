@@ -175,8 +175,15 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     // this they would never be published and every other device would see an
     // account with no filter at all. a field the profile already stamped is
     // never touched, so this cannot undo what another device chose.
-    let legacy = config.legacy_settings();
-    let migration_pending = adopt_legacy(&mut model.profile, &legacy, &profile_path, now_secs);
+    let legacy = radio_core::sync::legacy_settings(&data.join("config.toml"));
+    let unwritten =
+        radio_core::sync::adopt_legacy_at(&mut model.profile, &legacy, &profile_path, now_secs);
+    // two separate reasons to keep the legacy keys, and the second is the one
+    // that was missing: adoption also takes nothing when a sync already stamped
+    // the profile from *another* device, and dropping the keys then destroys
+    // this machine's only copy of its own filter and theme.
+    let migration_pending =
+        unwritten || !radio_core::sync::migration_settled(&model.profile, &legacy);
     seed_from_profile(&mut model);
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
@@ -238,11 +245,12 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         ColorTier::Truecolor => !model.glyphs.emoji_flags,
         ColorTier::Ansi16 => config.no_emoji,
     };
-    // rewriting the config drops the legacy keys. when the migration could not
-    // be persisted, they are the user's only remaining copy — leave them.
+    // rewriting the config drops the legacy keys. until the profile carries a
+    // value for every field the config still holds, they are the user's only
+    // remaining copy — leave them.
     match migration_pending {
         true => {
-            crate::log_warn!("startup: keeping the legacy config keys, the profile is unwritten")
+            crate::log_warn!("startup: keeping the legacy config keys, the profile is unstamped")
         }
         false => exit_config(&model, no_emoji).save(&data.join("config.toml")),
     }
@@ -252,34 +260,6 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     let _ = req_tx.send(WorkerReq::Shutdown);
     drop(worker_handle);
     loop_result.and(restore_result)
-}
-
-/// takes up settings an old config still carries, and reports whether the
-/// migration is still unwritten. adoption is once per device and the legacy
-/// values live nowhere else, so a failed save must keep the config as it is
-/// rather than let exit drop the keys.
-fn adopt_legacy(
-    profile: &mut radio_core::sync::Profile,
-    legacy: &crate::tui::config::LegacySettings,
-    profile_path: &std::path::Path,
-    now: i64,
-) -> bool {
-    let adopted = profile.adopt_existing(
-        &legacy.countries,
-        legacy.scope.as_deref().unwrap_or(""),
-        legacy.theme.as_deref().unwrap_or(""),
-        now,
-    );
-    if !adopted {
-        return false;
-    }
-    match profile.save(profile_path) {
-        Ok(()) => false,
-        Err(e) => {
-            crate::log_warn!("startup: failed to save the adopted profile: {e}");
-            true
-        }
-    }
 }
 
 /// pushes the profile into the ui at startup. this is the only seed for the
@@ -302,8 +282,6 @@ fn seed_from_profile(model: &mut Model) {
 /// values a sync had just brought in.
 fn exit_config(model: &Model, no_emoji: bool) -> Config {
     Config {
-        legacy_theme: None,
-        legacy_filters: None,
         no_emoji,
         last_station: model.now.uuid.clone(),
         query: model.browse.query.clone(),
@@ -602,12 +580,25 @@ mod tests {
         p
     }
 
-    fn legacy_of(raw: &str) -> crate::tui::config::LegacySettings {
-        Config::from_toml_str(raw).unwrap().legacy_settings()
+    fn legacy_of(raw: &str) -> radio_core::sync::LegacySettings {
+        radio_core::sync::legacy_settings_from_toml(raw)
     }
 
     const OLD_CONFIG: &str =
         "theme = \"monokai\"\n[filters]\nstatus = \"all\"\ncountries = [\"UA\"]\n";
+
+    /// the exact gate `run` applies before it lets exit rewrite `config.toml`,
+    /// so a test reads the real condition rather than a restatement that could
+    /// drift from it.
+    fn migration_pending(
+        profile: &mut radio_core::sync::Profile,
+        legacy: &radio_core::sync::LegacySettings,
+        profile_path: &std::path::Path,
+        now: i64,
+    ) -> bool {
+        let unwritten = radio_core::sync::adopt_legacy_at(profile, legacy, profile_path, now);
+        unwritten || !radio_core::sync::migration_settled(profile, legacy)
+    }
 
     // a successful adoption is written and the config is then free to drop the
     // legacy keys.
@@ -617,7 +608,7 @@ mod tests {
         let path = dir.path().join("profile.json");
         let mut profile = radio_core::sync::Profile::default();
 
-        let pending = adopt_legacy(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
 
         assert!(!pending);
         assert_eq!(
@@ -639,7 +630,7 @@ mod tests {
         let path = blocker.join("profile.json");
         let mut profile = radio_core::sync::Profile::default();
 
-        let pending = adopt_legacy(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
 
         assert!(pending, "a failed migration save must be reported");
     }
@@ -649,10 +640,9 @@ mod tests {
     fn adopting_nothing_leaves_no_migration_pending() {
         let dir = tempfile::tempdir().unwrap();
         let mut profile = radio_core::sync::Profile::default();
-        let legacy = Config::default().legacy_settings();
-        assert!(!adopt_legacy(
+        assert!(!migration_pending(
             &mut profile,
-            &legacy,
+            &radio_core::sync::LegacySettings::default(),
             &dir.path().join("profile.json"),
             500
         ));
@@ -665,21 +655,75 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let blocker = dir.path().join("blocker");
         std::fs::write(&blocker, "not a directory").unwrap();
-        let mut profile = profile_with(&["PL"], "favorites", "nord");
+        // already carrying the config's own values, and already marked as
+        // migrated, so there is nothing to adopt and the unwritable path is
+        // never even reached.
+        let mut profile = profile_with(&["UA"], "all", "monokai");
+        profile.migrated = true;
 
-        let pending = adopt_legacy(
+        let pending = migration_pending(
             &mut profile,
             &legacy_of(OLD_CONFIG),
             &blocker.join("profile.json"),
             500,
         );
 
-        assert!(!pending);
+        assert!(!pending, "a doomed save must not be attempted at all");
         assert_eq!(
             profile.countries,
-            vec!["PL".to_string()],
+            vec!["UA".to_string()],
             "stamped value lost"
         );
+    }
+
+    // the unrecoverable data loss this fix removes.
+    //
+    // the mac app (or `sync run`) syncs before the tui is ever opened on this
+    // machine. it publishes nothing, the server answers with device b's filter
+    // and theme, and profile.save stamps countries_at and theme_at. the tui then
+    // opens: adoption correctly refuses to outrank device b, so it returns
+    // "adopted nothing" — which the old gate read as "already migrated" and let
+    // exit rewrite config.toml without [filters] or theme. this machine's own UA
+    // filter and monokai theme were then gone from both files, unrecoverably.
+    //
+    // the scope was never stamped by that sync, so the config is still the only
+    // copy of something and the keys must stay.
+    #[test]
+    fn a_sync_before_the_first_tui_launch_does_not_drop_the_legacy_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        // exactly what apply_remote_profile leaves behind: device b's filter and
+        // theme stamped, the scope untouched.
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["PL".into()], 900);
+        profile.set_theme("cyber-neon", 900);
+        profile.save(&path).unwrap();
+
+        let pending = migration_pending(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(
+            pending,
+            "exit would rewrite config.toml and destroy this machine's only copy of its settings"
+        );
+    }
+
+    // and once the migration really has settled — every field the config carries
+    // is stamped in the profile — the keys must finally be dropped, or the gate
+    // would keep a stale copy alive for ever and re-adopt it after a reset.
+    #[test]
+    fn a_fully_stamped_profile_finally_releases_the_legacy_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        // the profile carries what the config was rescuing, so the config has
+        // stopped being anyone's only copy.
+        let mut profile = profile_with(&["UA"], "all", "monokai");
+
+        assert!(!migration_pending(
+            &mut profile,
+            &legacy_of(OLD_CONFIG),
+            &path,
+            500
+        ));
     }
 
     // the whole defect: device b changed the filter while this tui was closed,
@@ -749,7 +793,7 @@ mod tests {
     #[test]
     fn a_fresh_install_adopts_nothing() {
         let mut profile = radio_core::sync::Profile::default();
-        let legacy = Config::default().legacy_settings();
+        let legacy = radio_core::sync::LegacySettings::default();
         let adopted = profile.adopt_existing(
             &legacy.countries,
             legacy.scope.as_deref().unwrap_or(""),
@@ -765,14 +809,14 @@ mod tests {
     // launch-then-exit cycle must show device b's values and write back neither.
     #[test]
     fn a_synced_filter_survives_a_launch_that_still_has_an_old_config() {
-        let old = Config::from_toml_str(
-            "theme = \"monokai\"\n[filters]\nstatus = \"all\"\ncountries = [\"UA\"]\n",
-        )
-        .unwrap();
         let mut model = Model::new(Theme::from_slug(""), ColorTier::Truecolor, Glyphs::ascii());
+        // fully stamped by device b: filter, scope and theme.
         model.profile = profile_with(&["PL", "DE"], "favorites", "nord");
 
-        let legacy = old.legacy_settings();
+        // whether exit may then drop the legacy keys is a separate question,
+        // answered by migration_settled and its own tests; this one is about
+        // which values the ui takes.
+        let legacy = legacy_of(OLD_CONFIG);
         let adopted = model.profile.adopt_existing(
             &legacy.countries,
             legacy.scope.as_deref().unwrap_or(""),

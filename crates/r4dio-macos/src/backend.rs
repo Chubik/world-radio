@@ -89,11 +89,17 @@ pub fn scope_from_wire(wire: &str) -> Option<Scope> {
 }
 
 /// pushes what the account decides into the live pick state. it runs at startup
-/// and again after every sync, because a filter or a block set on another device
-/// only ever arrives on disk — without this it would sit there unapplied, which
-/// is exactly how the filter came to govern every surface but this one. the
-/// scope is deliberately not seeded here: `sync` only moves it when the merge
-/// actually moved it, so re-applying it would reset a scope the user just set.
+/// and again after every sync, because a filter, a scope or a block set on
+/// another device only ever arrives on disk — without this it would sit there
+/// unapplied, which is exactly how the filter came to govern every surface but
+/// this one.
+///
+/// the scope is seeded here and nowhere else. it used to sit inside `sync`'s
+/// fallible body, after `save_state`, so a failing disk left the merged scope
+/// on disk and the old one in `MiniState`: the panel says ALL while the account
+/// says FAVS and shuffle draws from the wrong pool. re-seeding it from disk is
+/// always right because `set_scope` writes the user's own choice through to
+/// `profile.json` before anything reads it back — the disk is the only owner.
 fn seed_from_profile(
     state: &mut MiniState,
     profile: &radio_core::sync::Profile,
@@ -101,6 +107,31 @@ fn seed_from_profile(
 ) {
     state.set_filter(profile.countries.clone());
     state.set_blocked(blocked.to_vec());
+    // an unknown or unset scope leaves the panel alone rather than resetting the
+    // user to ALL from a value a newer client wrote.
+    if let Some(scope) = scope_from_wire(&profile.scope) {
+        state.set_scope(scope);
+    }
+}
+
+/// the profile this app starts from, adoption included.
+///
+/// this app can be the first thing a machine ever syncs with — the tui may
+/// never have been opened here. adoption used to live only in the tui, so a mac
+/// that synced first published an empty profile, took whatever another device
+/// had chosen, and the filter and theme that only `config.toml` held were then
+/// gone for good. it belongs on every path that can reach the server, so it
+/// sits at startup, before anything reads the profile.
+fn startup_profile(
+    profile_path: &std::path::Path,
+    config_path: &std::path::Path,
+) -> radio_core::sync::Profile {
+    let mut profile = radio_core::sync::Profile::load(profile_path);
+    let legacy = radio_core::sync::legacy_settings(config_path);
+    if radio_core::sync::adopt_legacy(&mut profile, &legacy, profile_path) {
+        eprintln!("startup: failed to save the adopted profile");
+    }
+    profile
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -165,10 +196,7 @@ impl Backend {
         // a scope, a filter and a blocklist synced from another device are all on
         // disk before this app starts; reading them here is what makes the panel
         // open on the same scope and shuffle inside the same filter.
-        let profile = radio_core::sync::Profile::load(&profile_path);
-        if let Some(scope) = scope_from_wire(&profile.scope) {
-            state.set_scope(scope);
-        }
+        let profile = startup_profile(&profile_path, &data.join("config.toml"));
         seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
         state.set_volume(load_volume(&settings_path));
 
@@ -646,13 +674,6 @@ impl Backend {
             &self.blacklist_path,
             &self.excluded_path,
         )?;
-        // the synced scope is the only profile field this app has live state
-        // for; without this the merged value would sit on disk unread.
-        if changed.scope {
-            if let Some(scope) = scope_from_wire(&profile.scope) {
-                self.state.set_scope(scope);
-            }
-        }
         // remove exactly what we just sent; keep anything written to the log
         // during the round-trip (a plain overwrite would destroy it).
         radio_core::sync::Pending::clear_pushed(&pushed, &self.pending_path)?;
@@ -760,9 +781,13 @@ mod tests {
     }
 
     /// a backend wired to a stub sync server that answers the push with a
-    /// `UA` filter, so `Backend::sync` can be driven end to end. `R4DIO_SYNC_URL`
-    /// is the seam `SyncClient::new` already honours; it is process-wide, so
-    /// these tests hold a lock rather than running concurrently.
+    /// `UA` filter and a `favorites` scope, so `Backend::sync` can be driven end
+    /// to end. `R4DIO_SYNC_URL` is the seam `SyncClient::new` already honours; it
+    /// is process-wide, so these tests hold a lock rather than running
+    /// concurrently.
+    ///
+    /// the scope answer is `favorites`, not `all`: `MiniState` starts on `All`,
+    /// so an `all` answer could never tell a working seed from a missing one.
     ///
     /// the returned server and mock must stay alive for the call — dropping the
     /// server closes the port and the push fails for the wrong reason.
@@ -786,7 +811,7 @@ mod tests {
                 // is the shape `session::remote_lww_filter` reads.
                 r#"{"favs":[],"blocked":[],"excluded_countries":[],
                     "shuffle_filter":{"value":{"countries":["UA"]},"at":9999999999},
-                    "scope":{"value":"all","at":1},
+                    "scope":{"value":"favorites","at":9999999999},
                     "theme":{"value":"","at":0},"history":[]}"#,
             )
             .create();
@@ -849,6 +874,79 @@ mod tests {
 
         assert_eq!(state.active_stations().len(), 1);
         assert_eq!(state.active_stations()[0].uuid, "b");
+    }
+
+    // the scope used to be seeded by hand at two call sites, one of them inside
+    // a fallible body that could skip it. it belongs here, where every path that
+    // pushes the account into the pick state goes through it.
+    #[test]
+    fn a_scope_on_disk_reaches_the_pick_state() {
+        let mut state = MiniState::new();
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_scope("favorites", 100);
+
+        seed_from_profile(&mut state, &profile, &[]);
+
+        assert_eq!(state.scope, Scope::Favorites);
+    }
+
+    // a scope this app cannot show must leave the panel where it is rather than
+    // collapsing it to ALL.
+    #[test]
+    fn a_scope_this_app_cannot_show_leaves_the_pick_state_alone() {
+        let mut state = MiniState::new();
+        state.set_scope(Scope::Favorites);
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_scope("dead", 100);
+
+        seed_from_profile(&mut state, &profile, &[]);
+
+        assert_eq!(state.scope, Scope::Favorites);
+    }
+
+    // the mac may be the first surface on this machine to reach the server, and
+    // adoption only ever ran in the tui. without it the mac publishes nothing,
+    // the account adopts another device's filter, and the settings that only
+    // config.toml held are lost.
+    #[test]
+    fn the_mac_adopts_an_old_config_at_startup() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let profile_path = dir.path().join("profile.json");
+        std::fs::write(
+            &config,
+            "theme = \"monokai\"\n[filters]\nstatus = \"favorites\"\ncountries = [\"UA\"]\n",
+        )
+        .unwrap();
+
+        let profile = startup_profile(&profile_path, &config);
+
+        assert_eq!(profile.countries, vec!["UA".to_string()]);
+        assert_eq!(profile.scope, "favorites");
+        assert_eq!(profile.theme, "monokai");
+        assert!(profile.countries_at > 0, "the adoption was never stamped");
+        assert_eq!(
+            radio_core::sync::Profile::load(&profile_path).countries,
+            vec!["UA".to_string()],
+            "the adoption never reached the disk"
+        );
+    }
+
+    // adoption is a rescue, never a writer that outranks another device.
+    #[test]
+    fn the_mac_never_adopts_over_a_stamped_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.toml");
+        let profile_path = dir.path().join("profile.json");
+        std::fs::write(&config, "[filters]\ncountries = [\"UA\"]\n").unwrap();
+        let mut p = radio_core::sync::Profile::default();
+        p.set_countries(vec!["PL".into()], 900);
+        p.save(&profile_path).unwrap();
+
+        assert_eq!(
+            startup_profile(&profile_path, &config).countries,
+            vec!["PL".to_string()]
+        );
     }
 
     // a filter cleared on another device has to widen the pool back out, not
@@ -1041,13 +1139,14 @@ mod tests {
 
     /// the hazard this branch exists to remove, at its last hiding place.
     ///
-    /// `sync` writes the new filter to `profile.json` and only then runs four
-    /// more fallible steps — save_state, the pending-log rewrite and two sqlite
-    /// reads. when the seed sat after those, any of them failing left the filter
-    /// on disk and the old countries in `MiniState`: the user shuffles and hears
-    /// what they just filtered away. this drives the same order `sync` does —
-    /// the profile written, then a post-write failure — and asserts the pool
-    /// followed anyway.
+    /// `sync` writes the new filter and scope to `profile.json` and only then
+    /// runs four more fallible steps — save_state, the pending-log rewrite and
+    /// two sqlite reads. when the seed sat after those, any of them failing left
+    /// the merged values on disk and the old ones in `MiniState`: the user
+    /// shuffles and hears what they just filtered away, and the panel says ALL
+    /// while the account says FAVS. this drives the same order `sync` does — the
+    /// profile written, then a post-write failure — and asserts both the filter
+    /// and the scope followed anyway.
     #[test]
     fn a_failure_after_the_profile_is_written_still_reaches_the_pool() {
         let (mut b, dir, _server, _lock) = syncing_backend();
@@ -1073,14 +1172,19 @@ mod tests {
 
         assert!(
             b.profile_path.exists(),
-            "precondition: the merged filter reached disk before the failure ({err})"
+            "precondition: the merged profile reached disk before the failure ({err})"
         );
+        let on_disk = radio_core::sync::Profile::load(&b.profile_path);
         assert_eq!(
-            radio_core::sync::Profile::load(&b.profile_path).countries,
+            on_disk.countries,
             vec!["UA".to_string()],
             "precondition: the filter on disk is the merged one"
         );
-        // the invariant: the filter that reached disk also reached the live pick
+        assert_eq!(
+            on_disk.scope, "favorites",
+            "precondition: the scope on disk is the merged one"
+        );
+        // the invariant: everything that reached disk also reached the live pick
         // state, even though sync returned Err. without it the user shuffles and
         // still hears PL until the app is relaunched.
         assert_eq!(
@@ -1088,11 +1192,21 @@ mod tests {
             ["UA".to_string()],
             "the filter reached disk but never the pick state — the user would still hear PL"
         );
-        // and it really governs the picks, not just a field: the sync legitimately
-        // reloads the pool from the (empty) test catalogue, so it is re-populated
-        // here to show the seeded filter cutting it down.
+        // the scope half, which used to sit inside the fallible body and so was
+        // skipped by exactly this failure: the panel would show ALL while the
+        // account says FAVS, and shuffle would draw from the whole catalogue.
+        assert_eq!(
+            b.state.scope,
+            Scope::Favorites,
+            "the scope reached disk but never the pick state — the panel would still say ALL"
+        );
+        // and the filter really governs the picks, not just a field. the sync
+        // legitimately reloads the pool from the (empty) test catalogue, so it is
+        // re-populated here; the scope is put back to ALL because the country
+        // filter deliberately does not apply to the favourites arm.
         b.state
             .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        b.state.set_scope(Scope::All);
         assert_eq!(b.state.active_stations().len(), 1);
         assert_eq!(b.state.active_stations()[0].uuid, "a");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1107,8 +1221,10 @@ mod tests {
         b.sync_with_key("r4-test").expect("this sync must succeed");
 
         assert_eq!(b.state.filter(), ["UA".to_string()]);
+        assert_eq!(b.state.scope, Scope::Favorites);
         b.state
             .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        b.state.set_scope(Scope::All);
         assert_eq!(b.state.active_stations().len(), 1);
         assert_eq!(b.state.active_stations()[0].uuid, "a");
         let _ = std::fs::remove_dir_all(&dir);
