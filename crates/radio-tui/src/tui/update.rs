@@ -2039,6 +2039,31 @@ mod tests {
         p
     }
 
+    // a filter that arrived from another device must reach the list, not just
+    // the profile — this is the path that was broken before this branch.
+    #[test]
+    fn a_synced_filter_redraws_the_list() {
+        let mut m = model();
+        let fx = update(
+            &mut m,
+            Msg::ProfileSynced {
+                profile: {
+                    let mut p = radio_core::sync::Profile::default();
+                    p.set_countries(vec!["UA".into()], 100);
+                    p
+                },
+                countries: Some(vec!["UA".into()]),
+                scope: None,
+                theme: None,
+            },
+        );
+        assert_eq!(m.profile.countries, vec!["UA".to_string()]);
+        assert!(
+            fx.iter().any(|e| matches!(e, Effect::Search(..))),
+            "a synced filter must trigger a re-search: {fx:?}"
+        );
+    }
+
     #[test]
     fn profile_synced_applies_countries_scope_and_theme_to_the_model() {
         let mut m = model();
