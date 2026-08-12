@@ -26,12 +26,18 @@ pub fn meta_label(country: &str, codec: &str, bitrate: u32) -> String {
 }
 
 pub fn pick_random(stations: &[StationPick]) -> Option<StationPick> {
-    let playable: Vec<&StationPick> = stations.iter().filter(|s| !s.url.is_empty()).collect();
+    pick_from(&stations.iter().collect::<Vec<&StationPick>>())
+}
+
+/// a station with no url cannot be played, so it is never picked — a pool of
+/// only those must report nothing rather than hand back an unplayable row.
+pub fn pick_from(stations: &[&StationPick]) -> Option<StationPick> {
+    let playable: Vec<&&StationPick> = stations.iter().filter(|s| !s.url.is_empty()).collect();
     if playable.is_empty() {
         return None;
     }
     let idx = fastrand::usize(..playable.len());
-    Some(playable[idx].clone())
+    Some((*playable[idx]).clone())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +79,8 @@ pub struct MiniState {
     pub scope: Scope,
     all: Vec<StationPick>,
     favorites: Vec<StationPick>,
+    filter: Vec<String>,
+    blocked: Vec<String>,
 }
 
 impl MiniState {
@@ -84,6 +92,8 @@ impl MiniState {
             scope: Scope::All,
             all: Vec::new(),
             favorites: Vec::new(),
+            filter: Vec::new(),
+            blocked: Vec::new(),
         }
     }
 
@@ -108,15 +118,48 @@ impl MiniState {
         &self.favorites
     }
 
-    pub fn active_stations(&self) -> &[StationPick] {
+    /// the country filter this device is listening under. empty means
+    /// unrestricted; the codes come from `profile.json`, never from here.
+    pub fn set_filter(&mut self, filter: Vec<String>) {
+        self.filter = filter;
+    }
+
+    /// what the window shows the user they are filtered to. a filter in effect
+    /// and a filter unapplied look identical without it.
+    #[allow(dead_code)]
+    pub fn filter(&self) -> &[String] {
+        &self.filter
+    }
+
+    pub fn set_blocked(&mut self, blocked: Vec<String>) {
+        self.blocked = blocked;
+    }
+
+    /// the pool shuffle draws from. the filter is applied here rather than baked
+    /// into `all`, so a filter arriving from another device narrows the pool
+    /// without reloading the catalogue. favourites come back untouched: an
+    /// explicit star outranks a broad taste filter, matching android.
+    pub fn active_stations(&self) -> Vec<&StationPick> {
         match self.scope {
-            Scope::All => &self.all,
-            Scope::Favorites => &self.favorites,
+            Scope::All => self
+                .all
+                .iter()
+                .filter(|s| {
+                    radio_core::catalog::allowed_row(
+                        &s.uuid,
+                        &s.country,
+                        &[],
+                        &self.blocked,
+                        &self.filter,
+                    )
+                })
+                .collect(),
+            Scope::Favorites => self.favorites.iter().collect(),
         }
     }
 
     pub fn pick_shuffle(&self) -> Option<StationPick> {
-        pick_random(self.active_stations())
+        pick_from(&self.active_stations())
     }
 
     pub fn begin_play(&mut self, pick: StationPick) {
@@ -167,6 +210,65 @@ mod tests {
             codec: String::new(),
             bitrate: 0,
         }
+    }
+
+    fn st_in(uuid: &str, country: &str) -> StationPick {
+        StationPick {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            url: format!("http://{uuid}"),
+            country: country.into(),
+            codec: String::new(),
+            bitrate: 0,
+        }
+    }
+
+    #[test]
+    fn the_shuffle_pool_honours_the_country_filter() {
+        let mut s = MiniState::new();
+        s.set_all(vec![st_in("a", "UA"), st_in("b", "PL")]);
+        s.set_filter(vec!["UA".into()]);
+        for _ in 0..20 {
+            assert_eq!(s.pick_shuffle().unwrap().uuid, "a");
+        }
+    }
+
+    #[test]
+    fn an_empty_filter_leaves_the_pool_whole() {
+        let mut s = MiniState::new();
+        s.set_all(vec![st_in("a", "UA"), st_in("b", "PL")]);
+        s.set_filter(vec![]);
+        assert_eq!(s.active_stations().len(), 2);
+    }
+
+    // a station blocked on another device must not be shuffled into here.
+    #[test]
+    fn the_shuffle_pool_skips_blocked_stations() {
+        let mut s = MiniState::new();
+        s.set_all(vec![st_in("a", "UA"), st_in("b", "UA")]);
+        s.set_blocked(vec!["a".into()]);
+        for _ in 0..20 {
+            assert_eq!(s.pick_shuffle().unwrap().uuid, "b");
+        }
+    }
+
+    // the star outranks the taste filter, exactly as on android.
+    #[test]
+    fn favourites_ignore_the_country_filter() {
+        let mut s = MiniState::new();
+        s.set_favorites(vec![st_in("f", "PL")]);
+        s.set_filter(vec!["UA".into()]);
+        s.set_scope(Scope::Favorites);
+        assert_eq!(s.pick_shuffle().unwrap().uuid, "f");
+    }
+
+    #[test]
+    fn the_country_filter_ignores_case() {
+        let mut s = MiniState::new();
+        s.set_all(vec![st_in("a", "ua"), st_in("b", "PL")]);
+        s.set_filter(vec!["Ua".into()]);
+        assert_eq!(s.active_stations().len(), 1);
+        assert_eq!(s.active_stations()[0].uuid, "a");
     }
 
     #[test]

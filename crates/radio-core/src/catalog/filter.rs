@@ -8,14 +8,33 @@ pub fn allowed_station(
     blocked: &[String],
     included_countries: &[String],
 ) -> bool {
-    let country = station.countrycode.to_uppercase();
+    allowed_row(
+        &station.stationuuid,
+        &station.countrycode,
+        excluded_countries,
+        blocked,
+        included_countries,
+    )
+}
+
+/// the same rule for a surface that carries its own row type rather than a
+/// `Station` — macos picks from `StationPick`, and building a throwaway
+/// `Station` per row would allocate over the whole catalogue on every shuffle.
+pub fn allowed_row(
+    uuid: &str,
+    countrycode: &str,
+    excluded_countries: &[String],
+    blocked: &[String],
+    included_countries: &[String],
+) -> bool {
+    let country = countrycode.to_uppercase();
     if excluded_countries
         .iter()
         .any(|c| c.to_uppercase() == country)
     {
         return false;
     }
-    if blocked.iter().any(|b| b == &station.stationuuid) {
+    if blocked.iter().any(|b| b == uuid) {
         return false;
     }
     match included_countries.is_empty() {
@@ -115,6 +134,39 @@ mod tests {
         assert!(!allowed_station(&st("a", "UA"), &[], &blocked, &inc));
         let excluded = vec!["UA".to_string()];
         assert!(!allowed_station(&st("b", "UA"), &excluded, &[], &inc));
+    }
+
+    // the row form is what macos picks through; if it ever stops agreeing with
+    // the station form, the filter silently means two different things again.
+    #[test]
+    fn the_row_form_answers_exactly_as_the_station_form() {
+        let excluded = vec!["DE".to_string()];
+        let blocked = vec!["b".to_string()];
+        let included = vec!["ua".to_string(), "US".to_string()];
+        for (uuid, country) in [
+            ("a", "UA"),
+            ("b", "UA"),
+            ("c", "PL"),
+            ("d", "DE"),
+            ("e", "us"),
+            ("f", ""),
+        ] {
+            let s = st(uuid, country);
+            assert_eq!(
+                allowed_row(uuid, country, &excluded, &blocked, &included),
+                allowed_station(&s, &excluded, &blocked, &included),
+                "{uuid}/{country}"
+            );
+        }
+        // and with no include set, where everything not excluded or blocked passes
+        for (uuid, country) in [("a", "UA"), ("b", "UA"), ("d", "DE")] {
+            let s = st(uuid, country);
+            assert_eq!(
+                allowed_row(uuid, country, &excluded, &blocked, &[]),
+                allowed_station(&s, &excluded, &blocked, &[]),
+                "{uuid}/{country}"
+            );
+        }
     }
 
     #[test]
