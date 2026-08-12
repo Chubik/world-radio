@@ -1,12 +1,14 @@
 use crate::tui::keybind::Keymap;
-use crate::tui::model::{BrowseFilters, SpectrumStyle};
+use crate::tui::model::SpectrumStyle;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+/// machine-local settings only. `theme` and `[filters]` are deliberately absent:
+/// `profile.json` owns them from this build on, and an old file that still
+/// carries them is read by `radio_core::sync::legacy_settings` — the one reader
+/// every surface shares — never from here.
 pub struct Config {
-    #[serde(default = "default_theme")]
-    pub theme: String,
     #[serde(default)]
     pub no_emoji: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -21,16 +23,10 @@ pub struct Config {
     pub spectrum_style: SpectrumStyle,
     #[serde(default)]
     pub keybindings: Keymap,
-    #[serde(default)]
-    pub filters: BrowseFilters,
 }
 
 fn default_true() -> bool {
     true
-}
-
-fn default_theme() -> String {
-    "amber-crt".to_string()
 }
 
 fn default_divisor() -> f32 {
@@ -40,7 +36,6 @@ fn default_divisor() -> f32 {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            theme: default_theme(),
             no_emoji: false,
             last_station: None,
             query: String::new(),
@@ -48,7 +43,6 @@ impl Default for Config {
             crossfade: true,
             spectrum_style: SpectrumStyle::default(),
             keybindings: Keymap::default(),
-            filters: BrowseFilters::default(),
         }
     }
 }
@@ -90,21 +84,27 @@ mod tests {
     #[test]
     fn parse_defaults_when_missing_fields() {
         let cfg = Config::from_toml_str("").unwrap();
-        assert_eq!(cfg.theme, "amber-crt");
         assert!(!cfg.no_emoji);
+        assert!(cfg.crossfade);
     }
 
+    // an old file still carries `theme` and `[filters]`. this struct must parse
+    // straight past them rather than erroring out, or a machine due for the
+    // migration would fall back to defaults for its real settings too.
     #[test]
-    fn parse_reads_theme_and_no_emoji() {
-        let cfg = Config::from_toml_str("theme = \"cyber-neon\"\nno_emoji = true\n").unwrap();
-        assert_eq!(cfg.theme, "cyber-neon");
+    fn an_old_config_still_parses_its_machine_local_keys() {
+        let cfg = Config::from_toml_str(
+            "theme = \"cyber-neon\"\nno_emoji = true\n[filters]\nstatus = \"all\"\n",
+        )
+        .unwrap();
         assert!(cfg.no_emoji);
     }
 
     #[test]
     fn missing_file_yields_defaults() {
         let cfg = Config::load(std::path::Path::new("/no/such/config.toml"));
-        assert_eq!(cfg.theme, "amber-crt");
+        assert!(!cfg.no_emoji);
+        assert!(cfg.crossfade);
     }
 
     #[test]
@@ -113,39 +113,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "not = [valid").unwrap();
-        let cfg = Config::load(&path);
-        assert_eq!(cfg.theme, "amber-crt");
+        assert!(Config::load(&path).crossfade);
     }
 
     #[test]
-    fn config_roundtrips_theme_and_no_emoji() {
+    fn config_roundtrips_no_emoji_and_last_station() {
         let cfg = Config {
-            theme: "cyber-neon".into(),
             no_emoji: true,
             last_station: Some("uuid-123".into()),
             ..Default::default()
         };
         let s = cfg.to_toml_string();
         let back = Config::from_toml_str(&s).unwrap();
-        assert_eq!(back.theme, "cyber-neon");
         assert!(back.no_emoji);
         assert_eq!(back.last_station.as_deref(), Some("uuid-123"));
     }
 
     #[test]
-    fn config_roundtrips_query_and_filters() {
-        use crate::tui::model::{BrowseFilters, SpectrumStyle, StatusFilter};
+    fn config_roundtrips_query_and_view_settings() {
+        use crate::tui::model::SpectrumStyle;
         let cfg = Config {
             query: "80".into(),
             fft_divisor: 4.0,
             crossfade: false,
             spectrum_style: SpectrumStyle::Wave,
-            filters: BrowseFilters {
-                status: StatusFilter::Favorites,
-                tags: vec!["jazz".into(), "80s".into()],
-                hide_unplayable: true,
-                ..Default::default()
-            },
             ..Default::default()
         };
         let s = cfg.to_toml_string();
@@ -154,11 +145,27 @@ mod tests {
         assert_eq!(back.fft_divisor, 4.0);
         assert!(!back.crossfade);
         assert_eq!(back.spectrum_style, SpectrumStyle::Wave);
-        assert_eq!(back.filters.status, StatusFilter::Favorites);
-        assert_eq!(
-            back.filters.tags,
-            vec!["jazz".to_string(), "80s".to_string()]
+    }
+
+    #[test]
+    fn a_new_config_writes_no_filters_or_theme() {
+        let cfg = Config::default();
+        let out = toml::to_string(&cfg).unwrap();
+        assert!(
+            !out.contains("[filters]"),
+            "filters must not be written: {out}"
         );
-        assert!(back.filters.hide_unplayable);
+        assert!(!out.contains("theme"), "theme must not be written: {out}");
+    }
+
+    // the migration is one-way: once the values are read back out of an old
+    // file they must not be written again, or the next launch re-adopts them.
+    #[test]
+    fn a_loaded_old_config_writes_neither_back() {
+        let raw = "theme = \"monokai\"\n[filters]\nstatus = \"favorites\"\ncountries = [\"UA\"]\n";
+        let cfg = Config::from_toml_str(raw).unwrap();
+        let out = cfg.to_toml_string();
+        assert!(!out.contains("[filters]"), "filters came back: {out}");
+        assert!(!out.contains("monokai"), "theme came back: {out}");
     }
 }

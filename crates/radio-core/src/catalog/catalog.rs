@@ -608,7 +608,7 @@ mod tests {
         }
         let cat = Catalog::new(cache, health);
         let q = SearchQuery {
-            countrycode: Some("GB".into()),
+            countrycodes: vec!["GB".into()],
             ..Default::default()
         };
         let rows = cat.search_offline_filtered(&q).unwrap();

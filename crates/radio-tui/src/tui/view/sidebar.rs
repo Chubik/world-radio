@@ -337,6 +337,43 @@ mod tests {
         );
     }
 
+    // what the user actually sees after a sync brought another device's filter
+    // in: selection is carried by colour alone, so the marked entries are the
+    // only proof the panel is drawn from the profile and not a stale copy.
+    #[test]
+    fn the_panel_marks_exactly_the_countries_the_profile_carries() {
+        let mut m = Model::new(
+            crate::tui::theme::Theme::AmberCrt,
+            crate::tui::theme::ColorTier::Truecolor,
+            crate::tui::theme::Glyphs::unicode(),
+        );
+        m.browse.facets.countries = vec![("UA".into(), 6), ("PL".into(), 4), ("DE".into(), 11)];
+        m.browse.filters.countries = vec!["PL".into(), "DE".into()];
+        let opts = group_options(&m, 1, &m.browse.facets.countries.clone());
+        let marked: Vec<&String> = opts
+            .iter()
+            .filter(|(_, s)| *s == OptState::ShowOnly)
+            .map(|(l, _)| l)
+            .collect();
+        assert_eq!(marked, vec!["PL (4)", "DE (11)"]);
+    }
+
+    #[test]
+    fn the_panel_marks_the_scope_the_profile_carries() {
+        let mut m = Model::new(
+            crate::tui::theme::Theme::AmberCrt,
+            crate::tui::theme::ColorTier::Truecolor,
+            crate::tui::theme::Glyphs::unicode(),
+        );
+        m.browse.filters.status = crate::tui::model::StatusFilter::Favorites;
+        let marked: Vec<String> = status_options(&m)
+            .into_iter()
+            .filter(|(_, s)| *s == OptState::ShowOnly)
+            .map(|(l, _)| l)
+            .collect();
+        assert_eq!(marked, vec!["favorites".to_string()]);
+    }
+
     #[test]
     fn opt_state_colour_conveys_show_only_vs_hidden() {
         // no markers — colour alone must distinguish the states.
