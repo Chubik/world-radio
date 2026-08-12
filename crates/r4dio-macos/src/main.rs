@@ -104,7 +104,7 @@ fn spawn_stream_listener(app: &tauri::AppHandle) {
             std::thread::sleep(Duration::from_secs(10));
             continue;
         };
-        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+        let client = radio_core::mirror::MirrorClient::new(backend::SERVER);
         let handle = app.clone();
         let gate = queued.clone();
         let stream_key = key.clone();
@@ -114,12 +114,32 @@ fn spawn_stream_listener(app: &tauri::AppHandle) {
             if radio_core::sync::load_key().as_deref() != Some(stream_key.as_str()) {
                 return;
             }
-            let state = handle.state::<commands::Shared>();
             match backend::dispatch_stream_event(evt, &gate) {
-                backend::StreamAction::Mirror(e) => state.lock().unwrap().apply_mirror(e),
+                backend::StreamAction::Mirror(e) => handle
+                    .state::<commands::Shared>()
+                    .lock()
+                    .unwrap()
+                    .apply_mirror(e),
+                // the sync is a blocking round-trip, so it must not run here: this
+                // callback would hold the backend mutex for its whole duration, and
+                // the tray's label refresh takes that same mutex on the main thread
+                // — a slow server would freeze the menubar on right-click. the gate
+                // stays set meanwhile, so doorbells arriving during it still
+                // collapse into this one sync.
+                //
                 // sync() ends in seed_from_profile, which is what makes a filter
                 // changed elsewhere reach the shuffle pool and not just the disk.
-                backend::StreamAction::Resync => state.lock().unwrap().resync(&gate),
+                backend::StreamAction::Resync => {
+                    let handle = handle.clone();
+                    let gate = gate.clone();
+                    std::thread::spawn(move || {
+                        handle
+                            .state::<commands::Shared>()
+                            .lock()
+                            .unwrap()
+                            .resync(&gate)
+                    });
+                }
                 backend::StreamAction::Nothing => {}
             }
         });

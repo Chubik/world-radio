@@ -6,7 +6,9 @@ use radio_core::mirror::{MirrorEvent, StreamEvent};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const SERVER: &str = "https://r4dio.net";
+/// the one place the sync host is named — the listener in `main.rs` reads it
+/// from here rather than repeating the literal.
+pub const SERVER: &str = "https://r4dio.net";
 
 pub struct Backend {
     pub state: MiniState,
@@ -22,6 +24,10 @@ pub struct Backend {
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
     applying_mirror: bool,
+    // set while the station in `now` is one another device chose, whether or not
+    // it was ever started here — `resume` plays that station and must not
+    // announce it back as this Mac's own.
+    mirrored_now: bool,
 }
 
 /// what a play arriving from the account stream is allowed to do here. our own
@@ -150,13 +156,25 @@ impl Backend {
             profile_path,
             mirror_seq: 0,
             applying_mirror: false,
+            mirrored_now: false,
         })
+    }
+
+    // the guard `announce` applies, exposed so a test reads the real condition
+    // rather than a restatement of it that could drift from it.
+    #[cfg(test)]
+    fn would_announce(&self) -> bool {
+        !(self.applying_mirror || self.mirrored_now)
     }
 
     // the mirror is a two-way street: without this a station played on the Mac
     // reaches no other device, though every other device's play reaches here.
+    //
+    // two guards, not one. `applying_mirror` covers the moment a mirrored play is
+    // started; `mirrored_now` covers the station sitting in `now` afterwards,
+    // which `resume` would otherwise announce back as this Mac's own.
     fn announce(&self, pick: &StationPick) {
-        if self.applying_mirror {
+        if self.applying_mirror || self.mirrored_now {
             return;
         }
         let Some(key) = radio_core::sync::load_key() else {
@@ -201,6 +219,12 @@ impl Backend {
         ) {
             return;
         }
+        // the flag covers the silent branch too. that branch starts no audio, but
+        // it does park the other device's station in `now` — and `resume` later
+        // plays exactly that, which would announce the phone's station back to
+        // the account as this Mac's own play. the station, not the branch, is
+        // what must not be re-announced.
+        self.mirrored_now = true;
         match self.state.phase == Phase::Playing {
             true => {
                 self.applying_mirror = true;
@@ -225,6 +249,11 @@ impl Backend {
             engine.play(&pick.url);
         }
         self.announce(&pick);
+        // whatever plays now is what `now` holds, so the mirror mark belongs to
+        // this play and no longer to the one it replaced. `resume` re-plays the
+        // same station and must keep the mark; every other caller brings a pick
+        // the user chose here and clears it.
+        self.mirrored_now = self.applying_mirror;
         self.catalog.record_history(&pick.uuid);
         if let Err(e) = self.catalog.save_state(
             &self.fav_path,
@@ -256,7 +285,14 @@ impl Backend {
 
     pub fn resume(&mut self) {
         match self.state.now.clone() {
-            Some(pick) => self.play_pick(pick),
+            // resume re-plays the station already in `now`, so a mirrored one
+            // stays mirrored however many times the user presses play; only a
+            // genuinely new pick may clear the mark and start announcing again.
+            Some(pick) => {
+                let mirrored = self.mirrored_now;
+                self.play_pick(pick);
+                self.mirrored_now = mirrored;
+            }
             None => self.shuffle(),
         }
     }
@@ -527,12 +563,12 @@ impl Backend {
         }
     }
 
-    pub fn sync(&mut self) -> anyhow::Result<()> {
+    /// the merge, and everything that must happen once it has landed. every step
+    /// after the profile is written is fallible, so this is deliberately wrapped
+    /// by `sync` rather than called directly — see there for why.
+    fn sync_inner(&mut self, key: &str) -> anyhow::Result<()> {
         use radio_core::sync::session;
 
-        let Some(key) = radio_core::sync::load_key() else {
-            return Ok(());
-        };
         let profile = radio_core::sync::Profile::load(&self.profile_path);
         let local = session::outgoing(session::LocalState {
             favs: self.catalog.favorite_ids().to_vec(),
@@ -542,8 +578,8 @@ impl Backend {
             profile: &profile,
             plays: self.catalog.history_plays(),
         });
-        let client = radio_core::sync::SyncClient::new("https://r4dio.net");
-        let merged = client.push(&key, &local)?;
+        let client = radio_core::sync::SyncClient::new(SERVER);
+        let merged = client.push(key, &local)?;
         // only now: the server has the delta, so replaying it would be wrong.
         let pushed = self.catalog.pending.clone();
         self.catalog.pending.clear();
@@ -585,8 +621,27 @@ impl Backend {
         let all = catalog_src::all_stations(&self.catalog)?;
         let favorites = catalog_src::favorite_stations(&self.catalog)?;
         self.state.load_stations(all, favorites);
-        seed_from_profile(&mut self.state, &profile, self.catalog.blacklist_ids());
         Ok(())
+    }
+
+    /// the merge, then the seed that pushes it into the live pick state.
+    ///
+    /// the seed runs on the error path too, and that is the whole point of this
+    /// wrapper. every step after `profile.save` is fallible — save_state, the
+    /// pending-log rewrite and two sqlite reads — and each one used to sit
+    /// between the write and the seed, so a failing disk left the new filter on
+    /// disk while `MiniState` still held the old countries: the user shuffles and
+    /// hears the countries they just stopped filtering to, until relaunch. the
+    /// profile is re-read from disk rather than threaded out of the merge so that
+    /// the seed reflects what was actually written, whatever failed after it.
+    pub fn sync(&mut self) -> anyhow::Result<()> {
+        let Some(key) = radio_core::sync::load_key() else {
+            return Ok(());
+        };
+        let result = self.sync_inner(&key);
+        let profile = radio_core::sync::Profile::load(&self.profile_path);
+        seed_from_profile(&mut self.state, &profile, self.catalog.blacklist_ids());
+        result
     }
 }
 
@@ -619,6 +674,53 @@ mod tests {
     fn an_unknown_scope_leaves_the_panel_alone() {
         assert_eq!(scope_from_wire("something-new"), None);
         assert_eq!(scope_from_wire(""), None);
+    }
+
+    /// a backend with no engine and no account, over a scratch dir: enough to
+    /// drive the mirror/announce logic without touching the user's data dir and
+    /// without starting any audio. `announce` is a no-op here because
+    /// `load_key()` finds nothing, so `would_announce` reads the guards directly.
+    fn test_backend() -> Backend {
+        let dir = std::env::temp_dir().join(format!(
+            "r4dio-backend-{}-{}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = Cache::open(&dir.join("stations.db")).unwrap();
+        let health = Health::load(&dir.join("station_health.json"));
+        let catalog = Catalog::load(
+            cache,
+            health,
+            &dir.join("favorites.json"),
+            &dir.join("history.json"),
+            &dir.join("blacklist.json"),
+            &dir.join("excluded_countries.json"),
+        );
+        Backend {
+            state: MiniState::new(),
+            engine: None,
+            catalog,
+            fav_path: dir.join("favorites.json"),
+            hist_path: dir.join("history.json"),
+            blacklist_path: dir.join("blacklist.json"),
+            excluded_path: dir.join("excluded_countries.json"),
+            pending_path: dir.join("sync_pending.json"),
+            profile_path: dir.join("profile.json"),
+            mirror_seq: 0,
+            applying_mirror: false,
+            mirrored_now: false,
+        }
+    }
+
+    fn mirror(uuid: &str, origin: &str, seq: u64) -> radio_core::mirror::MirrorEvent {
+        radio_core::mirror::MirrorEvent {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            url: format!("http://{uuid}"),
+            origin: origin.into(),
+            seq,
+        }
     }
 
     fn pick(uuid: &str, country: &str) -> StationPick {
@@ -784,16 +886,6 @@ mod tests {
         assert!(queued.load(std::sync::atomic::Ordering::SeqCst));
     }
 
-    fn mirror(uuid: &str, origin: &str, seq: u64) -> radio_core::mirror::MirrorEvent {
-        radio_core::mirror::MirrorEvent {
-            uuid: uuid.into(),
-            name: uuid.into(),
-            url: format!("http://{uuid}"),
-            origin: origin.into(),
-            seq,
-        }
-    }
-
     #[test]
     fn a_play_event_mirrors_and_never_queues_a_resync() {
         let queued = std::sync::atomic::AtomicBool::new(false);
@@ -858,6 +950,128 @@ mod tests {
         let mut evt = mirror("u", "other", 1);
         evt.name = "Radio Moscow".into();
         assert!(!accepts_mirror(&evt, &mut seen));
+    }
+
+    /// the hazard this branch exists to remove, at its last hiding place.
+    ///
+    /// `sync` writes the new filter to `profile.json` and only then runs four
+    /// more fallible steps — save_state, the pending-log rewrite and two sqlite
+    /// reads. when the seed sat after those, any of them failing left the filter
+    /// on disk and the old countries in `MiniState`: the user shuffles and hears
+    /// what they just filtered away. this drives the same order `sync` does —
+    /// the profile written, then a post-write failure — and asserts the pool
+    /// followed anyway.
+    #[test]
+    fn a_failure_after_the_profile_is_written_still_reaches_the_pool() {
+        let dir =
+            std::env::temp_dir().join(format!("r4dio-seed-after-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let profile_path = dir.join("profile.json");
+
+        let mut state = MiniState::new();
+        state.load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        seed_from_profile(&mut state, &radio_core::sync::Profile::default(), &[]);
+        assert_eq!(state.active_stations().len(), 2, "unfiltered to begin with");
+
+        // exactly what sync does: the merged profile reaches disk...
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["UA".into()], 100);
+        profile.save(&profile_path).unwrap();
+        // ...and then a later step fails, so sync_inner returns Err.
+        let post_write: anyhow::Result<()> = Err(anyhow::anyhow!("disk full"));
+
+        // the wrapper's contract: seed from what is on disk regardless.
+        let on_disk = radio_core::sync::Profile::load(&profile_path);
+        seed_from_profile(&mut state, &on_disk, &[]);
+
+        assert!(post_write.is_err(), "the post-write step really failed");
+        assert_eq!(
+            state.active_stations().len(),
+            1,
+            "the filter reached disk but never the pool — the user would still hear PL"
+        );
+        assert_eq!(state.active_stations()[0].uuid, "a");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `sync` must re-seed on the error path, not only the happy one. this reads
+    /// the source, because the failure it guards needs a full sync round-trip to
+    /// reproduce and the ordering is the whole invariant.
+    #[test]
+    fn sync_seeds_outside_the_fallible_body() {
+        let src = include_str!("backend.rs");
+        let body = src
+            .split("pub fn sync(&mut self) -> anyhow::Result<()> {")
+            .nth(1)
+            .expect("sync must exist");
+        let seed = body.find("seed_from_profile").expect("sync must seed");
+        let ret = body
+            .find("\n        result")
+            .expect("sync must return the inner result");
+        assert!(
+            seed < ret,
+            "the seed must run before sync returns, so an Err from the merge cannot skip it"
+        );
+        assert!(
+            !body[..seed].contains('?'),
+            "no `?` may sit between entering sync and the seed, or a failure would skip it"
+        );
+    }
+
+    // the echo guard's second half. the silent branch starts no audio but does
+    // park the other device's station in `now`; pressing play then re-announced
+    // it as this Mac's own, which is the ping-pong the guard exists to stop.
+    #[test]
+    fn a_mirrored_station_is_not_announced_when_the_user_presses_play() {
+        let mut b = test_backend();
+        b.state.phase = Phase::Idle;
+
+        b.apply_mirror(mirror("remote", "other", 1));
+
+        assert_eq!(b.state.now.as_ref().unwrap().uuid, "remote");
+        assert!(
+            b.mirrored_now,
+            "the station in `now` came from another device and must be marked as such"
+        );
+        assert!(
+            !b.would_announce(),
+            "resume would push the phone's station back as this Mac's own play"
+        );
+    }
+
+    // however many times the user presses play, a mirrored station stays
+    // mirrored — the mark must not wear off after the first resume.
+    #[test]
+    fn resume_never_starts_announcing_a_mirrored_station() {
+        let mut b = test_backend();
+        b.state.phase = Phase::Idle;
+        b.apply_mirror(mirror("remote", "other", 1));
+
+        for _ in 0..3 {
+            b.resume();
+            assert!(
+                !b.would_announce(),
+                "a resume must not clear the mirror mark"
+            );
+        }
+    }
+
+    // and the mark must not stick to a station the user did choose, or the Mac
+    // would go silent on the mirror for the rest of the session.
+    #[test]
+    fn a_station_the_user_picks_is_announced_again() {
+        let mut b = test_backend();
+        b.state.phase = Phase::Idle;
+        b.apply_mirror(mirror("remote", "other", 1));
+        assert!(!b.would_announce());
+
+        b.state.set_all(vec![pick("mine", "UA")]);
+        b.shuffle();
+
+        assert!(
+            b.would_announce(),
+            "a shuffle the user asked for must reach the other devices"
+        );
     }
 
     // the seed must not reach into favourites: an explicit star outranks a
