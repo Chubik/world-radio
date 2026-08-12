@@ -57,6 +57,28 @@ pub enum UpdateCheck {
     AssetsPending { version: String },
 }
 
+/// the checksum file, with one retry. `None` means the release genuinely has no
+/// assets yet — a transport failure that survives the retry is reported the same
+/// way, because from the user's side "not ready" and "could not be read" are the
+/// same wait.
+fn fetch_sums(client: &reqwest::blocking::Client, base: &str) -> Option<String> {
+    for attempt in 0..2 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        let Ok(resp) = client.get(format!("{base}/SHA256SUMS")).send() else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        if let Ok(text) = resp.text() {
+            return Some(text);
+        }
+    }
+    None
+}
+
 pub fn check_from(api_url: &str, releases_base: &str) -> anyhow::Result<UpdateCheck> {
     let client = reqwest::blocking::Client::builder()
         .user_agent("world-radio-update/1")
@@ -84,13 +106,15 @@ pub fn check_from(api_url: &str, releases_base: &str) -> anyhow::Result<UpdateCh
     }
     let asset = format!("{}-{}-{}.tar.gz", BIN_NAME, version, target_triple());
     let base = releases_base.replace("{version}", &version);
-    let resp = client.get(format!("{base}/SHA256SUMS")).send()?;
-    // a tagged release whose tarballs are still uploading answers 404 here.
-    // that is a wait-and-retry, not a failure worth an error trace.
-    if !resp.status().is_success() {
-        return Ok(UpdateCheck::AssetsPending { version });
-    }
-    let sums = resp.text()?;
+    // a phone on the move drops connections, and this file is 500 bytes: one
+    // retry turns a failed update into a half-second pause. without it the user
+    // sees a raw transport error for a file that is perfectly reachable.
+    let sums = match fetch_sums(&client, &base) {
+        // a tagged release whose tarballs are still uploading answers 404 here.
+        // that is a wait-and-retry, not a failure worth an error trace.
+        None => return Ok(UpdateCheck::AssetsPending { version }),
+        Some(sums) => sums,
+    };
     match sums
         .lines()
         .find(|l| l.trim_end().ends_with(&asset))
@@ -373,5 +397,34 @@ mod tests {
         let err = verify_and_extract(&tarball, "deadbeef", &dest);
         assert!(err.is_err());
         assert_eq!(std::fs::read(&dest).unwrap(), b"OLD");
+    }
+
+    // a dropped connection is the normal condition of a phone on the move, and
+    // the checksum file is small: one retry turns a failed update into a
+    // half-second pause. without it the user sees a raw transport error for a
+    // file that is perfectly reachable.
+    #[test]
+    fn a_dropped_connection_is_retried() {
+        let mut server = mockito::Server::new();
+        let tag = "v99.0.0";
+        server
+            .mock("GET", "/releases/latest")
+            .with_body(format!(r#"[{{"tag_name":"{tag}"}}]"#))
+            .create();
+        let asset = format!("{}-99.0.0-{}.tar.gz", BIN_NAME, target_triple());
+        // the first attempt dies mid-response; the second answers properly.
+        server
+            .mock("GET", "/SHA256SUMS")
+            .with_status(503)
+            .expect(1)
+            .create();
+        server
+            .mock("GET", "/SHA256SUMS")
+            .with_body(format!("abc123  {asset}\n"))
+            .create();
+        let rel = latest_from(&format!("{}/releases/latest", server.url()), &server.url())
+            .unwrap()
+            .unwrap();
+        assert_eq!(rel.sha256, "abc123", "the retry never happened");
     }
 }
