@@ -50,12 +50,27 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests {
+            isIncludeAndroidResources = true
+        }
     }
 
     buildFeatures {
         compose = true
     }
 
+}
+
+// robolectric reaches into jdk internals that jdk 17+ hides by default; the
+// project's own toolchain is 17, but newer local jdks need these opened
+// explicitly or android-all's native shared-memory setup fails.
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+    )
 }
 
 dependencies {
@@ -78,4 +93,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // 4.14.1 caps at sdk 35; this project targets sdk 37 (needs 4.17-beta-1, the
+    // first robolectric release with sdk 37 support).
+    testImplementation("org.robolectric:robolectric:4.17-beta-1")
 }
