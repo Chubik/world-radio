@@ -716,7 +716,7 @@ pub(crate) fn status_filter_to_scope(status: StatusFilter) -> &'static str {
 
 /// `None` for an unrecognised value so the caller leaves the local scope alone
 /// rather than resetting the user to All.
-fn scope_to_status_filter(scope: &str) -> Option<StatusFilter> {
+pub(crate) fn scope_to_status_filter(scope: &str) -> Option<StatusFilter> {
     let scope = radio_core::sync::Scope::from_wire(scope)?;
     Some(match scope {
         radio_core::sync::Scope::All => StatusFilter::All,
