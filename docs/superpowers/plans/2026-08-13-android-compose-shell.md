@@ -655,9 +655,132 @@ class PlayerConnection(context: Context) {
 
 **Read first:** `MainActivity.kt:171-210` (connect + listeners) and `MainActivity.kt:420-428` (release). Port that lifecycle verbatim — including the `released` guard, which exists because the `ListenableFuture` can resolve after `onDestroy` and would otherwise leak a controller. `parseArtist` at `MainActivity.kt:32-37` moves here unchanged.
 
-This task has no unit test: it is Android-framework lifecycle glue whose behaviour is only meaningful against a live `MediaSession`. It is proven on the emulator in Task 8. State *decoding* — the part worth testing — was tested in Task 4.
+**This task is tested.** The lifecycle rules here are exactly the ones that broke before — a controller leaked when a future resolved after `onDestroy`, and a `send()` before connect must not crash — so they get tests rather than an emulator glance. To make that possible the controller is reached through a seam instead of being built inline:
 
-- [ ] **Step 1: Implement**
+```kotlin
+/** what PlayerConnection needs of a MediaController, so the lifecycle rules
+ *  can be tested without a live MediaSession. */
+interface ControllerHandle {
+    val isPlaying: Boolean
+    val sessionExtras: Bundle
+    fun sendCustomCommand(command: String)
+    fun release()
+}
+```
+
+`PlayerConnection` takes a `connect: (onReady: (ControllerHandle) -> Unit) -> Unit` lambda; production passes the Media3 builder, tests pass a fake that resolves on demand.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `android/app/src/test/kotlin/net/vchub/r4dio/ui/PlayerConnectionTest.kt`:
+
+```kotlin
+package net.vchub.r4dio.ui
+
+import android.os.Bundle
+import net.vchub.r4dio.EXTRA_CATALOG_SIZE
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+private class FakeHandle(
+    override val isPlaying: Boolean = false,
+    override val sessionExtras: Bundle = Bundle(),
+) : ControllerHandle {
+    var released = false
+    val sent = mutableListOf<String>()
+    override fun sendCustomCommand(command: String) { sent.add(command) }
+    override fun release() { released = true }
+}
+
+@RunWith(RobolectricTestRunner::class)
+class PlayerConnectionTest {
+    @Test
+    fun connecting_publishes_the_extras_the_session_already_had() {
+        val handle = FakeHandle(
+            isPlaying = true,
+            sessionExtras = Bundle().apply { putInt(EXTRA_CATALOG_SIZE, 1286) },
+        )
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        assertEquals(1286, conn.state.value.catalogueSize)
+        assertTrue(conn.state.value.isPlaying)
+    }
+
+    // the controller future can resolve after the screen is gone. without the
+    // released guard the callback hands us a controller nobody will ever close,
+    // and it keeps the session alive for the life of the process.
+    @Test
+    fun a_controller_arriving_after_release_is_closed_immediately() {
+        val handle = FakeHandle()
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        conn.release()
+        ready!!(handle)
+        assertTrue("late controller must be released", handle.released)
+        assertTrue("and never used", handle.sent.isEmpty())
+    }
+
+    @Test
+    fun release_closes_a_controller_that_did_arrive() {
+        val handle = FakeHandle()
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        conn.release()
+        assertTrue(handle.released)
+    }
+
+    // a tab can be tapped before the controller resolves; dropping the command
+    // is correct, crashing is not.
+    @Test
+    fun a_command_before_connect_is_dropped_not_thrown() {
+        val conn = PlayerConnection { }
+        conn.send("net.vchub.r4dio.SHUFFLE")
+    }
+
+    @Test
+    fun commands_reach_the_controller_once_connected() {
+        val handle = FakeHandle()
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        conn.send("net.vchub.r4dio.SHUFFLE")
+        assertEquals(listOf("net.vchub.r4dio.SHUFFLE"), handle.sent)
+    }
+
+    // reconnecting after a release must clear the guard, or the app comes back
+    // from the background with a permanently dead controller.
+    @Test
+    fun reconnecting_after_release_works() {
+        val second = FakeHandle()
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        conn.release()
+        conn.connect()
+        ready!!(second)
+        conn.send("net.vchub.r4dio.TOGGLE")
+        assertEquals(listOf("net.vchub.r4dio.TOGGLE"), second.sent)
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `cd android && ./gradlew testDebugUnitTest --tests '*PlayerConnectionTest*'`
+Expected: compile failure — `ControllerHandle` does not exist.
+
+- [ ] **Step 3: Implement**
+
+`PlayerConnection`'s constructor takes the connect seam; `MainActivity` passes the real Media3 builder. Both the `ControllerHandle` interface and a `mediaControllerConnector(context)` that adapts Media3 to it live in this file. `parseArtist` moves here unchanged from `MainActivity.kt:32-37`. The `Player.Listener` for `isPlaying`/`onMediaMetadataChanged` and the `MediaController.Listener` for `onExtrasChanged` attach inside the real connector, which folds their updates into the same `_state`.
 
 ```kotlin
 package net.vchub.r4dio.ui
@@ -683,60 +806,48 @@ internal fun parseArtist(artist: String): Pair<String, String> {
     return country to codec
 }
 
+/** what [PlayerConnection] needs of a controller, so its lifecycle rules can be
+ *  tested without a live MediaSession. */
+interface ControllerHandle {
+    val isPlaying: Boolean
+    val sessionExtras: Bundle
+    fun sendCustomCommand(command: String)
+    fun release()
+}
+
 /**
- * the single MediaController for the whole app. every tab reads [state]; none
- * of them build a controller of their own, so there is one connect/release
+ * the single controller for the whole app. every tab reads [state]; none of
+ * them build a controller of their own, so there is one connect/release
  * lifecycle rather than one per screen.
+ *
+ * [connector] is a seam: production passes [mediaControllerConnector], tests
+ * pass a fake they resolve by hand. the guard rules below are the ones worth
+ * testing, and a live MediaSession cannot exercise them deterministically.
  */
-class PlayerConnection(private val context: Context) {
+class PlayerConnection(
+    private val connector: (onReady: (ControllerHandle) -> Unit) -> Unit,
+) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private var controller: MediaController? = null
+    private var controller: ControllerHandle? = null
 
-    // the future can resolve after release(); without this the callback would
-    // hand us a controller nobody will ever close.
+    // the controller can arrive after release(); without this the callback would
+    // hand us one nobody will ever close, keeping the session alive for the life
+    // of the process.
     @Volatile private var released = false
-
-    private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _state.value = _state.value.copy(isPlaying = isPlaying)
-        }
-
-        override fun onMediaMetadataChanged(metadata: androidx.media3.common.MediaMetadata) {
-            val (country, codec) = parseArtist(metadata.artist?.toString().orEmpty())
-            _state.value = _state.value.copy(
-                stationName = (metadata.station ?: metadata.title)?.toString().orEmpty(),
-                country = country,
-                codec = codec,
-            )
-        }
-    }
-
-    private val controllerListener = object : MediaController.Listener {
-        override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
-            _state.value = uiStateFromExtras(extras, _state.value)
-        }
-    }
 
     fun connect() {
         released = false
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token)
-            .setListener(controllerListener)
-            .buildAsync()
-        future.addListener({
-            val c = runCatching { future.get() }.getOrNull() ?: return@addListener
+        connector { handle ->
             if (released) {
-                c.release()
-                return@addListener
+                handle.release()
+                return@connector
             }
-            controller = c
-            c.addListener(playerListener)
-            _state.value = uiStateFromExtras(c.sessionExtras, _state.value).copy(
-                isPlaying = c.isPlaying,
-            )
-        }, MoreExecutors.directExecutor())
+            controller = handle
+            _state.value = uiStateFromExtras(handle.sessionExtras, _state.value)
+                .copy(isPlaying = handle.isPlaying)
+        }
     }
 
     fun release() {
@@ -745,18 +856,70 @@ class PlayerConnection(private val context: Context) {
         controller = null
     }
 
+    /** dropped when nothing is connected yet: a tab can be tapped before the
+     *  controller resolves, and that is not a crash. */
     fun send(command: String) {
-        controller?.sendCustomCommand(SessionCommand(command, Bundle.EMPTY), Bundle.EMPTY)
+        controller?.sendCustomCommand(command)
+    }
+
+    internal fun onExtras(extras: Bundle) {
+        _state.value = uiStateFromExtras(extras, _state.value)
+    }
+
+    internal fun onPlaying(isPlaying: Boolean) {
+        _state.value = _state.value.copy(isPlaying = isPlaying)
+    }
+
+    internal fun onMetadata(station: String, artist: String) {
+        val (country, codec) = parseArtist(artist)
+        _state.value = _state.value.copy(stationName = station, country = country, codec = codec)
     }
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+The real connector wraps Media3 and forwards its callbacks into the three `internal` folds above. It keeps the `runCatching { future.get() }` and `MoreExecutors.directExecutor()` shape from `MainActivity.kt:171-210`:
 
-Run: `cd android && ./gradlew assembleDebug`
-Expected: `BUILD SUCCESSFUL`. Nothing uses this class yet.
+```kotlin
+fun mediaControllerConnector(
+    context: Context,
+    conn: () -> PlayerConnection,
+): (onReady: (ControllerHandle) -> Unit) -> Unit = { onReady ->
+    val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+    val future = MediaController.Builder(context, token)
+        .setListener(object : MediaController.Listener {
+            override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+                conn().onExtras(extras)
+            }
+        })
+        .buildAsync()
+    future.addListener({
+        val c = runCatching { future.get() }.getOrNull() ?: return@addListener
+        c.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) = conn().onPlaying(isPlaying)
+            override fun onMediaMetadataChanged(m: androidx.media3.common.MediaMetadata) =
+                conn().onMetadata(
+                    (m.station ?: m.title)?.toString().orEmpty(),
+                    m.artist?.toString().orEmpty(),
+                )
+        })
+        onReady(object : ControllerHandle {
+            override val isPlaying get() = c.isPlaying
+            override val sessionExtras get() = c.sessionExtras
+            override fun sendCustomCommand(command: String) {
+                c.sendCustomCommand(SessionCommand(command, Bundle.EMPTY), Bundle.EMPTY)
+            }
+            override fun release() = c.release()
+        })
+    }, MoreExecutors.directExecutor())
+}
+```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Run to verify they pass**
+
+Run: `cd android && ./gradlew testDebugUnitTest --tests '*PlayerConnectionTest*' && ./gradlew assembleDebug`
+Expected: 6 tests PASS, `BUILD SUCCESSFUL`.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add android/app/src/main/kotlin/net/vchub/r4dio/ui/PlayerConnection.kt
@@ -1134,7 +1297,11 @@ git commit -m "four tabs, and the station always one tap away"
 
 ```kotlin
 class MainActivity : ComponentActivity() {
-    private val connection by lazy { PlayerConnection(this) }
+    // the connector needs the connection to fold callbacks into, and the
+    // connection needs the connector — hence the lambda indirection.
+    private val connection: PlayerConnection by lazy {
+        PlayerConnection(mediaControllerConnector(this) { connection })
+    }
     private val favStore by lazy { FavStore(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
