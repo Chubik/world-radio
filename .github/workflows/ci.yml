@@ -150,15 +150,33 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
 
-      - name: build debug apk
-        run: cd android && ./gradlew assembleDebug
+      # the release key must come from the secrets. a debug key is regenerated
+      # per machine, so every build would carry a different signature and
+      # android would refuse to update over the last one — the user loses every
+      # setting they had, including the sync key that is their whole account.
+      - name: restore the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is not set — refusing to ship an unsignable apk" >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/r4dio-release.jks"
+
+      - name: build signed apk
+        env:
+          R4DIO_KEYSTORE: ${{ runner.temp }}/r4dio-release.jks
+          R4DIO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          R4DIO_KEY_ALIAS: r4dio
+        run: cd android && ./gradlew assembleRelease
 
       - name: package apk and checksum
         id: pkg
         run: |
           version="${{ needs.version.outputs.version }}"
           apk="r4dio-${version}-beta.apk"
-          cp android/app/build/outputs/apk/debug/app-debug.apk "$apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
           sha256sum "$apk" > SHA256SUMS-android
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "apk=$apk" >> "$GITHUB_OUTPUT"
