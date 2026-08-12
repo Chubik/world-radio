@@ -45,6 +45,8 @@ class MainActivity : ComponentActivity() {
     private var favCount = 0
     private var hiddenCount = 0
     private var playableCount = 0
+    private var catalogueSize = 0
+    private var catalogueGrowing = false
     private var catalogLoaded = false
     private var filterCountries: List<String> = emptyList()
     private var released = false
@@ -214,6 +216,8 @@ class MainActivity : ComponentActivity() {
         hiddenCount = extras.getInt(EXTRA_HIDDEN_COUNT, 0)
         playableCount = extras.getInt(EXTRA_PLAYABLE_COUNT, 0)
         catalogLoaded = extras.getBoolean(EXTRA_CATALOG_LOADED, false)
+        catalogueSize = extras.getInt(EXTRA_CATALOG_SIZE, 0)
+        catalogueGrowing = extras.getBoolean(EXTRA_CATALOG_GROWING, false)
         filterCountries = extras.getStringArray(EXTRA_FILTER_COUNTRIES)?.toList() ?: emptyList()
     }
 
@@ -231,6 +235,7 @@ class MainActivity : ComponentActivity() {
         renderScope()
         renderHidden()
         renderFilter()
+        renderCatalogue()
         renderFav()
         renderHero()
         renderPlayButton(c?.isPlaying ?: false)
@@ -300,6 +305,17 @@ class MainActivity : ComponentActivity() {
                 pill.visibility = View.VISIBLE
             }
             false -> pill.visibility = View.GONE
+        }
+    }
+
+    private fun renderCatalogue() {
+        val pill = findViewById<TextView?>(R.id.catalogue_pill) ?: return
+        when (val label = catalogueLabel(catalogueSize, catalogueGrowing)) {
+            "" -> pill.visibility = View.GONE
+            else -> {
+                pill.text = label
+                pill.visibility = View.VISIBLE
+            }
         }
     }
 

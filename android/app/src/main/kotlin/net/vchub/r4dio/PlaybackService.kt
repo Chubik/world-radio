@@ -42,6 +42,8 @@ const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
 const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
 const val EXTRA_CATALOG_LOADED = "net.vchub.r4dio.EXTRA_CATALOG_LOADED"
 const val EXTRA_FILTER_COUNTRIES = "net.vchub.r4dio.EXTRA_FILTER_COUNTRIES"
+const val EXTRA_CATALOG_SIZE = "net.vchub.r4dio.EXTRA_CATALOG_SIZE"
+const val EXTRA_CATALOG_GROWING = "net.vchub.r4dio.EXTRA_CATALOG_GROWING"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -171,6 +173,10 @@ class PlaybackService : MediaSessionService() {
             putInt(EXTRA_PLAYABLE_COUNT, playable)
             putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
             putStringArray(EXTRA_FILTER_COUNTRIES, included.sorted().toTypedArray())
+            putInt(EXTRA_CATALOG_SIZE, stations.size)
+            // "+" means there is more to come, not that a fetch is running right
+            // now: the top-up waits for wi-fi and a charger, which may be hours.
+            putBoolean(EXTRA_CATALOG_GROWING, stations.isNotEmpty() && stations.size < TOP_UP_CEILING)
         }
         session?.setSessionExtras(extras)
     }
