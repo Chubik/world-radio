@@ -5,7 +5,10 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
@@ -77,6 +80,23 @@ class MainActivity : ComponentActivity() {
                 applyKeepAwake(next)
             }
         }
+        // android grants this one only from its own settings screen, so the pill
+        // opens that rather than pretending it can ask here.
+        findViewById<View>(R.id.overlay_pill).setOnClickListener {
+            if (canDrawOverlay(this)) {
+                Toast.makeText(this, R.string.home_overlay_desc, Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            Toast.makeText(this, R.string.overlay_ask, Toast.LENGTH_LONG).show()
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName"),
+                    )
+                )
+            }
+        }
     }
 
     /**
@@ -101,7 +121,27 @@ class MainActivity : ComponentActivity() {
     // not just once at creation.
     override fun onResume() {
         super.onResume()
+        // the overlay exists for playback the user cannot see, so the service
+        // has to know whether this screen is the thing in front.
+        StationToast.appIsInForeground = true
+        // read back from the system rather than remembered: the user may have
+        // granted or revoked it in settings while we were away, and a pill that
+        // disagrees with the permission is worse than no pill.
+        applyOverlayPill(canDrawOverlay(this))
         lifecycleScope.launch { applyKeepAwake(favStore.currentKeepAwake()) }
+    }
+
+    private fun applyOverlayPill(on: Boolean) {
+        findViewById<TextView>(R.id.overlay_pill).apply {
+            setText(if (on) R.string.home_overlay_on else R.string.home_overlay_off)
+            setTextColor(getColor(if (on) R.color.amber_hi else R.color.dim))
+            setBackgroundResource(if (on) R.drawable.bg_pill_on else R.drawable.bg_pill)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        StationToast.appIsInForeground = false
     }
 
     private fun send(action: String) {

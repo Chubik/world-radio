@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- one row tall: the content is a single line of controls, and asking for two
+     cells left a band of empty panel above and below it. minResizeHeight must
+     not exceed minHeight either, or the widget cannot be shrunk by hand. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="390dp"
-    android:minHeight="80dp"
+    android:minHeight="60dp"
     android:minResizeWidth="110dp"
-    android:minResizeHeight="122dp"
+    android:minResizeHeight="60dp"
     android:targetCellWidth="6"
-    android:targetCellHeight="2"
+    android:targetCellHeight="1"
     android:description="@string/widget_description"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_radio"
