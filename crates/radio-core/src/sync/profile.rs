@@ -22,10 +22,10 @@ pub struct Profile {
     /// has nothing left to adopt stops rewriting this file every time.
     ///
     /// it does not decide whether `config.toml` may drop its legacy keys —
-    /// `migration_settled` answers that from the stamps, because what protects
-    /// the user is the values having landed somewhere, not the migration having
-    /// been attempted. it never travels on the wire: it is a fact about this
-    /// disk, not about the account.
+    /// `migration_settled` answers that by comparing values, not stamps, because
+    /// a sync stamps a field with *another* device's value and what protects the
+    /// user is this machine's own value having landed somewhere. it never
+    /// travels on the wire: it is a fact about this disk, not about the account.
     #[serde(default)]
     pub migrated: bool,
 }
