@@ -85,6 +85,13 @@ class PlaybackService : MediaSessionService() {
     // syncNow(), which both can run in the first seconds of a service) into a single
     // network fetch instead of one each.
     private val refreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    // same collapsing as refreshInFlight: a sync burst and service start can all
+    // reach pullFilteredCountries() within a second of each other.
+    private val filterPullInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    // countries already pulled in full this session, so a re-sync that carries the
+    // same filter costs nothing. deliberately not persisted: a fresh process is
+    // also a fresh chance to pick up stations added since.
+    @Volatile private var filterCountriesPulled: Set<String> = emptySet()
     @Volatile private var current: Station? = null
     private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
@@ -215,6 +222,9 @@ class PlaybackService : MediaSessionService() {
         setMediaNotificationProvider(provider)
         loadStations()
         syncNow()
+        // the filter is usually already set, from a desktop that chose it long ago;
+        // waiting for it to change would never pull anything for that user.
+        pullFilteredCountries()
         startMirrorListener()
     }
 
@@ -354,6 +364,52 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * pulls every station of each filtered country into the cache.
+     *
+     * called from all three places a filter can become active — the two syncs that
+     * can write one, and service start, which is the case for a filter set on the
+     * desktop days ago and never touched since. a change-only trigger would be dead
+     * code for that user: their filter never changes again.
+     */
+    private fun pullFilteredCountries() {
+        if (!filterPullInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                val filter = runBlocking { favStore.currentFilter() }
+                val wanted = countriesToPull(filter, filterCountriesPulled)
+                if (wanted.isEmpty()) {
+                    return@thread
+                }
+                val blocked = runBlocking { favStore.currentBlocked() }
+                var added = 0
+                wanted.forEach { code ->
+                    val fetched = catalog.fetchCountry(code, blocked = blocked)
+                    // a failed fetch must not mark the country done, or it would
+                    // never be retried for the rest of the session.
+                    if (fetched.isEmpty()) {
+                        Log.w("r4dio", "country fetch for $code returned nothing")
+                        return@forEach
+                    }
+                    filterCountriesPulled = filterCountriesPulled + code
+                    added += catalogCache.merge(fetched)
+                }
+                if (added == 0) {
+                    return@thread
+                }
+                // the merged stations are only in the pool once the service re-reads
+                // the cache: `stations` is what every pick path draws from.
+                stations = catalogCache.read()
+                Log.i("r4dio", "pulled $added new stations for filter ${wanted.joinToString(",")}")
+                scope.launch { refreshCustomLayout() }
+            } finally {
+                filterPullInFlight.set(false)
+            }
+        }
+    }
+
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
     private fun launchSyncActivity() {
@@ -460,6 +516,9 @@ class PlaybackService : MediaSessionService() {
                     // startup. always safe to call: it is itself TTL-gated, so it is a
                     // no-op unless a reset (or real TTL expiry) actually happened.
                     refreshIfStale(favStore.currentExcluded(), favStore.currentBlocked())
+                    // a filter that just arrived from another device names countries
+                    // the top-1000 barely covers; pull them before the user shuffles.
+                    pullFilteredCountries()
                     refreshCustomLayout()
                 }
             }

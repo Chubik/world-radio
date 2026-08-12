@@ -30,6 +30,22 @@ fun isExcluded(station: Station): Boolean {
 }
 
 /**
+ * which of the filtered countries still need fetching in full. the filter is the
+ * moment the user's intent is explicit and narrow, so it is worth one request per
+ * country — but only once per country per session, and never for a banned one.
+ *
+ * uppercased on both sides: the filter arrives from the desktop over the wire and
+ * its case is not ours to trust.
+ */
+fun countriesToPull(filter: Set<String>, alreadyPulled: Set<String>): Set<String> {
+    val pulled = alreadyPulled.map { it.uppercase() }.toSet()
+    return filter
+        .map { it.uppercase() }
+        .filter { it.isNotBlank() && it !in pulled && it !in EXCLUDED_COUNTRYCODES }
+        .toSet()
+}
+
+/**
  * [blocked] outranks everything, including a star: blocking is a pointed "never play
  * this station again", while excluding a country is a broad taste filter that an
  * explicit favourite is allowed to override (see fetchByUuids and FavLogic.pickFav).
