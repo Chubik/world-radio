@@ -27,14 +27,16 @@ class CatalogCache(private val dir: File) {
     // production reader and writer against each other.
     private val lock = Any()
 
-    fun read(): List<Station> = synchronized(lock) {
+    fun read(): List<Station> = synchronized(lock) { readLocked() }
+
+    private fun readLocked(): List<Station> {
         // a leftover .bak can only come from a version of the app that used a
         // move-aside write. it is never the only copy now, so just clear it.
         File(dir, "$CACHE_FILE.bak").delete()
         if (!file.exists()) {
             return emptyList()
         }
-        runCatching {
+        return runCatching {
             json.decodeFromString(ListSerializer(FavStation.serializer()), file.readText())
                 .map { it.toStation() }
         }.getOrElse {
@@ -43,10 +45,39 @@ class CatalogCache(private val dir: File) {
         }
     }
 
+    /**
+     * folds [incoming] into what is already held and returns how many were
+     * genuinely new. the whole read-modify-write sits inside the lock: a country
+     * fetch and the background top-up both merge from background threads, and
+     * outside the lock their read-modify-writes would overwrite each other.
+     *
+     * a station already held wins over its incoming copy, so a merge can never
+     * rewrite a url under a listener, and never shrinks the catalogue.
+     */
+    fun merge(incoming: List<Station>): Int = synchronized(lock) {
+        if (incoming.isEmpty()) {
+            return 0
+        }
+        val held = readLocked()
+        val heldUuids = held.map { it.uuid }.toSet()
+        val fresh = incoming.filter { it.uuid !in heldUuids }.distinctBy { it.uuid }
+        if (fresh.isEmpty()) {
+            return 0
+        }
+        when (writeLocked(held + fresh)) {
+            true -> fresh.size
+            // the catalogue on disk is unchanged, so reporting a gain would let a
+            // caller log or display stations that were never stored.
+            false -> 0
+        }
+    }
+
     /** returns true only when the new content is on disk under [CACHE_FILE]. */
-    fun write(stations: List<Station>): Boolean = synchronized(lock) {
+    fun write(stations: List<Station>): Boolean = synchronized(lock) { writeLocked(stations) }
+
+    private fun writeLocked(stations: List<Station>): Boolean {
         var tmp: File? = null
-        runCatching {
+        return runCatching {
             val raw = json.encodeToString(
                 ListSerializer(FavStation.serializer()),
                 stations.map { FavStation.of(it) },
