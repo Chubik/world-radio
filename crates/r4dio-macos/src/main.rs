@@ -93,6 +93,42 @@ fn main() {
     run(backend);
 }
 
+// the account's event stream, kept open for the life of the app. without it this
+// Mac only ever learned of another device's change at launch, so a filter set on
+// the phone sat unread until the app was quit and reopened.
+fn spawn_stream_listener(app: &tauri::AppHandle) {
+    let app = app.clone();
+    let queued = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    std::thread::spawn(move || loop {
+        let Some(key) = radio_core::sync::load_key() else {
+            std::thread::sleep(Duration::from_secs(10));
+            continue;
+        };
+        let client = radio_core::mirror::MirrorClient::new("https://r4dio.net");
+        let handle = app.clone();
+        let gate = queued.clone();
+        let stream_key = key.clone();
+        let _ = client.events(&key, |evt| {
+            // re-linking the Mac to another account must stop this stream rather
+            // than keep feeding the old account's events into the new one.
+            if radio_core::sync::load_key().as_deref() != Some(stream_key.as_str()) {
+                return;
+            }
+            let state = handle.state::<commands::Shared>();
+            match backend::dispatch_stream_event(evt, &gate) {
+                backend::StreamAction::Mirror(e) => state.lock().unwrap().apply_mirror(e),
+                // sync() ends in seed_from_profile, which is what makes a filter
+                // changed elsewhere reach the shuffle pool and not just the disk.
+                backend::StreamAction::Resync => state.lock().unwrap().resync(&gate),
+                backend::StreamAction::Nothing => {}
+            }
+        });
+        // the stream drops on any network blip; reconnect rather than going deaf
+        // for the rest of the session.
+        std::thread::sleep(Duration::from_secs(3));
+    });
+}
+
 // the menubar is at the top of the screen, so the panel belongs below the icon.
 // TrayCenter puts it *above* — `tray_y - window_height`, which is off-screen here.
 // TrayBottomCenter lands on `tray_y`, i.e. covering the menubar and the icon
@@ -196,6 +232,7 @@ fn run(backend: backend::Backend) {
             // accessory: a menubar app has no dock icon and no menu bar of its own.
             set_accessory(app.handle());
             register_shuffle_hotkey(app.handle());
+            spawn_stream_listener(app.handle());
 
             let shuffle = MenuItem::with_id(
                 app,
