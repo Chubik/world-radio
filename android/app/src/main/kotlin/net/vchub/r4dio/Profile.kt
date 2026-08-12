@@ -78,6 +78,16 @@ data class SyncProfile(
         return copy(countries = normalised, countriesAt = now)
     }
 
+    /**
+     * the theme is shared across devices exactly as the scope and the filter
+     * are. not normalised: a slug this build does not know is still a valid
+     * value for a newer client, and must survive a round trip through here.
+     */
+    fun withTheme(next: String, now: Long): SyncProfile {
+        if (next == theme) return this
+        return copy(theme = next, themeAt = now)
+    }
+
     fun outgoing(
         favs: List<String>,
         blocked: List<String>,
