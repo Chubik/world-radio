@@ -5,3 +5,7 @@
 world-radio.log
 crates/r4dio-macos/gen/
 .superpowers/
+
+# secrets never belong in the repo
+.env
+.env.*
