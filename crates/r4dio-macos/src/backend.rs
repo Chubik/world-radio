@@ -20,6 +20,7 @@ pub struct Backend {
     excluded_path: PathBuf,
     pending_path: PathBuf,
     profile_path: PathBuf,
+    settings_path: PathBuf,
     mirror_seq: u64,
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
@@ -102,6 +103,36 @@ fn seed_from_profile(
     state.set_blocked(blocked.to_vec());
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Settings {
+    #[serde(default)]
+    volume: f32,
+}
+
+/// volume is per-machine — unlike everything in `profile.json`, it must never
+/// travel to another device, so it gets its own file instead.
+fn load_volume(path: &std::path::Path) -> f32 {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return 0.8;
+    };
+    serde_json::from_str::<Settings>(&raw)
+        .map(|s| s.volume)
+        .unwrap_or(0.8)
+}
+
+fn save_volume(path: &std::path::Path, volume: f32) {
+    let body = match serde_json::to_string(&Settings { volume }) {
+        Ok(body) => body,
+        Err(e) => {
+            eprintln!("encode volume failed: {e}");
+            return;
+        }
+    };
+    if let Err(e) = std::fs::write(path, body) {
+        eprintln!("save volume failed: {e}");
+    }
+}
+
 impl Backend {
     pub fn new() -> anyhow::Result<Backend> {
         let data = radio_core::paths::ensure_data_dir()?;
@@ -113,6 +144,7 @@ impl Backend {
         let excluded_path = data.join("excluded_countries.json");
         let pending_path = data.join("sync_pending.json");
         let profile_path = data.join("profile.json");
+        let settings_path = data.join("settings.json");
         let mut catalog = Catalog::load(
             cache,
             health,
@@ -138,6 +170,7 @@ impl Backend {
             state.set_scope(scope);
         }
         seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
+        state.set_volume(load_volume(&settings_path));
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
@@ -154,6 +187,7 @@ impl Backend {
             excluded_path,
             pending_path,
             profile_path,
+            settings_path,
             mirror_seq: 0,
             applying_mirror: false,
             mirrored_now: false,
@@ -309,6 +343,7 @@ impl Backend {
         if let Some(engine) = &self.engine {
             engine.set_volume(self.state.volume);
         }
+        save_volume(&self.settings_path, self.state.volume);
     }
 
     // the stamp is taken here, at the moment the user changes the scope, never
@@ -707,6 +742,7 @@ mod tests {
             excluded_path: dir.join("excluded_countries.json"),
             pending_path: dir.join("sync_pending.json"),
             profile_path: dir.join("profile.json"),
+            settings_path: dir.join("settings.json"),
             mirror_seq: 0,
             applying_mirror: false,
             mirrored_now: false,
@@ -1072,6 +1108,25 @@ mod tests {
             b.would_announce(),
             "a shuffle the user asked for must reach the other devices"
         );
+    }
+
+    // volume is per-machine, so it lives in its own file rather than in
+    // profile.json — a loud desktop must not push its level onto a phone.
+    #[test]
+    fn a_saved_volume_survives_a_restart() {
+        let dir = std::env::temp_dir().join(format!(
+            "r4dio-volume-{}-{}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings_path = dir.join("settings.json");
+
+        save_volume(&settings_path, 0.35);
+        let loaded = load_volume(&settings_path);
+
+        assert_eq!(loaded, 0.35);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // the seed must not reach into favourites: an explicit star outranks a
