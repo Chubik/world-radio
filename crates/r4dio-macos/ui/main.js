@@ -8,7 +8,10 @@ import { mountBrowse } from "./views/browse.js";
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
 
-const account = mountAccount(document.getElementById("account_host"));
+// a sign-in or a sync can bring a new country filter down, and the sidebar row
+// that names it is outside this pane — so it is told, exactly as the two filter
+// sections below tell it.
+const account = mountAccount(document.getElementById("account_host"), loadFilterSummary);
 const favourites = mountFavourites(document.getElementById("pane_favourites"));
 // both filter sections change the counts the sidebar shows, so they say when
 // they did rather than leaving it stale until the window is reopened.
@@ -49,6 +52,11 @@ async function loadFilterSummary() {
     const counts = await invoke("filter_counts");
     document.getElementById("filter_summary").textContent =
       filterSummary(counts.excluded, counts.blocked);
+    // the backend words this one. empty means no filter to announce, which has
+    // to hide the row — an empty "FILTER:" reads like a setting that failed.
+    const active = document.getElementById("filter_active");
+    active.textContent = counts.filter || "";
+    active.classList.toggle("hidden", !counts.filter);
   } catch (e) {
     console.error("filter_counts failed", e);
   }

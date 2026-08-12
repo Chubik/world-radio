@@ -57,9 +57,39 @@ pub fn update_label(version: &str) -> String {
     format!("Update to v{version}")
 }
 
+/// how many codes the label spells out before it counts the rest. the row is
+/// narrow, so a long list is cut rather than allowed to push the scope buttons
+/// off the panel's edge.
+const FILTER_CODES: usize = 3;
+
+/// what the window shows the user they are filtered to. empty means there is
+/// nothing to show and the row stays hidden — a filter in effect and a filter
+/// unapplied look identical without it.
+///
+/// favourites are deliberately excluded: `MiniState::active_stations` lets a
+/// star outrank the country filter, so naming a filter in that scope would tell
+/// the user something untrue about what ★ will play. android's `filterPillLabel`
+/// makes the same cut with the same wording, so the two surfaces read alike.
+pub fn filter_label(countries: &[String], scope: crate::state::Scope) -> String {
+    if countries.is_empty() || scope == crate::state::Scope::Favorites {
+        return String::new();
+    }
+    let shown: Vec<&str> = countries
+        .iter()
+        .take(FILTER_CODES)
+        .map(|c| c.as_str())
+        .collect();
+    let shown = shown.join("·");
+    match countries.len().saturating_sub(FILTER_CODES) {
+        0 => format!("FILTER: {shown}"),
+        rest => format!("FILTER: {shown} +{rest}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Scope;
 
     #[test]
     fn playstop_reads_as_the_action_it_will_take() {
@@ -119,5 +149,58 @@ mod tests {
     fn version_label_is_the_running_build() {
         assert_eq!(version_label("1.18.1"), "v1.18.1");
         assert_eq!(version_label(""), "");
+    }
+
+    fn codes(list: &[&str]) -> Vec<String> {
+        list.iter().map(|c| c.to_string()).collect()
+    }
+
+    // no filter is not a filter of nothing: the row must disappear rather than
+    // print an empty "FILTER:" that reads like a setting that failed to load.
+    #[test]
+    fn no_filter_shows_nothing() {
+        assert_eq!(filter_label(&[], Scope::All), "");
+    }
+
+    #[test]
+    fn one_country_is_named_outright() {
+        assert_eq!(filter_label(&codes(&["UA"]), Scope::All), "FILTER: UA");
+    }
+
+    #[test]
+    fn up_to_three_countries_are_all_spelled_out() {
+        assert_eq!(
+            filter_label(&codes(&["UA", "PL"]), Scope::All),
+            "FILTER: UA·PL"
+        );
+        assert_eq!(
+            filter_label(&codes(&["UA", "PL", "DE"]), Scope::All),
+            "FILTER: UA·PL·DE"
+        );
+    }
+
+    // the row is narrow, so a longer list is cut and the rest counted — the same
+    // shape android's filterPillLabel produces, so the two surfaces read alike.
+    #[test]
+    fn a_longer_list_is_cut_and_the_rest_counted() {
+        assert_eq!(
+            filter_label(&codes(&["UA", "PL", "DE", "FR"]), Scope::All),
+            "FILTER: UA·PL·DE +1"
+        );
+        assert_eq!(
+            filter_label(&codes(&["UA", "PL", "DE", "FR", "IT", "ES"]), Scope::All),
+            "FILTER: UA·PL·DE +3"
+        );
+    }
+
+    // favourites bypass the country filter entirely, so naming one there would
+    // tell the user something untrue about what the ★ scope will play.
+    #[test]
+    fn favourites_never_advertise_a_filter_they_ignore() {
+        assert_eq!(filter_label(&codes(&["UA"]), Scope::Favorites), "");
+        assert_eq!(
+            filter_label(&codes(&["UA", "PL", "DE", "FR"]), Scope::Favorites),
+            ""
+        );
     }
 }

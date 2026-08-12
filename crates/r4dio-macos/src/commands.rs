@@ -12,6 +12,10 @@ pub struct NowState {
     pub scope: String,
     pub is_favorite: bool,
     pub meta: String,
+    /// the country filter this device listens under, already worded. it rides
+    /// the state poll rather than a command of its own so it cannot lag a scope
+    /// switch — the label is hidden in favourites, which the same poll carries.
+    pub filter: String,
 }
 
 fn phase_str(phase: Phase) -> &'static str {
@@ -96,6 +100,7 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
             .as_ref()
             .map(|n| crate::state::meta_label(&n.country, &n.codec, n.bitrate))
             .unwrap_or_default(),
+        filter: crate::tray::filter_label(b.state.filter(), b.state.scope),
     }
 }
 
@@ -195,6 +200,11 @@ pub fn favourite_ids(state: tauri::State<Shared>) -> Vec<String> {
 pub struct FilterCounts {
     pub excluded: u32,
     pub blocked: u32,
+    /// the countries shuffle is limited *to*, as opposed to `excluded`, which
+    /// counts the ones it is kept *out of*. the two read alike and mean the
+    /// opposite, so the window names this one rather than leaving the user to
+    /// infer a narrowed pool from a count of the setting it is not.
+    pub filter: String,
 }
 
 #[tauri::command]
@@ -239,5 +249,31 @@ mod tests {
         assert_eq!(crate::backend::scope_from_wire("recent"), None);
         assert_eq!(crate::backend::scope_from_wire("blocked"), None);
         assert_eq!(crate::backend::scope_from_wire("dead"), None);
+    }
+
+    // both windows read the label off a serialised field; a rename would leave
+    // the row permanently blank rather than fail, so the wire name is pinned.
+    #[test]
+    fn both_windows_receive_the_filter_under_the_name_they_read() {
+        let now = NowState {
+            station: None,
+            track: String::new(),
+            phase: "idle".into(),
+            volume: 0.8,
+            scope: "all".into(),
+            is_favorite: false,
+            meta: String::new(),
+            filter: crate::tray::filter_label(&["UA".to_string()], Scope::All),
+        };
+        let json = serde_json::to_value(&now).unwrap();
+        assert_eq!(json["filter"], "FILTER: UA");
+
+        let counts = FilterCounts {
+            excluded: 0,
+            blocked: 0,
+            filter: crate::tray::filter_label(&["UA".to_string(), "PL".to_string()], Scope::All),
+        };
+        let json = serde_json::to_value(&counts).unwrap();
+        assert_eq!(json["filter"], "FILTER: UA·PL");
     }
 }

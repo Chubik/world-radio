@@ -50,6 +50,12 @@ function render(s) {
     seg.classList.toggle("on", seg.dataset.scope === s.scope)
   );
 
+  // the backend words this one — an empty string is "no filter to announce",
+  // which has to hide the row rather than draw an empty pill.
+  const filter = $("filter");
+  filter.textContent = s.filter || "";
+  filter.classList.toggle("hidden", !s.filter);
+
   lastPhase = s.phase;
 }
 
