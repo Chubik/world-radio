@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- android 11 and below use this older format; android 12+ reads
-     backup_rules.xml instead. both must be kept in step. -->
+     backup_rules.xml instead. both must be kept in step. an include on its own
+     is the whole rule: anything not named here is already excluded. -->
 <full-backup-content>
     <include domain="file" path="datastore/" />
-    <exclude domain="file" path="catalog.json" />
 </full-backup-content>
