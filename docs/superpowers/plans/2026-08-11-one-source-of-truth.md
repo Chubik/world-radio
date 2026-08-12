@@ -14,6 +14,7 @@
 
 - Branch `dev` in this repo. Do not push; the controller pushes after review. Never touch the `sync` repo (`../sync`) or `ops` — no server change is needed by this plan.
 - **The defect class this plan exists to remove:** correct code the real user path never reaches. Six instances have shipped. Every task names the real user path that proves it, and no task is done on tests alone.
+- **Never start playback to prove something.** Launching r4dio plays audio out loud on the user's machine, and audio proves nothing here: this plan is about which stations are *listed and picked*, not how they sound. Read the rendered screen (drive the TUI in a pty and read the visible rows), read what was written to disk, or read what went over the wire. Start playback only when the thing under test is playback itself, and say so first.
 - Old-client/old-server compatibility on the wire stays untouched: this plan changes no payload shape and no merge rule. If a task finds itself editing `crates/radio-core/src/sync/session.rs`'s payload shape, stop and escalate.
 - Migration runs once per device and cannot be re-run — a wrong outcome is unrecoverable for that user. Every migration step is proven on a copy of a real `config.toml` before it is committed.
 - Favourites bypass the country filter on every surface (an explicit star outranks a broad taste filter). Hidden countries and the blacklist always outrank both.
@@ -56,7 +57,7 @@ In `crates/radio-core/src/catalog/filter.rs` `mod tests`:
 
 ```rust
     // `Station` does not derive Default (crates/radio-core/src/catalog/station.rs:3),
-    // so every field is named here rather than spread.
+    // so every one of its 13 fields is named here rather than spread.
     fn st(uuid: &str, country: &str) -> Station {
         Station {
             stationuuid: uuid.into(),
@@ -70,6 +71,8 @@ In `crates/radio-core/src/catalog/filter.rs` `mod tests`:
             votes: 0,
             geo_lat: None,
             geo_long: None,
+            lastcheckok: 1,
+            lastchecktime_iso8601: String::new(),
         }
     }
 
