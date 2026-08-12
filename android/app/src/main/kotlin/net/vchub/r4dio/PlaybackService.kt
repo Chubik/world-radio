@@ -74,6 +74,7 @@ class PlaybackService : MediaSessionService() {
     private var exo: ExoPlayer? = null
     private val catalog = Catalog()
     private val catalogCache by lazy { CatalogCache(filesDir) }
+    private val toast by lazy { StationToast(this) }
     @Volatile private var stations: List<Station> = emptyList()
     // true once a load has been attempted and resolved, on either branch — including
     // the branch where the user's filters emptied the fetch and `stations` stays
@@ -236,6 +237,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // a panel left behind would outlive the thing it describes.
+        toast.hide()
         session?.release()
         exo?.release()
         session = null
@@ -607,8 +610,21 @@ class PlaybackService : MediaSessionService() {
         return fetched ?: emptyList()
     }
 
+    /** the station name over whatever is on screen, for the case the media
+     *  notification cannot serve: a driver following a map never opens the
+     *  shade. silent unless the user granted the overlay permission. */
+    private fun announceStation(pick: Station) {
+        if (!shouldAnnounce(current?.uuid, pick.uuid, StationToast.appIsInForeground)) {
+            return
+        }
+        toast.show(toastText(pick.name, pick.country))
+    }
+
     private fun playPick(pick: Station) {
         val player = exo ?: return
+        // announced before `current` moves on, since the previous station is
+        // what decides whether this is a change worth showing at all.
+        announceStation(pick)
         current = pick
         refreshWidget(pick, true)
         Log.i("r4dio", "playing ${pick.name} — ${pick.url}")

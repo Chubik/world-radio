@@ -20,9 +20,30 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // the release key is passed in by the environment, never committed. without
+    // it a release build is unsigned rather than silently falling back to the
+    // debug key: a debug key is regenerated per machine, and android refuses to
+    // update an app whose signature changed, which costs the user every setting
+    // they had.
+    signingConfigs {
+        create("release") {
+            val store = System.getenv("R4DIO_KEYSTORE")
+            if (!store.isNullOrBlank()) {
+                storeFile = file(store)
+                storePassword = System.getenv("R4DIO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("R4DIO_KEY_ALIAS") ?: "r4dio"
+                keyPassword = System.getenv("R4DIO_KEY_PASSWORD")
+                    ?: System.getenv("R4DIO_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (!System.getenv("R4DIO_KEYSTORE").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
