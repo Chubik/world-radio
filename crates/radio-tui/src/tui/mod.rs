@@ -176,15 +176,7 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     // account with no filter at all. a field the profile already stamped is
     // never touched, so this cannot undo what another device chose.
     let legacy = config.legacy_settings();
-    let adopted = model.profile.adopt_existing(
-        &legacy.countries,
-        legacy.scope.as_deref().unwrap_or(""),
-        legacy.theme.as_deref().unwrap_or(""),
-        now_secs,
-    );
-    if adopted {
-        let _ = model.profile.save(&profile_path);
-    }
+    let migration_pending = adopt_legacy(&mut model.profile, &legacy, &profile_path, now_secs);
     seed_from_profile(&mut model);
     if let Some(c) = catalog_count {
         model.catalog_count = Some(c);
@@ -246,13 +238,48 @@ pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
         ColorTier::Truecolor => !model.glyphs.emoji_flags,
         ColorTier::Ansi16 => config.no_emoji,
     };
-    exit_config(&model, no_emoji).save(&data.join("config.toml"));
+    // rewriting the config drops the legacy keys. when the migration could not
+    // be persisted, they are the user's only remaining copy — leave them.
+    match migration_pending {
+        true => {
+            crate::log_warn!("startup: keeping the legacy config keys, the profile is unwritten")
+        }
+        false => exit_config(&model, no_emoji).save(&data.join("config.toml")),
+    }
     let restore_result = restore_terminal(&mut terminal);
     // state is saved on every mutation, so exit does not wait for the worker;
     // signal shutdown best-effort and return immediately.
     let _ = req_tx.send(WorkerReq::Shutdown);
     drop(worker_handle);
     loop_result.and(restore_result)
+}
+
+/// takes up settings an old config still carries, and reports whether the
+/// migration is still unwritten. adoption is once per device and the legacy
+/// values live nowhere else, so a failed save must keep the config as it is
+/// rather than let exit drop the keys.
+fn adopt_legacy(
+    profile: &mut radio_core::sync::Profile,
+    legacy: &crate::tui::config::LegacySettings,
+    profile_path: &std::path::Path,
+    now: i64,
+) -> bool {
+    let adopted = profile.adopt_existing(
+        &legacy.countries,
+        legacy.scope.as_deref().unwrap_or(""),
+        legacy.theme.as_deref().unwrap_or(""),
+        now,
+    );
+    if !adopted {
+        return false;
+    }
+    match profile.save(profile_path) {
+        Ok(()) => false,
+        Err(e) => {
+            crate::log_warn!("startup: failed to save the adopted profile: {e}");
+            true
+        }
+    }
 }
 
 /// pushes the profile into the ui at startup. this is the only seed for the
@@ -573,6 +600,86 @@ mod tests {
         p.set_scope(scope, 100);
         p.set_theme(theme, 100);
         p
+    }
+
+    fn legacy_of(raw: &str) -> crate::tui::config::LegacySettings {
+        Config::from_toml_str(raw).unwrap().legacy_settings()
+    }
+
+    const OLD_CONFIG: &str =
+        "theme = \"monokai\"\n[filters]\nstatus = \"all\"\ncountries = [\"UA\"]\n";
+
+    // a successful adoption is written and the config is then free to drop the
+    // legacy keys.
+    #[test]
+    fn a_written_adoption_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profile.json");
+        let mut profile = radio_core::sync::Profile::default();
+
+        let pending = adopt_legacy(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(!pending);
+        assert_eq!(
+            radio_core::sync::Profile::load(&path).countries,
+            vec!["UA".to_string()],
+            "the adoption never reached the disk"
+        );
+    }
+
+    // the unrecoverable path: the profile could not be written, so the legacy
+    // values exist nowhere but config.toml and the config must keep them.
+    #[test]
+    fn an_unwritable_profile_leaves_the_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        // a file where the parent directory must be: create_dir_all fails, so
+        // the save fails for a real filesystem reason.
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let path = blocker.join("profile.json");
+        let mut profile = radio_core::sync::Profile::default();
+
+        let pending = adopt_legacy(&mut profile, &legacy_of(OLD_CONFIG), &path, 500);
+
+        assert!(pending, "a failed migration save must be reported");
+    }
+
+    // nothing to adopt is not a failure: the config may still be rewritten.
+    #[test]
+    fn adopting_nothing_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut profile = radio_core::sync::Profile::default();
+        let legacy = Config::default().legacy_settings();
+        assert!(!adopt_legacy(
+            &mut profile,
+            &legacy,
+            &dir.path().join("profile.json"),
+            500
+        ));
+    }
+
+    // an already-stamped profile has nothing to adopt, so a save that would
+    // fail is never attempted and the config is still free to be rewritten.
+    #[test]
+    fn an_already_migrated_device_leaves_no_migration_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let mut profile = profile_with(&["PL"], "favorites", "nord");
+
+        let pending = adopt_legacy(
+            &mut profile,
+            &legacy_of(OLD_CONFIG),
+            &blocker.join("profile.json"),
+            500,
+        );
+
+        assert!(!pending);
+        assert_eq!(
+            profile.countries,
+            vec!["PL".to_string()],
+            "stamped value lost"
+        );
     }
 
     // the whole defect: device b changed the filter while this tui was closed,
