@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -57,11 +58,19 @@ class StationToast(private val context: Context) {
     }
 
     fun show(text: String) {
+        // every failure here is logged: an overlay that does not appear leaves no
+        // other trace, and telling "permission missing" apart from "the window
+        // manager refused us" is otherwise pure guesswork.
         if (!canDrawOverlay(context)) {
+            Log.i("r4dio", "overlay not shown: permission not granted")
             return
         }
         hide()
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        if (wm == null) {
+            Log.w("r4dio", "overlay not shown: no window manager")
+            return
+        }
         val panel = TextView(context).apply {
             this.text = text
             setTextColor(context.getColor(R.color.amber_hi))
@@ -92,6 +101,7 @@ class StationToast(private val context: Context) {
                 view = panel
                 handler.postDelayed({ hide() }, TOAST_MILLIS)
             }
+            .onFailure { Log.w("r4dio", "overlay not shown: ${it.message}") }
     }
 
     fun hide() {

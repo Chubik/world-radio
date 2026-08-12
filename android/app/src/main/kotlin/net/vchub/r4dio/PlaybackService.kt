@@ -33,6 +33,7 @@ const val CMD_STAR = "net.vchub.r4dio.STAR"
 const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
+const val CMD_CLEAR_FILTER = "net.vchub.r4dio.CLEAR_FILTER"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
@@ -41,6 +42,8 @@ const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
 const val EXTRA_PLAYABLE_COUNT = "net.vchub.r4dio.EXTRA_PLAYABLE_COUNT"
 const val EXTRA_CATALOG_LOADED = "net.vchub.r4dio.EXTRA_CATALOG_LOADED"
 const val EXTRA_FILTER_COUNTRIES = "net.vchub.r4dio.EXTRA_FILTER_COUNTRIES"
+const val EXTRA_CATALOG_SIZE = "net.vchub.r4dio.EXTRA_CATALOG_SIZE"
+const val EXTRA_CATALOG_GROWING = "net.vchub.r4dio.EXTRA_CATALOG_GROWING"
 
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
@@ -85,6 +88,15 @@ class PlaybackService : MediaSessionService() {
     // syncNow(), which both can run in the first seconds of a service) into a single
     // network fetch instead of one each.
     private val refreshInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    // same collapsing as refreshInFlight: a sync burst and service start can all
+    // reach pullFilteredCountries() within a second of each other.
+    private val filterPullInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    // countries already pulled in full this session, so a re-sync that carries the
+    // same filter costs nothing. deliberately not persisted: a fresh process is
+    // also a fresh chance to pick up stations added since.
+    @Volatile private var filterCountriesPulled: Set<String> = emptySet()
+    private val topUpInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val conditions by lazy { TopUpConditions(this) }
     @Volatile private var current: Station? = null
     private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
@@ -106,6 +118,7 @@ class PlaybackService : MediaSessionService() {
     private val scopeCommand = SessionCommand(CMD_SCOPE, android.os.Bundle.EMPTY)
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
     private val syncUiCommand = SessionCommand(CMD_SYNC_UI, android.os.Bundle.EMPTY)
+    private val clearFilterCommand = SessionCommand(CMD_CLEAR_FILTER, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
@@ -160,6 +173,10 @@ class PlaybackService : MediaSessionService() {
             putInt(EXTRA_PLAYABLE_COUNT, playable)
             putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
             putStringArray(EXTRA_FILTER_COUNTRIES, included.sorted().toTypedArray())
+            putInt(EXTRA_CATALOG_SIZE, stations.size)
+            // "+" means there is more to come, not that a fetch is running right
+            // now: the top-up waits for wi-fi and a charger, which may be hours.
+            putBoolean(EXTRA_CATALOG_GROWING, stations.isNotEmpty() && stations.size < TOP_UP_CEILING)
         }
         session?.setSessionExtras(extras)
     }
@@ -215,6 +232,12 @@ class PlaybackService : MediaSessionService() {
         setMediaNotificationProvider(provider)
         loadStations()
         syncNow()
+        // the filter is usually already set, from a desktop that chose it long ago;
+        // waiting for it to change would never pull anything for that user.
+        pullFilteredCountries()
+        // the baseline for someone who never sets a filter; it declines itself when
+        // the phone is not on wi-fi and charging, so calling it costs nothing.
+        topUpCatalogue()
         startMirrorListener()
     }
 
@@ -354,6 +377,95 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /**
+     * pulls every station of each filtered country into the cache.
+     *
+     * called from all three places a filter can become active — the two syncs that
+     * can write one, and service start, which is the case for a filter set on the
+     * desktop days ago and never touched since. a change-only trigger would be dead
+     * code for that user: their filter never changes again.
+     */
+    private fun pullFilteredCountries() {
+        if (!filterPullInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                val filter = runBlocking { favStore.currentFilter() }
+                val wanted = countriesToPull(filter, filterCountriesPulled)
+                if (wanted.isEmpty()) {
+                    return@thread
+                }
+                val blocked = runBlocking { favStore.currentBlocked() }
+                var added = 0
+                wanted.forEach { code ->
+                    val fetched = catalog.fetchCountry(code, blocked = blocked)
+                    // a failed fetch must not mark the country done, or it would
+                    // never be retried for the rest of the session.
+                    if (fetched.isEmpty()) {
+                        Log.w("r4dio", "country fetch for $code returned nothing")
+                        return@forEach
+                    }
+                    filterCountriesPulled = filterCountriesPulled + code
+                    added += catalogCache.merge(fetched)
+                }
+                if (added == 0) {
+                    return@thread
+                }
+                // the merged stations are only in the pool once the service re-reads
+                // the cache: `stations` is what every pick path draws from.
+                stations = catalogCache.read()
+                Log.i("r4dio", "pulled $added new stations for filter ${wanted.joinToString(",")}")
+                scope.launch { refreshCustomLayout() }
+            } finally {
+                filterPullInFlight.set(false)
+            }
+        }
+    }
+
+    /**
+     * one page of the world catalogue, but only while the phone is on wi-fi and
+     * charging. this is the baseline for the user who never sets a filter at all:
+     * without it they stay on the skewed top-1000 forever.
+     *
+     * one page per opportunity rather than a loop to the ceiling — a burst would be
+     * exactly the "load" the user asked to avoid, even on wi-fi.
+     */
+    private fun topUpCatalogue() {
+        if (!topUpInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                // the cache, not `stations`: this can run before loadStations() has
+                // populated the field, and an offset of 0 would re-fetch page one.
+                val held = catalogCache.read().size
+                val unmetered = conditions.unmetered()
+                val charging = conditions.charging()
+                if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                    Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
+                    return@thread
+                }
+                val blocked = runBlocking { favStore.currentBlocked() }
+                val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
+                if (page.isEmpty()) {
+                    Log.i("r4dio", "top-up page at offset $held came back empty")
+                    return@thread
+                }
+                val added = catalogCache.merge(page)
+                if (added == 0) {
+                    Log.i("r4dio", "top-up page at offset $held was all stations we hold")
+                    return@thread
+                }
+                stations = catalogCache.read()
+                Log.i("r4dio", "topped up $added stations, holding ${stations.size}")
+                scope.launch { refreshCustomLayout() }
+            } finally {
+                topUpInFlight.set(false)
+            }
+        }
+    }
+
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
     private fun launchSyncActivity() {
@@ -460,6 +572,9 @@ class PlaybackService : MediaSessionService() {
                     // startup. always safe to call: it is itself TTL-gated, so it is a
                     // no-op unless a reset (or real TTL expiry) actually happened.
                     refreshIfStale(favStore.currentExcluded(), favStore.currentBlocked())
+                    // a filter that just arrived from another device names countries
+                    // the top-1000 barely covers; pull them before the user shuffles.
+                    pullFilteredCountries()
                     refreshCustomLayout()
                 }
             }
@@ -547,6 +662,11 @@ class PlaybackService : MediaSessionService() {
                 applyingMirror = false
             }
             else -> {
+                // announced even though nothing starts playing: the other device
+                // changed station, and that is worth seeing. announced before
+                // `current` moves, since the previous station is what decides
+                // whether this is a change at all.
+                announceStation(station)
                 current = station
                 // mirror events carry no country/codec/bitrate, so meta has nothing to
                 // show — refreshWidget's widgetMetaLabel call resolves to "" on its own.
@@ -556,6 +676,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun shuffle() {
+        // a shuffle is the one moment we know the user is listening, so it is when
+        // a page is worth fetching — still gated on wi-fi and charging.
+        topUpCatalogue()
         scope.launch {
             val sc = withContext(Dispatchers.IO) {
                 runCatching { withTimeout(3000) { favStore.currentScope() } }.getOrDefault(Scope.ALL)
@@ -677,6 +800,7 @@ class PlaybackService : MediaSessionService() {
                     .add(scopeCommand)
                     .add(stopCommand)
                     .add(syncUiCommand)
+                    .add(clearFilterCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -739,6 +863,19 @@ class PlaybackService : MediaSessionService() {
                         refreshWidget(current, exo?.isPlaying == true, favStore.currentFavUuids())
                         // the scope is carried by the account: setScope stamps it, and
                         // only this call takes it to the other devices.
+                        syncNow()
+                        shuffle()
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_CLEAR_FILTER -> {
+                    scope.launch {
+                        favStore.setFilter(emptySet())
+                        // the countries pulled for the old filter stay in the cache —
+                        // they cost nothing and re-selecting that country is instant.
+                        refreshCustomLayout()
+                        // same as the scope: only this call takes the change to the
+                        // other devices, and the filter is shared across all of them.
                         syncNow()
                         shuffle()
                     }
