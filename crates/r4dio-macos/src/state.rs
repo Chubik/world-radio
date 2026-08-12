@@ -110,11 +110,10 @@ impl MiniState {
 
     /// the favourites the ★ button may actually land on — it shuffles them
     /// regardless of the panel's scope, so it reads this rather than switching
-    /// scope as a side effect. blocked ones are gone: without that, this button
+    /// scope as a side effect. blocked ones are gone: without that, the button
     /// would play a station the user blocked on another device even though the
-    /// FAVS scope will not. there is deliberately no unfiltered accessor.
-    /// that button bypasses the scope, so without this it would play a station
-    /// the user blocked on another device even though the FAVS scope will not.
+    /// FAVS scope will not. there is deliberately no unfiltered accessor —
+    /// that one was the trap this fix removed.
     pub fn playable_favorites(&self) -> Vec<&StationPick> {
         self.favorites
             .iter()
