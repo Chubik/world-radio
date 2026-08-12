@@ -158,6 +158,28 @@ class Catalog(
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * every station in one country. the top-1000 by clickcount holds only a
+     * handful of any country outside the big few — 7 of ukraine's 351 — so a
+     * filter set to one is filtering almost nothing until this runs.
+     */
+    fun fetchCountry(code: String, blocked: Set<String> = emptySet()): List<Station> {
+        val url = "$baseUrl/json/stations/bycountrycodeexact/$code?hidebroken=true"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "world-radio-android/1.0")
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || body.isBlank()) return emptyList()
+                json.decodeFromString<List<ApiStation>>(body)
+                    .map { it.toStation() }
+                    .filter { allowedStation(it, blocked = blocked) }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun fetchOnce(limit: Int, blocked: Set<String>): List<Station> {
         val url =
             "$baseUrl/json/stations/search" +
