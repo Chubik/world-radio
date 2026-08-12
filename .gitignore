@@ -9,3 +9,6 @@ crates/r4dio-macos/gen/
 # secrets never belong in the repo
 .env
 .env.*
+
+# macos leaves these everywhere
+.DS_Store
