@@ -3,13 +3,6 @@ use crate::state::{Phase, Scope};
 use serde::Serialize;
 use std::sync::Mutex;
 
-fn parse_scope(s: &str) -> Scope {
-    match s {
-        "favorites" => Scope::Favorites,
-        _ => Scope::All,
-    }
-}
-
 #[derive(Serialize)]
 pub struct NowState {
     pub station: Option<String>,
@@ -71,9 +64,15 @@ pub fn set_volume(state: tauri::State<Shared>, v: f32) {
     state.lock().unwrap().set_volume(v);
 }
 
+/// an unrecognised value leaves the panel where it is rather than snapping it to
+/// All — the window only ever sends the two it draws, so anything else is a bug
+/// or a newer client, and neither is a reason to move the user off favourites.
 #[tauri::command]
 pub fn set_scope(state: tauri::State<Shared>, scope: String) {
-    state.lock().unwrap().set_scope(parse_scope(&scope));
+    let Some(scope) = crate::backend::scope_from_wire(&scope) else {
+        return;
+    };
+    state.lock().unwrap().set_scope(scope);
 }
 
 #[tauri::command]
@@ -216,9 +215,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_scope_maps_known_and_defaults_to_all() {
-        assert_eq!(parse_scope("favorites"), Scope::Favorites);
-        assert_eq!(parse_scope("all"), Scope::All);
-        assert_eq!(parse_scope("garbage"), Scope::All);
+    fn the_window_sends_the_two_scopes_this_app_has() {
+        assert_eq!(
+            crate::backend::scope_from_wire("favorites"),
+            Some(Scope::Favorites)
+        );
+        assert_eq!(crate::backend::scope_from_wire("all"), Some(Scope::All));
+    }
+
+    // a value only a newer client knows must leave the panel where it is; the
+    // old parser turned every unknown string into All and moved the user off
+    // favourites.
+    #[test]
+    fn an_unknown_scope_moves_nothing() {
+        assert_eq!(crate::backend::scope_from_wire("garbage"), None);
+        assert_eq!(crate::backend::scope_from_wire(""), None);
+    }
+
+    // recent/blocked/dead are real synced scopes with no panel equivalent, so
+    // they must not collapse into All either.
+    #[test]
+    fn a_scope_the_panel_cannot_show_moves_nothing() {
+        assert_eq!(crate::backend::scope_from_wire("recent"), None);
+        assert_eq!(crate::backend::scope_from_wire("blocked"), None);
+        assert_eq!(crate::backend::scope_from_wire("dead"), None);
     }
 }

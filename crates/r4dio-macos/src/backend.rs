@@ -27,12 +27,27 @@ fn now_secs() -> i64 {
 /// real synced scopes it has no equivalent for, so they leave the panel where
 /// it is instead of being collapsed into `All` — the profile on disk still
 /// carries them for the surfaces that do.
-fn scope_from_wire(wire: &str) -> Option<Scope> {
+pub fn scope_from_wire(wire: &str) -> Option<Scope> {
     match radio_core::sync::Scope::from_wire(wire)? {
         radio_core::sync::Scope::All => Some(Scope::All),
         radio_core::sync::Scope::Favorites => Some(Scope::Favorites),
         _ => None,
     }
+}
+
+/// pushes what the account decides into the live pick state. it runs at startup
+/// and again after every sync, because a filter or a block set on another device
+/// only ever arrives on disk — without this it would sit there unapplied, which
+/// is exactly how the filter came to govern every surface but this one. the
+/// scope is deliberately not seeded here: `sync` only moves it when the merge
+/// actually moved it, so re-applying it would reset a scope the user just set.
+fn seed_from_profile(
+    state: &mut MiniState,
+    profile: &radio_core::sync::Profile,
+    blocked: &[String],
+) {
+    state.set_filter(profile.countries.clone());
+    state.set_blocked(blocked.to_vec());
 }
 
 impl Backend {
@@ -63,12 +78,14 @@ impl Backend {
 
         let mut state = MiniState::new();
         state.load_stations(all, favorites);
-        // a scope synced from another device is on disk before this app starts;
-        // reading it here is what makes the panel open on the same scope.
-        if let Some(scope) = scope_from_wire(&radio_core::sync::Profile::load(&profile_path).scope)
-        {
+        // a scope, a filter and a blocklist synced from another device are all on
+        // disk before this app starts; reading them here is what makes the panel
+        // open on the same scope and shuffle inside the same filter.
+        let profile = radio_core::sync::Profile::load(&profile_path);
+        if let Some(scope) = scope_from_wire(&profile.scope) {
             state.set_scope(scope);
         }
+        seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
@@ -270,6 +287,10 @@ impl Backend {
     pub fn unblock(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
         catalog_src::unblock(&mut self.catalog, uuid);
         self.persist();
+        // unblocking widens the pool immediately: the station must be reachable
+        // by the next shuffle, not only after the next sync.
+        self.state
+            .set_blocked(self.catalog.blacklist_ids().to_vec());
         self.blocked_rows()
     }
 
@@ -448,6 +469,7 @@ impl Backend {
         let all = catalog_src::all_stations(&self.catalog)?;
         let favorites = catalog_src::favorite_stations(&self.catalog)?;
         self.state.load_stations(all, favorites);
+        seed_from_profile(&mut self.state, &profile, self.catalog.blacklist_ids());
         Ok(())
     }
 }
@@ -481,5 +503,156 @@ mod tests {
     fn an_unknown_scope_leaves_the_panel_alone() {
         assert_eq!(scope_from_wire("something-new"), None);
         assert_eq!(scope_from_wire(""), None);
+    }
+
+    fn pick(uuid: &str, country: &str) -> StationPick {
+        StationPick {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            url: format!("http://{uuid}"),
+            country: country.into(),
+            codec: String::new(),
+            bitrate: 0,
+        }
+    }
+
+    // the filter lives in profile.json, which another device may have written
+    // before this app ever started; without this seed it would sit there unread.
+    #[test]
+    fn a_filter_on_disk_reaches_the_shuffle_pool_at_startup() {
+        let mut state = MiniState::new();
+        state.load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["UA".into()], 100);
+
+        seed_from_profile(&mut state, &profile, &[]);
+
+        assert_eq!(state.active_stations().len(), 1);
+        assert_eq!(state.active_stations()[0].uuid, "a");
+    }
+
+    #[test]
+    fn a_blocklist_from_the_account_reaches_the_shuffle_pool() {
+        let mut state = MiniState::new();
+        state.load_stations(vec![pick("a", "UA"), pick("b", "UA")], Vec::new());
+
+        seed_from_profile(
+            &mut state,
+            &radio_core::sync::Profile::default(),
+            &["a".to_string()],
+        );
+
+        assert_eq!(state.active_stations().len(), 1);
+        assert_eq!(state.active_stations()[0].uuid, "b");
+    }
+
+    // a filter cleared on another device has to widen the pool back out, not
+    // leave the previous narrowing in place.
+    #[test]
+    fn a_filter_cleared_elsewhere_widens_the_pool_again() {
+        let mut state = MiniState::new();
+        state.load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["UA".into()], 100);
+        seed_from_profile(&mut state, &profile, &[]);
+        assert_eq!(state.active_stations().len(), 1);
+
+        profile.set_countries(Vec::new(), 200);
+        seed_from_profile(&mut state, &profile, &[]);
+
+        assert_eq!(state.active_stations().len(), 2);
+    }
+
+    /// the real pick path over this machine's real account and catalogue: ten
+    /// shuffles must all land in the filtered countries and never on a station
+    /// blocked elsewhere. it runs against a copy, so the account it is proving
+    /// cannot be altered by the proof — and it starts no playback.
+    #[test]
+    #[ignore]
+    fn shuffles_of_the_real_account_stay_inside_the_filter() {
+        let Ok(real) = radio_core::paths::ensure_data_dir() else {
+            eprintln!("no data dir; skipping");
+            return;
+        };
+        if !real.join("stations.db").exists() {
+            eprintln!("no local cache; skipping");
+            return;
+        }
+        let data = std::env::temp_dir().join(format!("r4dio-filter-proof-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        for name in [
+            "stations.db",
+            "station_health.json",
+            "favorites.json",
+            "history.json",
+            "blacklist.json",
+            "excluded_countries.json",
+            "profile.json",
+        ] {
+            if real.join(name).exists() {
+                std::fs::copy(real.join(name), data.join(name)).unwrap();
+            }
+        }
+        let cache = Cache::open(&data.join("stations.db")).unwrap();
+        let health = Health::load(&data.join("station_health.json"));
+        let catalog = Catalog::load(
+            cache,
+            health,
+            &data.join("favorites.json"),
+            &data.join("history.json"),
+            &data.join("blacklist.json"),
+            &data.join("excluded_countries.json"),
+        );
+        let profile = radio_core::sync::Profile::load(&data.join("profile.json"));
+        eprintln!(
+            "profile filter: {:?}, blocked: {}",
+            profile.countries,
+            catalog.blacklist_ids().len()
+        );
+
+        let mut state = MiniState::new();
+        state.load_stations(
+            catalog_src::all_stations(&catalog).unwrap(),
+            catalog_src::favorite_stations(&catalog).unwrap(),
+        );
+        eprintln!("pool before the seed: {}", state.active_stations().len());
+        seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
+        eprintln!("pool after the seed:  {}", state.active_stations().len());
+
+        for i in 0..10 {
+            let pick = state.pick_shuffle().unwrap();
+            eprintln!("shuffle {i}: {} [{}]", pick.name, pick.country);
+            if !profile.countries.is_empty() {
+                assert!(
+                    profile
+                        .countries
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case(&pick.country)),
+                    "{} is in {}, outside the filter",
+                    pick.name,
+                    pick.country
+                );
+            }
+            assert!(
+                !catalog.blacklist_ids().contains(&pick.uuid),
+                "{} is blocked on this account",
+                pick.name
+            );
+        }
+    }
+
+    // the seed must not reach into favourites: an explicit star outranks a
+    // broad taste filter, exactly as on android.
+    #[test]
+    fn the_seed_leaves_favourites_alone() {
+        let mut state = MiniState::new();
+        state.load_stations(Vec::new(), vec![pick("f", "PL")]);
+        state.set_scope(Scope::Favorites);
+        let mut profile = radio_core::sync::Profile::default();
+        profile.set_countries(vec!["UA".into()], 100);
+
+        seed_from_profile(&mut state, &profile, &[]);
+
+        assert_eq!(state.pick_shuffle().unwrap().uuid, "f");
     }
 }
