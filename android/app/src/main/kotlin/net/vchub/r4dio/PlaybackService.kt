@@ -93,6 +93,8 @@ class PlaybackService : MediaSessionService() {
     // same filter costs nothing. deliberately not persisted: a fresh process is
     // also a fresh chance to pick up stations added since.
     @Volatile private var filterCountriesPulled: Set<String> = emptySet()
+    private val topUpInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val conditions by lazy { TopUpConditions(this) }
     @Volatile private var current: Station? = null
     private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
@@ -227,6 +229,9 @@ class PlaybackService : MediaSessionService() {
         // the filter is usually already set, from a desktop that chose it long ago;
         // waiting for it to change would never pull anything for that user.
         pullFilteredCountries()
+        // the baseline for someone who never sets a filter; it declines itself when
+        // the phone is not on wi-fi and charging, so calling it costs nothing.
+        topUpCatalogue()
         startMirrorListener()
     }
 
@@ -408,6 +413,49 @@ class PlaybackService : MediaSessionService() {
                 scope.launch { refreshCustomLayout() }
             } finally {
                 filterPullInFlight.set(false)
+            }
+        }
+    }
+
+    /**
+     * one page of the world catalogue, but only while the phone is on wi-fi and
+     * charging. this is the baseline for the user who never sets a filter at all:
+     * without it they stay on the skewed top-1000 forever.
+     *
+     * one page per opportunity rather than a loop to the ceiling — a burst would be
+     * exactly the "load" the user asked to avoid, even on wi-fi.
+     */
+    private fun topUpCatalogue() {
+        if (!topUpInFlight.compareAndSet(false, true)) {
+            return
+        }
+        thread {
+            try {
+                // the cache, not `stations`: this can run before loadStations() has
+                // populated the field, and an offset of 0 would re-fetch page one.
+                val held = catalogCache.read().size
+                val unmetered = conditions.unmetered()
+                val charging = conditions.charging()
+                if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                    Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
+                    return@thread
+                }
+                val blocked = runBlocking { favStore.currentBlocked() }
+                val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
+                if (page.isEmpty()) {
+                    Log.i("r4dio", "top-up page at offset $held came back empty")
+                    return@thread
+                }
+                val added = catalogCache.merge(page)
+                if (added == 0) {
+                    Log.i("r4dio", "top-up page at offset $held was all stations we hold")
+                    return@thread
+                }
+                stations = catalogCache.read()
+                Log.i("r4dio", "topped up $added stations, holding ${stations.size}")
+                scope.launch { refreshCustomLayout() }
+            } finally {
+                topUpInFlight.set(false)
             }
         }
     }
@@ -617,6 +665,9 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun shuffle() {
+        // a shuffle is the one moment we know the user is listening, so it is when
+        // a page is worth fetching — still gated on wi-fi and charging.
+        topUpCatalogue()
         scope.launch {
             val sc = withContext(Dispatchers.IO) {
                 runCatching { withTimeout(3000) { favStore.currentScope() } }.getOrDefault(Scope.ALL)
