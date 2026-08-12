@@ -2,7 +2,11 @@ use crate::catalog_src;
 use crate::state::{MiniState, Phase, Scope, StationPick};
 use radio_audio::AudioEngine;
 use radio_core::catalog::{Cache, Catalog, Health};
+use radio_core::mirror::{MirrorEvent, StreamEvent};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+const SERVER: &str = "https://r4dio.net";
 
 pub struct Backend {
     pub state: MiniState,
@@ -14,6 +18,48 @@ pub struct Backend {
     excluded_path: PathBuf,
     pending_path: PathBuf,
     profile_path: PathBuf,
+    mirror_seq: u64,
+    // set while a play arriving from another device is being started, so the
+    // announce below does not push it straight back and start a ping-pong.
+    applying_mirror: bool,
+}
+
+/// what a play arriving from the account stream is allowed to do here. our own
+/// echo and anything already seen are dropped, and the ru/by ban is re-applied
+/// at this boundary because the other device may be on a build without it.
+pub fn accepts_mirror(evt: &MirrorEvent, seen_seq: &mut u64) -> bool {
+    if evt.origin == radio_core::mirror::device_id() {
+        return false;
+    }
+    if evt.seq <= *seen_seq {
+        return false;
+    }
+    *seen_seq = evt.seq;
+    !radio_core::catalog::text_is_excluded(&format!("{} {}", evt.name, evt.url))
+}
+
+#[derive(Debug, PartialEq)]
+pub enum StreamAction {
+    Mirror(MirrorEvent),
+    Resync,
+    Nothing,
+}
+
+/// what the account event stream does to this app. a play mirrors the other
+/// device; the doorbell queues a re-sync, at most one at a time — the caller
+/// clears `resync_queued` once that sync has run, so a burst of events costs
+/// one sync rather than one each.
+///
+/// our own push echoes back here too, and the re-sync it causes is a no-op that
+/// the server answers without ringing again, so it cannot loop.
+pub fn dispatch_stream_event(evt: StreamEvent, resync_queued: &AtomicBool) -> StreamAction {
+    match evt {
+        StreamEvent::Play(e) => StreamAction::Mirror(e),
+        StreamEvent::ProfileChanged => match resync_queued.swap(true, Ordering::SeqCst) {
+            true => StreamAction::Nothing,
+            false => StreamAction::Resync,
+        },
+    }
 }
 
 fn now_secs() -> i64 {
@@ -102,13 +148,83 @@ impl Backend {
             excluded_path,
             pending_path,
             profile_path,
+            mirror_seq: 0,
+            applying_mirror: false,
         })
+    }
+
+    // the mirror is a two-way street: without this a station played on the Mac
+    // reaches no other device, though every other device's play reaches here.
+    fn announce(&self, pick: &StationPick) {
+        if self.applying_mirror {
+            return;
+        }
+        let Some(key) = radio_core::sync::load_key() else {
+            return;
+        };
+        let (uuid, name, url) = (pick.uuid.clone(), pick.name.clone(), pick.url.clone());
+        // the announce is a blocking http call and this runs under the backend
+        // mutex, so it goes to a thread rather than freezing the panel.
+        std::thread::spawn(move || {
+            let client = radio_core::mirror::MirrorClient::new(SERVER);
+            let origin = radio_core::mirror::device_id();
+            if let Err(e) = client.play(&key, &uuid, &name, &url, &origin) {
+                eprintln!("mirror announce failed: {e}");
+            }
+        });
+    }
+
+    /// a play from another device. it only takes over the speakers when this Mac
+    /// is already playing — mirroring onto a silent Mac would start audio the
+    /// user never asked for.
+    pub fn apply_mirror(&mut self, evt: MirrorEvent) {
+        if !accepts_mirror(&evt, &mut self.mirror_seq) {
+            return;
+        }
+        let pick = StationPick {
+            uuid: evt.uuid,
+            name: evt.name,
+            url: evt.url,
+            country: String::new(),
+            codec: String::new(),
+            bitrate: 0,
+        };
+        // a station blocked on this account must not arrive by the back door
+        // either. the country filter is deliberately not applied: a deliberate
+        // play on another device is an explicit choice, like a star.
+        if !radio_core::catalog::allowed_row(
+            &pick.uuid,
+            &pick.country,
+            &[],
+            self.catalog.blacklist_ids(),
+            &[],
+        ) {
+            return;
+        }
+        match self.state.phase == Phase::Playing {
+            true => {
+                self.applying_mirror = true;
+                self.play_pick(pick);
+                self.applying_mirror = false;
+            }
+            false => self.state.now = Some(pick),
+        }
+    }
+
+    /// the doorbell's sync. the gate is released here rather than by the caller
+    /// so that events arriving while it is in flight collapse into this one.
+    pub fn resync(&mut self, queued: &AtomicBool) {
+        if let Err(e) = self.sync() {
+            eprintln!("resync failed: {e}");
+        }
+        queued.store(false, Ordering::SeqCst);
     }
 
     fn play_pick(&mut self, pick: StationPick) {
         if let Some(engine) = &self.engine {
             engine.play(&pick.url);
         }
+        self.announce(&pick);
         self.catalog.record_history(&pick.uuid);
         if let Err(e) = self.catalog.save_state(
             &self.fav_path,
@@ -639,6 +755,109 @@ mod tests {
                 pick.name
             );
         }
+    }
+
+    // two doorbells in flight must still cost exactly one resync.
+    #[test]
+    fn rapid_doorbells_queue_one_resync() {
+        let queued = std::sync::atomic::AtomicBool::new(false);
+        let mut syncs = 0;
+        for _ in 0..2 {
+            if dispatch_stream_event(StreamEvent::ProfileChanged, &queued) == StreamAction::Resync {
+                syncs += 1;
+            }
+        }
+        assert_eq!(syncs, 1, "a burst must queue one sync, not one per event");
+        queued.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            dispatch_stream_event(StreamEvent::ProfileChanged, &queued),
+            StreamAction::Resync
+        );
+    }
+
+    // a doorbell must reach the sync path; a play event must not be mistaken
+    // for one (that would resync on every station change anywhere).
+    #[test]
+    fn only_a_doorbell_triggers_a_resync() {
+        let queued = std::sync::atomic::AtomicBool::new(false);
+        dispatch_stream_event(StreamEvent::ProfileChanged, &queued);
+        assert!(queued.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    fn mirror(uuid: &str, origin: &str, seq: u64) -> radio_core::mirror::MirrorEvent {
+        radio_core::mirror::MirrorEvent {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            url: format!("http://{uuid}"),
+            origin: origin.into(),
+            seq,
+        }
+    }
+
+    #[test]
+    fn a_play_event_mirrors_and_never_queues_a_resync() {
+        let queued = std::sync::atomic::AtomicBool::new(false);
+        let action = dispatch_stream_event(StreamEvent::Play(mirror("u", "other", 1)), &queued);
+        assert!(matches!(action, StreamAction::Mirror(_)));
+        assert!(
+            !queued.load(std::sync::atomic::Ordering::SeqCst),
+            "a play must not trigger a sync"
+        );
+    }
+
+    // the two lines below are the literal bytes the live server sent this
+    // machine's stream, so the listener is pinned to the wire it actually reads
+    // rather than to a shape invented here.
+    #[test]
+    fn the_lines_the_live_server_sends_reach_the_right_branch() {
+        let queued = std::sync::atomic::AtomicBool::new(false);
+        let play = radio_core::mirror::parse_stream_event(
+            r#"data: {"uuid":"u-test","name":"Proof FM","url":"http://example.invalid/s","origin":"dev-phone01","seq":234}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            dispatch_stream_event(play, &queued),
+            StreamAction::Mirror(_)
+        ));
+        assert!(!queued.load(std::sync::atomic::Ordering::SeqCst));
+
+        let doorbell =
+            radio_core::mirror::parse_stream_event(r#"data: {"type":"profile_changed"}"#).unwrap();
+        assert_eq!(
+            dispatch_stream_event(doorbell, &queued),
+            StreamAction::Resync
+        );
+    }
+
+    // our own announce echoes straight back down the stream; acting on it would
+    // make two devices bounce the same station between them for ever.
+    #[test]
+    fn our_own_play_echoing_back_is_ignored() {
+        let mut seen = 0;
+        assert!(!accepts_mirror(
+            &mirror("u", &radio_core::mirror::device_id(), 5),
+            &mut seen
+        ));
+        assert_eq!(seen, 0);
+    }
+
+    #[test]
+    fn a_stale_play_is_ignored_and_a_newer_one_is_taken() {
+        let mut seen = 3;
+        assert!(!accepts_mirror(&mirror("u", "other", 3), &mut seen));
+        assert_eq!(seen, 3);
+        assert!(accepts_mirror(&mirror("u", "other", 4), &mut seen));
+        assert_eq!(seen, 4);
+    }
+
+    // the ru/by ban holds at the mirror boundary too: another device may be on
+    // a build without it, and its play must still not reach this one.
+    #[test]
+    fn a_banned_station_never_arrives_from_another_device() {
+        let mut seen = 0;
+        let mut evt = mirror("u", "other", 1);
+        evt.name = "Radio Moscow".into();
+        assert!(!accepts_mirror(&evt, &mut seen));
     }
 
     // the seed must not reach into favourites: an explicit star outranks a
