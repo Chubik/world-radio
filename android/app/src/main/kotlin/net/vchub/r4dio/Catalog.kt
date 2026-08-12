@@ -45,6 +45,20 @@ fun countriesToPull(filter: Set<String>, alreadyPulled: Set<String>): Set<String
         .toSet()
 }
 
+/** how many stations the background top-up will grow the catalogue to. */
+const val TOP_UP_CEILING = 20_000
+
+/** one page per opportunity: small enough to be unnoticeable, big enough to matter. */
+const val TOP_UP_PAGE = 200
+
+/**
+ * whether now is a moment the top-up costs the user nothing. both conditions are
+ * required and are read at the moment of the attempt, never cached: "without load"
+ * means waiting for wi-fi AND a charger, not taking smaller bites at a bad time.
+ */
+fun topUpAllowed(unmetered: Boolean, charging: Boolean, held: Int, ceiling: Int): Boolean =
+    unmetered && charging && held < ceiling
+
 /**
  * [blocked] outranks everything, including a star: blocking is a pointed "never play
  * this station again", while excluding a country is a broad taste filter that an
@@ -181,6 +195,29 @@ class Catalog(
      */
     fun fetchCountry(code: String, blocked: Set<String> = emptySet()): List<Station> {
         val url = "$baseUrl/json/stations/bycountrycodeexact/$code?hidebroken=true"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "world-radio-android/1.0")
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || body.isBlank()) return emptyList()
+                json.decodeFromString<List<ApiStation>>(body)
+                    .map { it.toStation() }
+                    .filter { allowedStation(it, blocked = blocked) }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * one page further down the same clickcount ordering the first 1000 came from,
+     * so the top-up keeps adding the next-most-popular stations rather than random
+     * ones. the ban is applied here like on every other ingest path.
+     */
+    fun fetchPage(offset: Int, limit: Int, blocked: Set<String> = emptySet()): List<Station> {
+        val url = "$baseUrl/json/stations/search" +
+            "?limit=$limit&offset=$offset&hidebroken=true&order=clickcount&reverse=true"
         val request = Request.Builder()
             .url(url)
             .header("User-Agent", "world-radio-android/1.0")
