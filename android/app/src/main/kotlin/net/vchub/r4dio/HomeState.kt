@@ -32,13 +32,16 @@ fun isAllHiddenWarn(playableCount: Int, hiddenCount: Int, scope: String, catalog
 private const val FILTER_PILL_CODES = 3
 
 /**
- * the synced shuffle filter, or null when there is nothing to show. hidden in favs
- * scope for the same reason the excluded-countries pill is: favourites bypass the
- * filter entirely, so advertising it there would be false. the row is narrow, so a
+ * the synced shuffle filter, or null when none is set. the row is narrow, so a
  * long list is cut after three codes and the rest counted.
+ *
+ * shown in favs scope too, even though it does not apply there: hiding it meant a
+ * filter the user had set simply disappeared, which read as "my filter is gone"
+ * rather than "my filter is not in force right now". [filterIsInForce] is what
+ * carries that difference to the screen.
  */
 fun filterPillLabel(countries: List<String>, scope: String): String? {
-    if (countries.isEmpty() || scope == "favs") return null
+    if (countries.isEmpty()) return null
     val shown = countries.take(FILTER_PILL_CODES).joinToString("·")
     val rest = countries.size - FILTER_PILL_CODES
     return when (rest > 0) {
@@ -46,6 +49,14 @@ fun filterPillLabel(countries: List<String>, scope: String): String? {
         false -> "FILTER: $shown"
     }
 }
+
+/**
+ * whether the filter actually decides what plays. favourites bypass it entirely
+ * (FavLogic.pickFav ignores it, exactly as it ignores excluded countries), so in
+ * favs scope a set filter is real but dormant — and the pill has to say so.
+ */
+fun filterIsInForce(countries: List<String>, scope: String): Boolean =
+    countries.isNotEmpty() && scope != "favs"
 
 /**
  * the screen-awake toggle is a car feature: the phone is in a mount, and a screen

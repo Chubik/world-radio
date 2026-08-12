@@ -174,9 +174,23 @@ class FavStore(context: Context) {
         }
     }
 
-    // the filter has no editor on android by design — it is chosen on the desktop
-    // and arrives here through [applyProfile]. this device only honours it.
     suspend fun currentFilter(): Set<String> = store.data.first()[keyFilterCountries] ?: emptySet()
+
+    /**
+     * the filter is shared across devices, so a change here travels like the scope
+     * does. stamped through [SyncProfile.withCountries] so the "a same-value save
+     * must not move the stamp" rule lives in one place.
+     */
+    suspend fun setFilter(countries: Set<String>, now: Long = System.currentTimeMillis() / 1000) {
+        store.edit { prefs ->
+            val stamped = SyncProfile(
+                countries = (prefs[keyFilterCountries] ?: emptySet()).sorted(),
+                countriesAt = prefs[keyFilterAt] ?: 0L,
+            ).withCountries(countries.toList(), now)
+            prefs[keyFilterCountries] = stamped.countries.toSet()
+            prefs[keyFilterAt] = stamped.countriesAt
+        }
+    }
 
     suspend fun profile(): SyncProfile {
         val prefs = store.data.first()

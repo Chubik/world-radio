@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the app draws its own chrome, so this only dresses the system pieces we
+         cannot paint ourselves — dialogs. without it a dialog arrives in the
+         platform's own light grey and teal, which reads as another app's. -->
+    <style name="R4dioDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">@color/panel</item>
+        <item name="android:textColorPrimary">@color/bright</item>
+        <item name="android:colorAccent">@color/amber_hi</item>
+        <item name="android:windowTitleStyle">@style/R4dioDialogTitle</item>
+    </style>
+
+    <style name="R4dioDialogTitle" parent="@android:style/TextAppearance.Material.DialogWindowTitle">
+        <item name="android:textColor">@color/amber_hi</item>
+    </style>
+</resources>

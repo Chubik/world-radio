@@ -55,12 +55,27 @@ data class SyncProfile(
      * move the stamp, or an idle device would outrank a device that actually changed
      * something on the next merge.
      *
-     * only the scope has a local editor on android: the filter and the theme are
-     * chosen on the desktop and only arrive through [applyRemote].
+     * the scope and the filter both have local editors on android; the theme is
+     * still chosen on the desktop and only arrives through [applyRemote].
      */
     fun withScope(next: String, now: Long): SyncProfile {
         if (next == scope) return this
         return copy(scope = next, scopeAt = now)
+    }
+
+    /**
+     * the filter is one shared setting, so clearing it on the phone is a decision
+     * for the account and has to be stamped like any other local change — an empty
+     * list is a real value here, not an absence, or the other device's older filter
+     * would win the merge and come straight back.
+     *
+     * uppercased for the same reason [applyRemote] uppercases: the pick path
+     * compares against `station.country.uppercase()`.
+     */
+    fun withCountries(next: List<String>, now: Long): SyncProfile {
+        val normalised = next.map { it.uppercase() }.sorted()
+        if (normalised == countries) return this
+        return copy(countries = normalised, countriesAt = now)
     }
 
     fun outgoing(
