@@ -53,4 +53,51 @@ class PaletteTest {
                 .forEach { assertEquals(0xFF000000, it and 0xFF000000) }
         }
     }
+
+    // panel, rule and mute are derived, not copied from the cli — they must stay
+    // opaque and must sit between the two colours they blend.
+    @Test
+    fun derived_colours_are_opaque_for_every_theme() {
+        THEME_SLUGS.mapNotNull { paletteFor(it) }.forEach { p ->
+            assertEquals(0xFF000000, p.panel() and 0xFF000000)
+            assertEquals(0xFF000000, p.rule() and 0xFF000000)
+            assertEquals(0xFF000000, p.mute() and 0xFF000000)
+        }
+    }
+
+    // the derived colours replace @color/panel, @color/rule and @color/mute, so
+    // for amber-crt they must land on what the current release actually draws.
+    // a channel may round by one; a whole role drifting means home changed
+    // colour, which is the defect this task exists to avoid.
+    @Test
+    fun derived_colours_reproduce_todays_home() {
+        val p = paletteFor("amber-crt")!!
+        assertChannelsWithin(0xFF1B1510, p.panel(), 1)
+        assertChannelsWithin(0xFF3A2C17, p.rule(), 3)
+        assertChannelsWithin(0xFF8A7F64, p.mute(), 2)
+    }
+
+    // a derived colour must never collapse onto the background: an invisible
+    // hairline or invisible secondary text is the failure mode that would not
+    // show up in a screenshot of the default theme alone.
+    @Test
+    fun derived_colours_stay_off_the_background_for_every_theme() {
+        THEME_SLUGS.mapNotNull { paletteFor(it) }.forEach { p ->
+            assert(channelDistance(p.rule(), p.bg) > 0) { "rule vanished into bg" }
+            assert(channelDistance(p.mute(), p.bg) > 40) { "mute too close to bg" }
+        }
+    }
+
+    private fun channelDistance(a: Long, b: Long): Long =
+        listOf(16, 8, 0).maxOf { s -> Math.abs(((a shr s) and 0xFF) - ((b shr s) and 0xFF)) }
+
+    private fun assertChannelsWithin(expected: Long, actual: Long, slack: Long) {
+        listOf(16, 8, 0).forEach { s ->
+            val e = (expected shr s) and 0xFF
+            val a = (actual shr s) and 0xFF
+            assert(Math.abs(e - a) <= slack) {
+                "channel at $s: expected ${e.toString(16)} got ${a.toString(16)}"
+            }
+        }
+    }
 }
