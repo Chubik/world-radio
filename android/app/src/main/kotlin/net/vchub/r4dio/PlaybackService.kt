@@ -452,15 +452,15 @@ class PlaybackService : MediaSessionService() {
                     if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
                         break
                     }
-                    val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
+                    val offset = topUpOffset(pages)
+                    val page = catalog.fetchPage(offset = offset, limit = TOP_UP_PAGE, blocked = blocked)
+                    // an empty page is the end of the api's list; a page of
+                    // stations we already hold is not — the api's ordering and
+                    // ours diverge, so walking on is what fills the catalogue.
                     if (page.isEmpty()) {
                         break
                     }
-                    val added = catalogCache.merge(page)
-                    if (added == 0) {
-                        break
-                    }
-                    totalAdded += added
+                    totalAdded += catalogCache.merge(page)
                     pages++
                     held = catalogCache.read().size
                 }
