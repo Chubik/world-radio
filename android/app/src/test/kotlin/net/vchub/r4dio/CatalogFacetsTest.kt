@@ -126,4 +126,22 @@ class CatalogFacetsTest {
     fun empty_countries_are_dropped() {
         assertEquals(listOf("UA" to 352), offeredCountryRows(listOf("UA" to 352, "ZZ" to 0)))
     }
+
+    // a rotation must not silently drop a filter the user set. every field has
+    // to survive the flatten/restore round trip, or the screen quietly forgets.
+    @Test
+    fun filters_survive_the_save_restore_round_trip() {
+        val f = CatalogFilters(
+            countries = setOf("UA", "PL"),
+            genres = setOf("jazz"),
+            codecs = setOf("AAC"),
+            minBitrate = 128,
+        )
+        assertEquals(f, filtersFromList(filtersToList(f)))
+    }
+
+    @Test
+    fun an_empty_filter_set_round_trips_too() {
+        assertEquals(CatalogFilters(), filtersFromList(filtersToList(CatalogFilters())))
+    }
 }

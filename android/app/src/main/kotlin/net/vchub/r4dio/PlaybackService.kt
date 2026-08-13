@@ -160,8 +160,13 @@ class PlaybackService : MediaSessionService() {
         val blocked = favStore.currentBlocked()
         val included = favStore.currentFilter()
         // count what the user could actually reach, so the screen can tell
-        // "your filters hid everything" apart from "the catalogue is empty"
-        val playable = stations.count { allowedStation(it, hidden, blocked, included) }
+        // "your filters hid everything" apart from "the catalogue is empty".
+        // dispatched: this runs on nearly every user action and the catalogue is
+        // ~59k stations, each checked against 13 banned substrings — on Main that
+        // is a visible stall on every star, scope and shuffle.
+        val playable = withContext(Dispatchers.Default) {
+            stations.count { allowedStation(it, hidden, blocked, included) }
+        }
         // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
         // ordering, so playableCount can be 0 just because the catalogue has not
         // landed yet. this flag is attempted-ness, not station presence, never a
@@ -469,9 +474,12 @@ class PlaybackService : MediaSessionService() {
                     if (page.isEmpty()) {
                         break
                     }
-                    totalAdded += catalogCache.merge(page)
+                    val added = catalogCache.merge(page)
+                    totalAdded += added
                     pages++
-                    held = catalogCache.read().size
+                    // counted, not re-read: read() reparses the whole ~10 mb file, and a
+                    // 300-page run would do that 300 times for a number we already have.
+                    held += added
                 }
                 if (totalAdded == 0) {
                     Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
@@ -719,7 +727,12 @@ class PlaybackService : MediaSessionService() {
                 runCatching { withTimeout(3000) { favStore.currentFilter() } }.getOrDefault(emptySet<String>())
             }
             val cat = withReadyCatalog()
-            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden, included = included)
+            // shuffle is the gesture the steering-wheel key is bound to, and the
+            // pick filters the whole ~59k catalogue before choosing. on Main that
+            // stalls the tap that asked for it.
+            val picked = withContext(Dispatchers.Default) {
+                pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden, included = included)
+            }
             if (picked.usedFallback) {
                 Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
             }

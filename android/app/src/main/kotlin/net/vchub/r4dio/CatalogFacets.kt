@@ -92,3 +92,23 @@ fun toggleValue(current: Set<String>, value: String): Set<String> =
         true -> current - value
         false -> current + value
     }
+
+/**
+ * the filter set, flattened so a rotation does not silently drop it.
+ * CatalogFilters holds sets, which Bundle cannot carry — losing a filter on
+ * rotation looks like the app forgot what the user asked for.
+ */
+fun filtersToList(f: CatalogFilters): List<Any> = listOf(
+    f.countries.toList(),
+    f.genres.toList(),
+    f.codecs.toList(),
+    f.minBitrate,
+)
+
+@Suppress("UNCHECKED_CAST")
+fun filtersFromList(saved: List<Any>): CatalogFilters = CatalogFilters(
+    countries = (saved[0] as List<String>).toSet(),
+    genres = (saved[1] as List<String>).toSet(),
+    codecs = (saved[2] as List<String>).toSet(),
+    minBitrate = saved[3] as Int,
+)

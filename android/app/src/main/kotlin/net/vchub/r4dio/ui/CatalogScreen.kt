@@ -47,6 +47,10 @@ import net.vchub.r4dio.R
 import net.vchub.r4dio.Station
 import net.vchub.r4dio.activeChips
 import net.vchub.r4dio.codecFacets
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import net.vchub.r4dio.filtersToList
+import net.vchub.r4dio.filtersFromList
 import net.vchub.r4dio.countryFacets
 import net.vchub.r4dio.genreFacets
 import net.vchub.r4dio.offeredCodecRows
@@ -76,7 +80,7 @@ fun CatalogScreen(
 ) {
     val c = R4dioTokens.colors
     var query by rememberSaveable { mutableStateOf("") }
-    var filters by remember { mutableStateOf(CatalogFilters()) }
+    var filters by rememberSaveable(stateSaver = FiltersSaver) { mutableStateOf(CatalogFilters()) }
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
 
     // one pass over 58k stations per keystroke or filter change, off the ui
@@ -131,8 +135,11 @@ fun CatalogScreen(
         // the facet passes are the expensive ones, so they are computed once for
         // the catalogue rather than per toggle. the sheet's live count is a plain
         // searchCatalog call, which the measured cost makes free.
-        val facets by remember(stations) {
-            derivedStateOf {
+        // three passes over 58k stations, and the genre pass splits every tag
+        // string — on the composing thread that is a freeze when the sheet opens.
+        var facets by remember(stations) { mutableStateOf(FacetSets()) }
+        LaunchedEffect(stations) {
+            facets = withContext(Dispatchers.Default) {
                 FacetSets(
                     countries = offeredCountryRows(
                         countryFacets(stations).filter { it.first.isNotBlank() },
@@ -300,3 +307,10 @@ private fun Notice(text: String) {
         )
     }
 }
+
+/** keeps the filter set across a rotation; CatalogFilters holds sets, which the
+ *  saved-state bundle cannot carry on its own. */
+val FiltersSaver: Saver<CatalogFilters, Any> = listSaver(
+    save = { filtersToList(it) },
+    restore = { filtersFromList(it) },
+)
