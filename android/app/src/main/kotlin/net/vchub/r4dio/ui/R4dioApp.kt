@@ -60,12 +60,16 @@ fun R4dioApp(
     overlayOn: Boolean = false,
     onKeepAwake: (() -> Unit)? = null,
     onOverlay: (() -> Unit)? = null,
+    // clearing the filter changes every device on the account, so the host can
+    // put a confirmation in front of it instead of sending the command straight.
+    onClearFilter: () -> Unit = { send(CMD_CLEAR_FILTER) },
+    modifier: Modifier = Modifier,
 ) {
     R4dioTheme(themeSlug) {
         val c = R4dioTokens.colors
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         Column(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxSize()
                 .background(Color(c.bg)),
         ) {
@@ -79,7 +83,7 @@ fun R4dioApp(
                         onScope = { send(CMD_SCOPE) },
                         onStop = { send(CMD_STOP) },
                         onSync = onOpenSync,
-                        onClearFilter = { send(CMD_CLEAR_FILTER) },
+                        onClearFilter = onClearFilter,
                         keepAwake = keepAwake,
                         overlayOn = overlayOn,
                         onKeepAwake = onKeepAwake,
