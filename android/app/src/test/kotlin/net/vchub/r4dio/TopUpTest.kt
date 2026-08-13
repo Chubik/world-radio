@@ -85,6 +85,27 @@ class TopUpTest {
 
     // one page per opportunity took hundreds of launches to fill; a run keeps
     // going while the moment is still free, and stops the instant it is not.
+    // the offset walks the api's own ordering, not our cache size. the cache also
+    // holds stations pulled by country, which are not in clickcount order — using
+    // its size as the offset skips into a band we already hold and the run stalls
+    // there forever. measured: at offset 1755 the page was ~95% already-held.
+    @Test
+    fun the_offset_follows_the_api_ordering_not_the_cache_size() {
+        assertEquals(0, topUpOffset(pagesDone = 0))
+        assertEquals(200, topUpOffset(pagesDone = 1))
+        assertEquals(1000, topUpOffset(pagesDone = 5))
+    }
+
+    // a page can be entirely stations we already hold — the api's ordering and
+    // ours diverge. that is a reason to walk on, not to stop: stopping there is
+    // what pinned a real device at 1,755 stations out of 62,250.
+    @Test
+    fun a_page_that_adds_nothing_does_not_end_the_run() {
+        var calls = 0
+        val pages = topUpRun(held = 1000, ceiling = 62_000, allowed = { calls++ < 4 })
+        assertEquals(4, pages)
+    }
+
     @Test
     fun a_run_stops_as_soon_as_a_condition_fails() {
         var calls = 0

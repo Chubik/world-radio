@@ -61,6 +61,15 @@ fun topUpAllowed(unmetered: Boolean, charging: Boolean, held: Int, ceiling: Int)
     unmetered && charging && held < ceiling
 
 /**
+ * where the next page starts. the api is walked in its own clickcount order, so
+ * the offset counts pages we have asked for — never the cache size. the cache
+ * also holds whole countries pulled by filter, which are not in that order, so
+ * using its size skips into a band we already hold and the run stalls there:
+ * measured on a real device, that pinned the catalogue at 1,755 of 62,250.
+ */
+fun topUpOffset(pagesDone: Int, limit: Int = TOP_UP_PAGE): Int = pagesDone * limit
+
+/**
  * how many pages a single top-up opportunity should fetch. pure so the stopping
  * rules can be tested; the caller does the fetching and re-reads the conditions
  * through [allowed] before each page, never caching them.
