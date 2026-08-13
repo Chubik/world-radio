@@ -909,7 +909,13 @@ class PlaybackService : MediaSessionService() {
                 CMD_PLAY_UUID -> {
                     val uuid = args.getString(ARG_UUID).orEmpty()
                     scope.launch {
-                        val station = withReadyCatalog().firstOrNull { it.uuid == uuid }
+                        // a linear scan over the whole catalogue must not run on the
+                        // ui thread — withReadyCatalog() returns synchronously with
+                        // no dispatcher change once the list is warm, which is the
+                        // common case by the time a tap can happen.
+                        val station = withContext(Dispatchers.Default) {
+                            withReadyCatalog().firstOrNull { it.uuid == uuid }
+                        }
                         when (station) {
                             // the catalogue the screen listed and the one the
                             // service holds can differ after a refresh; a tap on
