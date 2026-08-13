@@ -1,4 +1,4 @@
-package net.vchub.r4dio
+package net.vchub.r4dio.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
