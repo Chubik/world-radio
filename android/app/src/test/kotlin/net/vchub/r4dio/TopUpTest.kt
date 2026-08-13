@@ -9,6 +9,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * the rules deciding when the catalogue may be fetched, plus the paged walk that
+ * survives only as the fallback for when our own server cannot be reached.
+ */
 class TopUpTest {
     private lateinit var server: MockWebServer
     private lateinit var catalog: Catalog
@@ -25,26 +29,57 @@ class TopUpTest {
         server.shutdown()
     }
 
-    // "без навантаження" means waiting for a moment that costs the user nothing,
-    // not taking smaller bites at an arbitrary one.
+    // wi-fi never needed a reason: it costs the user nothing, and data saver
+    // only ever restrains mobile data.
     @Test
-    fun the_top_up_waits_for_wifi_and_charging() {
-        assertTrue(topUpAllowed(unmetered = true, charging = true, held = 1000, ceiling = 20_000))
-        assertFalse(topUpAllowed(unmetered = false, charging = true, held = 1000, ceiling = 20_000))
-        assertFalse(topUpAllowed(unmetered = true, charging = false, held = 1000, ceiling = 20_000))
-        assertFalse(topUpAllowed(unmetered = false, charging = false, held = 1000, ceiling = 20_000))
+    fun wifi_always_fetches() {
+        assertTrue(
+            catalogueFetchAllowed(unmetered = true, dataSaver = false, onMobileAllowed = true),
+        )
+        assertTrue(
+            catalogueFetchAllowed(unmetered = true, dataSaver = true, onMobileAllowed = false),
+        )
+    }
+
+    // the whole point of the change: a phone that never sees wi-fi used to sit
+    // on 1,000 stations forever.
+    @Test
+    fun mobile_data_fetches_when_the_user_allows_it() {
+        assertTrue(
+            catalogueFetchAllowed(unmetered = false, dataSaver = false, onMobileAllowed = true),
+        )
     }
 
     @Test
-    fun the_top_up_stops_at_the_ceiling() {
-        assertFalse(topUpAllowed(unmetered = true, charging = true, held = 20_000, ceiling = 20_000))
+    fun mobile_data_is_left_alone_when_the_user_says_no() {
+        assertFalse(
+            catalogueFetchAllowed(unmetered = false, dataSaver = false, onMobileAllowed = false),
+        )
     }
 
-    // one station short of the ceiling is still a reason to fetch: the boundary
-    // belongs on the "stop" side only once it is actually reached.
+    // when android has been told to hold back background data, an app does not
+    // get to decide its own download is the exception.
     @Test
-    fun the_top_up_runs_right_up_to_the_ceiling() {
-        assertTrue(topUpAllowed(unmetered = true, charging = true, held = 19_999, ceiling = 20_000))
+    fun data_saver_outranks_the_users_own_toggle() {
+        assertFalse(
+            catalogueFetchAllowed(unmetered = false, dataSaver = true, onMobileAllowed = true),
+        )
+    }
+
+    // the ceiling is the whole catalogue, not a guessed-at fraction of it.
+    @Test
+    fun the_ceiling_is_the_whole_catalogue() {
+        assertTrue(TOP_UP_CEILING >= 62_000)
+    }
+
+    // a real full fetch landed at 58,938 on a device: the ban and unplayable
+    // streams take ~3,300 off what upstream reports. measuring "is it whole"
+    // against the upstream ceiling left the pill saying "+" forever on a
+    // catalogue that was already complete.
+    @Test
+    fun a_complete_catalogue_is_below_the_upstream_ceiling() {
+        assertTrue(CATALOGUE_WHOLE < TOP_UP_CEILING)
+        assertTrue("a real full fetch of 58938 must count as whole", 58_938 >= CATALOGUE_WHOLE)
     }
 
     @Test
@@ -58,8 +93,8 @@ class TopUpTest {
         assertTrue(asked, asked.contains("hidebroken=true"))
     }
 
-    // the ban is a product requirement on every ingest path, and the top-up is
-    // the one path that pulls stations nobody asked for by name.
+    // the ban is a product requirement on every ingest path, and the fallback
+    // walk is one that pulls stations nobody asked for by name.
     @Test
     fun a_page_still_drops_banned_countries() {
         server.enqueue(
@@ -75,52 +110,5 @@ class TopUpTest {
     fun a_failed_page_returns_nothing_rather_than_throwing() {
         server.enqueue(MockResponse().setResponseCode(500))
         assertTrue(catalog.fetchPage(0, 10).isEmpty())
-    }
-
-    // the ceiling exists to stop, not to cap the world at a third of it.
-    @Test
-    fun the_ceiling_is_the_whole_catalogue() {
-        assertTrue(TOP_UP_CEILING >= 62_000)
-    }
-
-    // one page per opportunity took hundreds of launches to fill; a run keeps
-    // going while the moment is still free, and stops the instant it is not.
-    // the offset walks the api's own ordering, not our cache size. the cache also
-    // holds stations pulled by country, which are not in clickcount order — using
-    // its size as the offset skips into a band we already hold and the run stalls
-    // there forever. measured: at offset 1755 the page was ~95% already-held.
-    @Test
-    fun the_offset_follows_the_api_ordering_not_the_cache_size() {
-        assertEquals(0, topUpOffset(pagesDone = 0))
-        assertEquals(200, topUpOffset(pagesDone = 1))
-        assertEquals(1000, topUpOffset(pagesDone = 5))
-    }
-
-    // a page can be entirely stations we already hold — the api's ordering and
-    // ours diverge. that is a reason to walk on, not to stop: stopping there is
-    // what pinned a real device at 1,755 stations out of 62,250.
-    @Test
-    fun a_page_that_adds_nothing_does_not_end_the_run() {
-        var calls = 0
-        val pages = topUpRun(held = 1000, ceiling = 62_000, allowed = { calls++ < 4 })
-        assertEquals(4, pages)
-    }
-
-    @Test
-    fun a_run_stops_as_soon_as_a_condition_fails() {
-        var calls = 0
-        val pages = topUpRun(held = 1000, ceiling = 62_000, allowed = { calls++ < 3 })
-        assertEquals(3, pages)
-    }
-
-    @Test
-    fun a_run_stops_at_the_ceiling_even_while_conditions_hold() {
-        val pages = topUpRun(held = 61_900, ceiling = 62_000, allowed = { true })
-        assertEquals(1, pages)
-    }
-
-    @Test
-    fun a_run_that_may_not_start_fetches_nothing() {
-        assertEquals(0, topUpRun(held = 1000, ceiling = 62_000, allowed = { false }))
     }
 }

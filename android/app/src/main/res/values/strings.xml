@@ -77,6 +77,8 @@
     <string name="placeholder_library">favourites and history land here</string>
     <string name="placeholder_settings">preferences and themes land here</string>
     <string name="settings_open_sync">OPEN SYNC</string>
+    <string name="settings_fill_on_mobile">FILL ON MOBILE DATA</string>
+    <string name="settings_fill_on_mobile_hint">the full catalogue is one 4 mb download</string>
     <string name="catalog_search_hint">search stations</string>
     <string name="catalog_filters">+ FILTERS</string>
     <string name="catalog_clear_all">CLEAR ALL</string>

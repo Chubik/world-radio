@@ -1,10 +1,17 @@
 package net.vchub.r4dio
 
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlin.random.Random
+
+/**
+ * our own catalogue, not radio-browser's. see [Catalog.fetchCatalogue] for why
+ * it exists at all.
+ */
+const val CATALOG_URL = "https://r4dio.net/catalog"
 
 private val EXCLUDED_COUNTRYCODES = setOf("RU", "BY")
 private val EXCLUDED_NAME_SUBSTRINGS = listOf(
@@ -49,39 +56,45 @@ fun countriesToPull(filter: Set<String>, alreadyPulled: Set<String>): Set<String
 // ceiling is the whole catalogue, not a guessed-at fraction of it.
 const val TOP_UP_CEILING = 62_000
 
-/** one page per fetch: small enough to be unnoticeable, big enough to matter. */
+/**
+ * above this many stations the catalogue counts as whole, and the pill stops
+ * saying more is coming.
+ *
+ * deliberately below [TOP_UP_CEILING]: that number is what upstream holds
+ * *before* our filtering, and the ban plus unplayable streams take ~3,300 of
+ * them off. measured on the live api on 2026-08-13, a full fetch lands at
+ * 58,938 — so comparing against the upstream figure would leave "+" showing
+ * forever on a catalogue that is already complete.
+ */
+const val CATALOGUE_WHOLE = 50_000
+
+/**
+ * page size for [Catalog.fetchPage], which is now only the fallback path used
+ * when our own catalogue server cannot be reached.
+ */
 const val TOP_UP_PAGE = 200
 
 /**
- * whether now is a moment the top-up costs the user nothing. both conditions are
- * required and are read at the moment of the attempt, never cached: "without load"
- * means waiting for wi-fi AND a charger, not taking smaller bites at a bad time.
+ * whether now is a moment to fetch the catalogue. read at the moment of the
+ * attempt, never cached: a phone on wi-fi a minute ago may be on mobile data in
+ * a pocket now.
+ *
+ * the whole catalogue is one 4.3 mb request from our own server, so there is no
+ * longer any reason to wait for a charger — that gate existed only because
+ * walking radio-browser cost 69 mb.
+ *
+ * [dataSaver] outranks everything. when the user has asked android to hold back
+ * background data, an app does not get to decide its own download is worth it.
  */
-fun topUpAllowed(unmetered: Boolean, charging: Boolean, held: Int, ceiling: Int): Boolean =
-    unmetered && charging && held < ceiling
-
-/**
- * where the next page starts. the api is walked in its own clickcount order, so
- * the offset counts pages we have asked for — never the cache size. the cache
- * also holds whole countries pulled by filter, which are not in that order, so
- * using its size skips into a band we already hold and the run stalls there:
- * measured on a real device, that pinned the catalogue at 1,755 of 62,250.
- */
-fun topUpOffset(pagesDone: Int, limit: Int = TOP_UP_PAGE): Int = pagesDone * limit
-
-/**
- * how many pages a single top-up opportunity should fetch. pure so the stopping
- * rules can be tested; the caller does the fetching and re-reads the conditions
- * through [allowed] before each page, never caching them.
- */
-fun topUpRun(held: Int, ceiling: Int, limit: Int = TOP_UP_PAGE, allowed: () -> Boolean): Int {
-    var have = held
-    var pages = 0
-    while (have < ceiling && allowed()) {
-        have += limit
-        pages++
+fun catalogueFetchAllowed(
+    unmetered: Boolean,
+    dataSaver: Boolean,
+    onMobileAllowed: Boolean,
+): Boolean {
+    if (unmetered) {
+        return true
     }
-    return pages
+    return !dataSaver && onMobileAllowed
 }
 
 /**
@@ -252,6 +265,39 @@ class Catalog(
                 val body = resp.body?.string().orEmpty()
                 if (!resp.isSuccessful || body.isBlank()) return emptyList()
                 json.decodeFromString<List<ApiStation>>(body)
+                    .map { it.toStation() }
+                    .filter { allowedStation(it, blocked = blocked) }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * the whole catalogue in one request, from our own server rather than
+     * radio-browser. it exists because upstream sends 37 fields per station and
+     * compresses nothing: the same ~59k stations are 69 mb from there and 4.3 mb
+     * from here, which is what makes fetching on mobile data reasonable at all.
+     *
+     * the payload is already in the on-disk [FavStation] shape, so it needs no
+     * transcoding — but the ban is still applied here. the server filters too;
+     * this side does not get to assume that, because a stale or wrong server
+     * must never be able to put a banned station in front of a listener.
+     *
+     * an empty result means failure, and every caller must treat it that way:
+     * writing it to the cache would erase a good catalogue.
+     */
+    fun fetchCatalogue(
+        url: String = CATALOG_URL,
+        blocked: Set<String> = emptySet(),
+    ): List<Station> {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "world-radio-android/1.0")
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || body.isBlank()) return emptyList()
+                json.decodeFromString(ListSerializer(FavStation.serializer()), body)
                     .map { it.toStation() }
                     .filter { allowedStation(it, blocked = blocked) }
             }
