@@ -192,6 +192,25 @@ class FavStore(context: Context) {
         }
     }
 
+    val theme: Flow<String> = store.data.map { it[keyTheme].orEmpty() }
+
+    suspend fun currentTheme(): String = store.data.first()[keyTheme].orEmpty()
+
+    /**
+     * stamped through [SyncProfile.withTheme] so the "a same-value save must not
+     * move the stamp" rule lives in one place, exactly as setScope does.
+     */
+    suspend fun setTheme(slug: String, now: Long = System.currentTimeMillis() / 1000) {
+        store.edit { prefs ->
+            val stamped = SyncProfile(
+                theme = prefs[keyTheme].orEmpty(),
+                themeAt = prefs[keyThemeAt] ?: 0L,
+            ).withTheme(slug, now)
+            prefs[keyTheme] = stamped.theme
+            prefs[keyThemeAt] = stamped.themeAt
+        }
+    }
+
     suspend fun profile(): SyncProfile {
         val prefs = store.data.first()
         return SyncProfile(
