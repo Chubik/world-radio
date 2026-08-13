@@ -11,6 +11,7 @@ import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import net.vchub.r4dio.CMD_SHUFFLE
 import net.vchub.r4dio.PlaybackService
 
 /** splits the packed artist string ("SA · MP3 · 128k") into country and codec. */
@@ -26,6 +27,9 @@ internal fun parseArtist(artist: String?): Pair<String?, String?> {
 interface ControllerHandle {
     val isPlaying: Boolean
     val sessionExtras: Bundle
+
+    /** 0 means the session holds nothing yet — a cold start, not a reconnect. */
+    val mediaItemCount: Int
     fun sendCustomCommand(command: String)
     fun release()
 }
@@ -62,6 +66,13 @@ class PlayerConnection(
             controller = handle
             _state.value = uiStateFromExtras(handle.sessionExtras, _state.value)
                 .copy(isPlaying = handle.isPlaying)
+            // the radio plays the moment it opens, without being looked at —
+            // that is the product. an empty session means a cold start, so it
+            // shuffles itself; a loaded one is a reconnect and must be left
+            // alone, or returning from the background would change station.
+            if (handle.mediaItemCount == 0) {
+                handle.sendCustomCommand(CMD_SHUFFLE)
+            }
         }
     }
 
@@ -123,6 +134,7 @@ fun mediaControllerConnector(
         onReady(object : ControllerHandle {
             override val isPlaying get() = c.isPlaying
             override val sessionExtras get() = c.sessionExtras
+            override val mediaItemCount get() = c.mediaItemCount
             override fun sendCustomCommand(command: String) {
                 c.sendCustomCommand(SessionCommand(command, Bundle.EMPTY), Bundle.EMPTY)
             }
