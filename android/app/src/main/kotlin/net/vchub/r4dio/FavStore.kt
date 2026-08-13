@@ -97,6 +97,8 @@ class FavStore(context: Context) {
 
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
+    val blockedUuids: Flow<Set<String>> = store.data.map { it[keyBlocked] ?: emptySet() }
+
     val scope: Flow<Scope> = store.data.map {
         when (it[keyScope]) {
             Scope.FAVS.name -> Scope.FAVS
@@ -122,6 +124,21 @@ class FavStore(context: Context) {
                 false -> cached.filter { it.uuid != station.uuid }
             }
             prefs[keyCached] = json.encodeToString(ListSerializer(FavStation.serializer()), nextCached)
+        }
+    }
+
+    /**
+     * the local half of blocking. until now a uuid could only enter this set from
+     * a sync merge or a backup restore, which meant a station could be blocked on
+     * the desktop but not on the phone that is playing it.
+     *
+     * deliberately does not touch the favourite set: blocked outranks a star, and
+     * allowedStation already resolves that — unstarring here would lose a choice
+     * the user made separately.
+     */
+    suspend fun toggleBlocked(uuid: String) {
+        store.edit { prefs ->
+            prefs[keyBlocked] = FavLogic.toggle(prefs[keyBlocked] ?: emptySet(), uuid)
         }
     }
 
