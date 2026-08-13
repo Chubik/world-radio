@@ -302,6 +302,12 @@ class PlaybackService : MediaSessionService() {
                     // false read from before this attempt resolved.
                     catalogAttempted = true
                     startFrom(cached, userExcluded, blocked + hidden, included)
+                    // the held catalogue predates genres; drop the stamp so the
+                    // existing staleness path refetches it once, now.
+                    if (catalogCache.needsGenreBackfill(cached)) {
+                        Log.i("r4dio", "catalogue has no genres, refetching once")
+                        runBlocking { favStore.setCatalogSyncedAt(0) }
+                    }
                     refreshIfStale(userExcluded, blocked)
                 }
             }

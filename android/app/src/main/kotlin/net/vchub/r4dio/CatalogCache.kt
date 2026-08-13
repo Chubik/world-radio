@@ -75,6 +75,13 @@ class CatalogCache(private val dir: File) {
     /** returns true only when the new content is on disk under [CACHE_FILE]. */
     fun write(stations: List<Station>): Boolean = synchronized(lock) { writeLocked(stations) }
 
+    /**
+     * true when the held catalogue predates genres entirely. one-off: as soon as
+     * a refetch lands, at least one station carries tags and this stops firing.
+     */
+    fun needsGenreBackfill(stations: List<Station>): Boolean =
+        stations.isNotEmpty() && stations.none { it.tags.isNotBlank() }
+
     private fun writeLocked(stations: List<Station>): Boolean {
         var tmp: File? = null
         return runCatching {
