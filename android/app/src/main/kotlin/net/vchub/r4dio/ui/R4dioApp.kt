@@ -53,7 +53,6 @@ fun showsMiniPlayer(tab: Tab, stationName: String): Boolean =
 @Composable
 fun R4dioApp(
     state: UiState,
-    themeSlug: String,
     send: (String) -> Unit,
     onOpenSync: () -> Unit,
     keepAwake: Boolean = false,
@@ -65,40 +64,38 @@ fun R4dioApp(
     onClearFilter: () -> Unit = { send(CMD_CLEAR_FILTER) },
     modifier: Modifier = Modifier,
 ) {
-    R4dioTheme(themeSlug) {
-        val c = R4dioTokens.colors
-        var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .background(Color(c.bg)),
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                when (tab) {
-                    Tab.HOME -> HomeScreen(
-                        state = state,
-                        onShuffle = { send(CMD_SHUFFLE) },
-                        onToggle = { send(CMD_TOGGLE) },
-                        onStar = { send(CMD_STAR) },
-                        onScope = { send(CMD_SCOPE) },
-                        onStop = { send(CMD_STOP) },
-                        onSync = onOpenSync,
-                        onClearFilter = onClearFilter,
-                        keepAwake = keepAwake,
-                        overlayOn = overlayOn,
-                        onKeepAwake = onKeepAwake,
-                        onOverlay = onOverlay,
-                    )
-                    Tab.CATALOG -> Placeholder("CATALOG", "search and filters land here")
-                    Tab.LIBRARY -> Placeholder("LIBRARY", "favourites and history land here")
-                    Tab.SETTINGS -> SettingsPlaceholder(onOpenSync)
-                }
+    val c = R4dioTokens.colors
+    var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(c.bg)),
+    ) {
+        Box(modifier = Modifier.weight(1f)) {
+            when (tab) {
+                Tab.HOME -> HomeScreen(
+                    state = state,
+                    onShuffle = { send(CMD_SHUFFLE) },
+                    onToggle = { send(CMD_TOGGLE) },
+                    onStar = { send(CMD_STAR) },
+                    onScope = { send(CMD_SCOPE) },
+                    onStop = { send(CMD_STOP) },
+                    onSync = onOpenSync,
+                    onClearFilter = onClearFilter,
+                    keepAwake = keepAwake,
+                    overlayOn = overlayOn,
+                    onKeepAwake = onKeepAwake,
+                    onOverlay = onOverlay,
+                )
+                Tab.CATALOG -> Placeholder("CATALOG", "search and filters land here")
+                Tab.LIBRARY -> Placeholder("LIBRARY", "favourites and history land here")
+                Tab.SETTINGS -> SettingsPlaceholder(onOpenSync)
             }
-            if (showsMiniPlayer(tab, state.stationName)) {
-                MiniPlayer(state)
-            }
-            TabBar(tab) { tab = it }
         }
+        if (showsMiniPlayer(tab, state.stationName)) {
+            MiniPlayer(state)
+        }
+        TabBar(tab) { tab = it }
     }
 }
 

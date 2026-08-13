@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -294,12 +295,14 @@ private fun PillRow(
             text = keepAwakeLabel(keepAwake),
             on = keepAwake,
             onClick = onKeepAwake,
+            description = stringResource(R.string.home_awake_desc),
             modifier = Modifier.padding(start = 6.dp),
         )
         Pill(
             text = if (overlayOn) "◧ SHOWS" else "◧ HIDDEN",
             on = overlayOn,
             onClick = onOverlay,
+            description = stringResource(R.string.home_overlay_desc),
             modifier = Modifier.padding(start = 6.dp),
         )
     }

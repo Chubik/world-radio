@@ -8,6 +8,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -39,6 +41,9 @@ fun Pill(
     on: Boolean,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    // a pill's label is a glyph plus a word ("☾ SLEEPS"); screen readers need
+    // the sentence the xml carried in contentDescription, not the glyph.
+    description: String? = null,
 ) {
     val c = R4dioTokens.colors
     val fg = if (on) Color(c.accent) else Color(c.dim)
@@ -57,6 +62,7 @@ fun Pill(
             .background(fill, shape)
             .border(1.dp, stroke, shape)
             .let { if (onClick != null) it.clickable { onClick() } else it }
+            .let { m -> description?.let { d -> m.semantics { contentDescription = d } } ?: m }
             .padding(horizontal = 9.dp, vertical = 3.dp),
     )
 }
