@@ -2,6 +2,8 @@ package net.vchub.r4dio.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +65,9 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(c.bg))
+            // the four buttons and the sync bar are the eyes-free controls and
+            // must never scroll away; the stage above them takes what is left and
+            // scrolls internally, so a short screen loses nothing off the panel.
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
     ) {
         Stage(
@@ -99,15 +104,25 @@ private fun Stage(
             .background(Color(c.panel()), shape)
             .border(1.dp, Color(c.rule()), shape)
             .clickable { onShuffle() }
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 22.dp, vertical = 20.dp),
     ) {
         Kicker(state.isPlaying)
         StationName(state.stationName)
         ContextLine(state)
         PillRow(state, onClearFilter, keepAwake, overlayOn, onKeepAwake, onOverlay)
-        Hero(state, modifier = Modifier.weight(1f))
+        // the hero needs room to be the eyes-free target it exists to be. in
+        // landscape the stage is only a couple of hundred dp tall, and a hero
+        // with weight there pushed the pills and the station line out of the
+        // panel entirely — the old landscape layout dropped it for the same
+        // reason. the whole stage still shuffles on tap either way.
+        Hero(state, modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT))
     }
 }
+
+/** the ring plus its two lines. fixed rather than weighted so the stage can
+ *  scroll: a weighted child inside a scrolling column has no height to take. */
+private val HERO_HEIGHT = 300.dp
 
 @Composable
 private fun Kicker(isPlaying: Boolean) {
