@@ -23,6 +23,19 @@ val BITRATE_STEPS = listOf(0, 64, 128, 192, 256, 320)
  */
 val OFFERED_CODECS = setOf("MP3", "AAC", "AAC+", "OGG", "FLAC")
 
+/**
+ * how many country rows the sheet offers. the catalogue carries 240 country
+ * codes and 125 of them hold fewer than 20 stations; listing them all buries
+ * the genre and codec groups under a scroll nobody finishes. the commonest are
+ * what a person actually reaches for, and search covers the rest.
+ */
+const val COUNTRY_ROW_CAP = 30
+
+/** the country rows the sheet shows: the commonest first, capped, with empties
+ *  dropped so no dead row appears. */
+fun offeredCountryRows(facets: List<Pair<String, Int>>): List<Pair<String, Int>> =
+    facets.filter { it.second > 0 }.take(COUNTRY_ROW_CAP)
+
 /** the codec rows the sheet shows, keeping the facet order (commonest first)
  *  and dropping anything the catalogue has none of. */
 fun offeredCodecRows(facets: List<Pair<String, Int>>): List<Pair<String, Int>> =

@@ -50,6 +50,7 @@ import net.vchub.r4dio.codecFacets
 import net.vchub.r4dio.countryFacets
 import net.vchub.r4dio.genreFacets
 import net.vchub.r4dio.offeredCodecRows
+import net.vchub.r4dio.offeredCountryRows
 import net.vchub.r4dio.offeredGenreRows
 import net.vchub.r4dio.searchCatalog
 import net.vchub.r4dio.withoutChip
@@ -133,9 +134,9 @@ fun CatalogScreen(
         val facets by remember(stations) {
             derivedStateOf {
                 FacetSets(
-                    countries = countryFacets(stations)
-                        .filter { it.first.isNotBlank() }
-                        .map { FacetRow(it.first, it.first, it.second) },
+                    countries = offeredCountryRows(
+                        countryFacets(stations).filter { it.first.isNotBlank() },
+                    ).map { FacetRow(it.first, it.first, it.second) },
                     genres = offeredGenreRows(genreFacets(stations))
                         .map { FacetRow(it.first.uppercase(), it.first, it.second) },
                     codecs = offeredCodecRows(codecFacets(stations))

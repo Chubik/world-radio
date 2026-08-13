@@ -103,4 +103,27 @@ class CatalogFacetsTest {
     fun any_is_the_first_bitrate_step() {
         assertEquals(0, BITRATE_STEPS.first())
     }
+
+    // the catalogue carries 240 country codes, 125 of them with fewer than 20
+    // stations. an uncapped list buries the genre and codec groups under a
+    // scroll nobody will finish, so the sheet shows the commonest and stops.
+    @Test
+    fun the_country_rows_are_capped() {
+        val many = (1..300).map { "C$it" to (301 - it) }
+        val rows = offeredCountryRows(many)
+        assertEquals(COUNTRY_ROW_CAP, rows.size)
+        assertEquals("C1", rows.first().first)
+    }
+
+    @Test
+    fun a_short_country_list_is_untouched() {
+        val few = listOf("UA" to 352, "PL" to 120)
+        assertEquals(few, offeredCountryRows(few))
+    }
+
+    // a country with nothing in it would be a row that can only disappoint.
+    @Test
+    fun empty_countries_are_dropped() {
+        assertEquals(listOf("UA" to 352), offeredCountryRows(listOf("UA" to 352, "ZZ" to 0)))
+    }
 }
