@@ -47,6 +47,9 @@ const val EXTRA_FILTER_COUNTRIES = "net.vchub.r4dio.EXTRA_FILTER_COUNTRIES"
 const val EXTRA_CATALOG_SIZE = "net.vchub.r4dio.EXTRA_CATALOG_SIZE"
 const val EXTRA_CATALOG_GROWING = "net.vchub.r4dio.EXTRA_CATALOG_GROWING"
 
+/** true only while a catalogue download is actually in flight. */
+const val EXTRA_CATALOG_FETCHING = "net.vchub.r4dio.EXTRA_CATALOG_FETCHING"
+
 private class ShufflePlayer(
     delegate: androidx.media3.common.Player,
     private val onShuffle: () -> Unit,
@@ -182,9 +185,12 @@ class PlaybackService : MediaSessionService() {
             putBoolean(EXTRA_CATALOG_LOADED, catalogLoaded)
             putStringArray(EXTRA_FILTER_COUNTRIES, included.sorted().toTypedArray())
             putInt(EXTRA_CATALOG_SIZE, stations.size)
-            // "+" means there is more to come, not that a fetch is running right
-            // now: the top-up waits for wi-fi and a charger, which may be hours.
-            putBoolean(EXTRA_CATALOG_GROWING, stations.isNotEmpty() && stations.size < TOP_UP_CEILING)
+            // "+" means "this is not the whole catalogue yet", not "a fetch is
+            // running" — that is its own flag, published by publishFetching.
+            // measured against CATALOGUE_WHOLE rather than the upstream ceiling:
+            // our filtering means the full catalogue never reaches that number,
+            // so the old comparison left "+" showing on a complete catalogue.
+            putBoolean(EXTRA_CATALOG_GROWING, stations.isNotEmpty() && stations.size < CATALOGUE_WHOLE)
         }
         session?.setSessionExtras(extras)
     }
@@ -452,46 +458,66 @@ class PlaybackService : MediaSessionService() {
         }
         thread {
             try {
-                val blocked = runBlocking { favStore.currentBlocked() }
-                var totalAdded = 0
-                var pages = 0
-                var unmetered = false
-                var charging = false
-                // the cache, not `stations`: this can run before loadStations() has
-                // populated the field, and an offset of 0 would re-fetch page one.
-                var held = catalogCache.read().size
-                while (true) {
-                    unmetered = conditions.unmetered()
-                    charging = conditions.charging()
-                    if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
-                        break
-                    }
-                    val offset = topUpOffset(pages)
-                    val page = catalog.fetchPage(offset = offset, limit = TOP_UP_PAGE, blocked = blocked)
-                    // an empty page is the end of the api's list; a page of
-                    // stations we already hold is not — the api's ordering and
-                    // ours diverge, so walking on is what fills the catalogue.
-                    if (page.isEmpty()) {
-                        break
-                    }
-                    val added = catalogCache.merge(page)
-                    totalAdded += added
-                    pages++
-                    // counted, not re-read: read() reparses the whole ~10 mb file, and a
-                    // 300-page run would do that 300 times for a number we already have.
-                    held += added
-                }
-                if (totalAdded == 0) {
-                    Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
+                val held = catalogCache.read().size
+                if (held >= TOP_UP_CEILING) {
                     return@thread
                 }
-                stations = catalogCache.read()
-                Log.i("r4dio", "topped up $totalAdded stations over $pages pages, holding ${stations.size}")
+                val allowed = catalogueFetchAllowed(
+                    unmetered = conditions.unmetered(),
+                    dataSaver = conditions.dataSaverOn(),
+                    onMobileAllowed = runBlocking { favStore.currentFillOnMobile() },
+                )
+                if (!allowed) {
+                    Log.i("r4dio", "catalogue fetch skipped: held=$held")
+                    return@thread
+                }
+                val blocked = runBlocking { favStore.currentBlocked() }
+                publishFetching(true)
+                // one request for the whole catalogue, from our own server. it is
+                // 4.3 mb where walking radio-browser for the same stations was 69 mb
+                // over 312 requests, which is why this no longer waits for wi-fi.
+                val fetched = catalog.fetchCatalogue(blocked = blocked)
+                // empty means the download failed. writing it would erase a good
+                // catalogue, so the old one stays and the next attempt retries.
+                if (fetched.isEmpty()) {
+                    Log.w("r4dio", "catalogue fetch returned nothing, keeping the ${held} held")
+                    return@thread
+                }
+                // never trade a bigger catalogue for a smaller one: a partial
+                // response should look like a failure, not like stations vanishing.
+                if (fetched.size < held) {
+                    Log.w("r4dio", "catalogue fetch returned ${fetched.size} against $held held, ignoring")
+                    return@thread
+                }
+                if (!catalogCache.write(fetched)) {
+                    Log.w("r4dio", "catalogue fetched but not stored, keeping it in memory only")
+                    stations = fetched
+                    return@thread
+                }
+                stations = fetched
+                runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+                Log.i("r4dio", "catalogue fetched: ${fetched.size} stations in one request")
                 scope.launch { refreshCustomLayout() }
             } finally {
+                publishFetching(false)
                 topUpInFlight.set(false)
             }
         }
+    }
+
+    /**
+     * publishes only the in-flight flag, without the ~59k-station count and the
+     * notification rebuild [refreshCustomLayout] does. that one is far too
+     * expensive to run for a two-state boolean.
+     *
+     * every other field is left out of the bundle on purpose: uiStateFromExtras
+     * folds onto the previous state, so an absent key keeps what was there.
+     */
+    private fun publishFetching(fetching: Boolean) {
+        val extras = android.os.Bundle().apply {
+            putBoolean(EXTRA_CATALOG_FETCHING, fetching)
+        }
+        main.post { session?.setSessionExtras(extras) }
     }
 
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000

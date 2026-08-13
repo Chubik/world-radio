@@ -276,7 +276,11 @@ private fun PillRow(
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val count = catalogueLabel(state.catalogueSize, state.catalogueGrowing)
+        val count = catalogueLabel(
+            state.catalogueSize,
+            state.catalogueGrowing,
+            state.catalogueFetching,
+        )
         if (count.isNotEmpty()) {
             Text(
                 text = count,

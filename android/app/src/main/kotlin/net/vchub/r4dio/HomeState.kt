@@ -54,18 +54,33 @@ fun filterPillLabel(countries: List<String>, scope: String): String? {
  * how many stations the phone holds. the catalogue used to be either "the top-1000"
  * or nothing; it now grows in the background and when a filter pulls a country in,
  * so a silent partial catalogue would leave the user guessing what shuffle can even
- * reach. a trailing "+" says more is still coming.
+ * reach.
+ *
+ * [fetching] outranks [growing] because it is the sharper fact: "+" only says more
+ * exists somewhere, while the download is happening right now and is over in
+ * seconds. deliberately not a percentage — the catalogue arrives as one response,
+ * so any number counting up to it would be invented.
  *
  * grouped with a space rather than a comma or a dot — both read as a decimal point
  * somewhere, and this is read at a glance.
  */
-fun catalogueLabel(held: Int, growing: Boolean): String {
-    if (held <= 0) return ""
+fun catalogueLabel(held: Int, growing: Boolean, fetching: Boolean = false): String {
+    // the first fetch on a fresh install has nothing to count yet, and silence
+    // there reads as a broken app rather than a working one.
+    if (held <= 0) {
+        return when (fetching) {
+            true -> "LOADING STATIONS…"
+            false -> ""
+        }
+    }
     val grouped = held.toString()
         .reversed()
         .chunked(3)
         .joinToString(" ")
         .reversed()
+    if (fetching) {
+        return "$grouped STATIONS · LOADING…"
+    }
     return when (growing) {
         true -> "$grouped STATIONS +"
         false -> "$grouped STATIONS"
