@@ -257,6 +257,30 @@ class CatalogCacheTest {
         assertEquals(201, cache.read().size)
     }
 
+    // every station cached before genres existed has empty tags. one forced
+    // refetch fills them; without it the genre filter is empty for a day.
+    @Test
+    fun a_catalogue_with_no_genres_at_all_wants_a_backfill() {
+        val cache = CatalogCache(tmp.root)
+        assertTrue(cache.needsGenreBackfill(listOf(station("a"), station("b"))))
+    }
+
+    // one station with tags is enough to prove the catalogue came from a build
+    // that stores them — some stations genuinely have none.
+    @Test
+    fun a_catalogue_with_any_genre_does_not() {
+        val cache = CatalogCache(tmp.root)
+        val tagged = Station("c", "N", "u", "UA", "MP3", 128, "jazz")
+        assertFalse(cache.needsGenreBackfill(listOf(station("a"), tagged)))
+    }
+
+    // an empty catalogue is a cold start, not a stale one — the ordinary fetch
+    // path handles it, and claiming a backfill would double-fetch.
+    @Test
+    fun an_empty_catalogue_does_not_want_a_backfill() {
+        assertFalse(CatalogCache(tmp.root).needsGenreBackfill(emptyList()))
+    }
+
     @Test
     fun leftover_backup_from_an_older_version_is_not_resurrected() {
         // older builds moved the cache aside to catalog.json.bak. such a file is
