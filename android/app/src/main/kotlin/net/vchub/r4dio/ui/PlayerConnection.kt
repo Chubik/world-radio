@@ -30,7 +30,7 @@ interface ControllerHandle {
 
     /** 0 means the session holds nothing yet — a cold start, not a reconnect. */
     val mediaItemCount: Int
-    fun sendCustomCommand(command: String)
+    fun sendCustomCommand(command: String, args: Bundle = Bundle.EMPTY)
     fun release()
 }
 
@@ -84,8 +84,8 @@ class PlayerConnection(
 
     /** dropped when nothing is connected yet: a tab can be tapped before the
      *  controller resolves, and that is not a crash. */
-    fun send(command: String) {
-        controller?.sendCustomCommand(command)
+    fun send(command: String, args: Bundle = Bundle.EMPTY) {
+        controller?.sendCustomCommand(command, args)
     }
 
     internal fun onExtras(extras: Bundle) {
@@ -135,8 +135,8 @@ fun mediaControllerConnector(
             override val isPlaying get() = c.isPlaying
             override val sessionExtras get() = c.sessionExtras
             override val mediaItemCount get() = c.mediaItemCount
-            override fun sendCustomCommand(command: String) {
-                c.sendCustomCommand(SessionCommand(command, Bundle.EMPTY), Bundle.EMPTY)
+            override fun sendCustomCommand(command: String, args: Bundle) {
+                c.sendCustomCommand(SessionCommand(command, Bundle.EMPTY), args)
             }
             override fun release() = c.release()
         })

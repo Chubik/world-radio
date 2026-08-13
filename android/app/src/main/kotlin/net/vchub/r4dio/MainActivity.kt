@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import net.vchub.r4dio.ui.DEFAULT_THEME
 import net.vchub.r4dio.ui.MonoFamily
 import net.vchub.r4dio.ui.PlayerConnection
@@ -51,6 +53,12 @@ class MainActivity : ComponentActivity() {
     }
     private val favStore by lazy { FavStore(this) }
 
+    // READ ONLY. write/merge from here would race the service's read-modify-write
+    // and lose whatever a background top-up had just merged. the service owns
+    // every write; this side only ever calls read().
+    private val catalogCache by lazy { CatalogCache(filesDir) }
+    private var catalog by mutableStateOf(net.vchub.r4dio.ui.CatalogState())
+
     // read back from the system on every resume rather than remembered: the user
     // may have granted or revoked it in settings while we were away, and a pill
     // that disagrees with the permission is worse than no pill.
@@ -67,6 +75,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by connection.state.collectAsStateWithLifecycle()
             val synced by favStore.theme.collectAsStateWithLifecycle(initialValue = "")
+            val favourites by favStore.favUuids.collectAsStateWithLifecycle(initialValue = emptySet())
+            val blocked by favStore.blockedUuids.collectAsStateWithLifecycle(initialValue = emptySet())
             val slug = resolveTheme(synced, DEFAULT_THEME)
             var clearing by remember { mutableStateOf(false) }
             R4dioTheme(slug) {
@@ -79,6 +89,13 @@ class MainActivity : ComponentActivity() {
                     onKeepAwake = ::toggleKeepAwake,
                     onOverlay = ::askOverlay,
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
+                    catalog = catalog,
+                    favourites = favourites,
+                    blocked = blocked,
+                    onPlay = ::playStation,
+                    onStar = { station -> lifecycleScope.launch { favStore.toggleFav(station) } },
+                    onBlock = { station -> lifecycleScope.launch { favStore.toggleBlocked(station.uuid) } },
+                    onCatalogShown = ::loadCatalog,
                     // the compose tree owns the whole window, so the inset the xml
                     // root used to take with fitsSystemWindows is applied here.
                     modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars),
@@ -99,6 +116,25 @@ class MainActivity : ComponentActivity() {
             true -> requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             false -> connection.connect()
         }
+    }
+
+    /**
+     * the cache is 10mb and holds ~59k stations, so the read is never instant —
+     * it goes to IO and the screen shows its loading state until it lands. read
+     * only: see [catalogCache].
+     */
+    private fun loadCatalog() {
+        lifecycleScope.launch {
+            val stations = withContext(Dispatchers.IO) { catalogCache.read() }
+            catalog = net.vchub.r4dio.ui.CatalogState(stations = stations, loading = false)
+        }
+    }
+
+    /** the service owns the catalogue it plays from, so the tap sends a uuid
+     *  rather than a url — the station the screen listed may have been replaced
+     *  by a refresh, and the service resolves that. */
+    private fun playStation(station: Station) {
+        connection.send(CMD_PLAY_UUID, Bundle().apply { putString(ARG_UUID, station.uuid) })
     }
 
     private fun toggleKeepAwake() {

@@ -34,6 +34,8 @@ const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 const val CMD_CLEAR_FILTER = "net.vchub.r4dio.CLEAR_FILTER"
+const val CMD_PLAY_UUID = "net.vchub.r4dio.PLAY_UUID"
+const val ARG_UUID = "uuid"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
@@ -119,6 +121,7 @@ class PlaybackService : MediaSessionService() {
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
     private val syncUiCommand = SessionCommand(CMD_SYNC_UI, android.os.Bundle.EMPTY)
     private val clearFilterCommand = SessionCommand(CMD_CLEAR_FILTER, android.os.Bundle.EMPTY)
+    private val playUuidCommand = SessionCommand(CMD_PLAY_UUID, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
@@ -157,8 +160,13 @@ class PlaybackService : MediaSessionService() {
         val blocked = favStore.currentBlocked()
         val included = favStore.currentFilter()
         // count what the user could actually reach, so the screen can tell
-        // "your filters hid everything" apart from "the catalogue is empty"
-        val playable = stations.count { allowedStation(it, hidden, blocked, included) }
+        // "your filters hid everything" apart from "the catalogue is empty".
+        // dispatched: this runs on nearly every user action and the catalogue is
+        // ~59k stations, each checked against 13 banned substrings — on Main that
+        // is a visible stall on every star, scope and shuffle.
+        val playable = withContext(Dispatchers.Default) {
+            stations.count { allowedStation(it, hidden, blocked, included) }
+        }
         // loadStations() (a raw thread) and syncNow() (a Main coroutine) race with no
         // ordering, so playableCount can be 0 just because the catalogue has not
         // landed yet. this flag is attempted-ness, not station presence, never a
@@ -302,6 +310,12 @@ class PlaybackService : MediaSessionService() {
                     // false read from before this attempt resolved.
                     catalogAttempted = true
                     startFrom(cached, userExcluded, blocked + hidden, included)
+                    // the held catalogue predates genres; drop the stamp so the
+                    // existing staleness path refetches it once, now.
+                    if (catalogCache.needsGenreBackfill(cached)) {
+                        Log.i("r4dio", "catalogue has no genres, refetching once")
+                        runBlocking { favStore.setCatalogSyncedAt(0) }
+                    }
                     refreshIfStale(userExcluded, blocked)
                 }
             }
@@ -424,12 +438,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * one page of the world catalogue, but only while the phone is on wi-fi and
+     * pages of the world catalogue, but only while the phone is on wi-fi and
      * charging. this is the baseline for the user who never sets a filter at all:
      * without it they stay on the skewed top-1000 forever.
      *
-     * one page per opportunity rather than a loop to the ceiling — a burst would be
-     * exactly the "load" the user asked to avoid, even on wi-fi.
+     * one opportunity now fetches pages until a condition fails, the ceiling is
+     * reached, or a page adds nothing — unmetered/charging are re-read before
+     * every single page, never cached, so unplugging stops the run within a page.
      */
     private fun topUpCatalogue() {
         if (!topUpInFlight.compareAndSet(false, true)) {
@@ -437,28 +452,41 @@ class PlaybackService : MediaSessionService() {
         }
         thread {
             try {
+                val blocked = runBlocking { favStore.currentBlocked() }
+                var totalAdded = 0
+                var pages = 0
+                var unmetered = false
+                var charging = false
                 // the cache, not `stations`: this can run before loadStations() has
                 // populated the field, and an offset of 0 would re-fetch page one.
-                val held = catalogCache.read().size
-                val unmetered = conditions.unmetered()
-                val charging = conditions.charging()
-                if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                var held = catalogCache.read().size
+                while (true) {
+                    unmetered = conditions.unmetered()
+                    charging = conditions.charging()
+                    if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                        break
+                    }
+                    val offset = topUpOffset(pages)
+                    val page = catalog.fetchPage(offset = offset, limit = TOP_UP_PAGE, blocked = blocked)
+                    // an empty page is the end of the api's list; a page of
+                    // stations we already hold is not — the api's ordering and
+                    // ours diverge, so walking on is what fills the catalogue.
+                    if (page.isEmpty()) {
+                        break
+                    }
+                    val added = catalogCache.merge(page)
+                    totalAdded += added
+                    pages++
+                    // counted, not re-read: read() reparses the whole ~10 mb file, and a
+                    // 300-page run would do that 300 times for a number we already have.
+                    held += added
+                }
+                if (totalAdded == 0) {
                     Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
                     return@thread
                 }
-                val blocked = runBlocking { favStore.currentBlocked() }
-                val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
-                if (page.isEmpty()) {
-                    Log.i("r4dio", "top-up page at offset $held came back empty")
-                    return@thread
-                }
-                val added = catalogCache.merge(page)
-                if (added == 0) {
-                    Log.i("r4dio", "top-up page at offset $held was all stations we hold")
-                    return@thread
-                }
                 stations = catalogCache.read()
-                Log.i("r4dio", "topped up $added stations, holding ${stations.size}")
+                Log.i("r4dio", "topped up $totalAdded stations over $pages pages, holding ${stations.size}")
                 scope.launch { refreshCustomLayout() }
             } finally {
                 topUpInFlight.set(false)
@@ -699,7 +727,12 @@ class PlaybackService : MediaSessionService() {
                 runCatching { withTimeout(3000) { favStore.currentFilter() } }.getOrDefault(emptySet<String>())
             }
             val cat = withReadyCatalog()
-            val picked = pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden, included = included)
+            // shuffle is the gesture the steering-wheel key is bound to, and the
+            // pick filters the whole ~59k catalogue before choosing. on Main that
+            // stalls the tap that asked for it.
+            val picked = withContext(Dispatchers.Default) {
+                pickForScopeDetailed(sc, cat, favs, userExcluded, blocked + hidden, included = included)
+            }
             if (picked.usedFallback) {
                 Log.i("r4dio", "favs scope: no playable favourites, falling back to all stations")
             }
@@ -801,6 +834,7 @@ class PlaybackService : MediaSessionService() {
                     .add(stopCommand)
                     .add(syncUiCommand)
                     .add(clearFilterCommand)
+                    .add(playUuidCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -883,6 +917,26 @@ class PlaybackService : MediaSessionService() {
                 }
                 CMD_SYNC_UI -> {
                     launchSyncActivity()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_PLAY_UUID -> {
+                    val uuid = args.getString(ARG_UUID).orEmpty()
+                    scope.launch {
+                        // a linear scan over the whole catalogue must not run on the
+                        // ui thread — withReadyCatalog() returns synchronously with
+                        // no dispatcher change once the list is warm, which is the
+                        // common case by the time a tap can happen.
+                        val station = withContext(Dispatchers.Default) {
+                            withReadyCatalog().firstOrNull { it.uuid == uuid }
+                        }
+                        when (station) {
+                            // the catalogue the screen listed and the one the
+                            // service holds can differ after a refresh; a tap on
+                            // a station that is gone must do nothing, not crash.
+                            null -> Log.w("r4dio", "play requested for unknown station $uuid")
+                            else -> main.post { playPick(station) }
+                        }
+                    }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }

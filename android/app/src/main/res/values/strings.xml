@@ -74,8 +74,25 @@
     <string name="tab_catalog">CATALOG</string>
     <string name="tab_library">LIBRARY</string>
     <string name="tab_settings">SETTINGS</string>
-    <string name="placeholder_catalog">search and filters land here</string>
     <string name="placeholder_library">favourites and history land here</string>
     <string name="placeholder_settings">preferences and themes land here</string>
     <string name="settings_open_sync">OPEN SYNC</string>
+    <string name="catalog_search_hint">search stations</string>
+    <string name="catalog_filters">+ FILTERS</string>
+    <string name="catalog_clear_all">CLEAR ALL</string>
+    <string name="catalog_empty_title">NO STATIONS MATCH</string>
+    <string name="catalog_empty_clear">CLEAR FILTERS</string>
+    <string name="catalog_loading">BUILDING THE CATALOGUE…</string>
+    <string name="filters_title">FILTERS</string>
+    <string name="filters_reset">RESET</string>
+    <string name="filters_country">COUNTRY</string>
+    <string name="filters_genre">GENRE</string>
+    <string name="filters_codec">CODEC</string>
+    <string name="filters_bitrate">MIN BITRATE</string>
+    <string name="filters_any">ANY</string>
+    <string name="filters_show_n">SHOW %1$d STATIONS</string>
+    <string name="filters_show_none">NOTHING MATCHES</string>
+    <string name="catalog_blocked">BLOCKED</string>
+    <string name="catalog_unblock">UNBLOCK</string>
+    <string name="catalog_bitrate_k">%1$dk</string>
 </resources>
