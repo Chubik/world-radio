@@ -29,4 +29,17 @@ class FavStoreLogicTest {
         val p = FavLogic.pickFav(listOf(st("a"), st("b")), rng = Random(42))!!
         assertTrue(p.uuid == "a" || p.uuid == "b")
     }
+
+    @Test
+    fun blocking_and_unblocking_a_station_toggles_the_set() {
+        assertEquals(setOf("a"), FavLogic.toggle(emptySet(), "a"))
+        assertEquals(emptySet<String>(), FavLogic.toggle(setOf("a"), "a"))
+    }
+
+    @Test
+    fun blocking_does_not_touch_the_favourite_set() {
+        val favs = setOf("a")
+        FavLogic.toggle(emptySet(), "a")
+        assertEquals(setOf("a"), favs)
+    }
 }
