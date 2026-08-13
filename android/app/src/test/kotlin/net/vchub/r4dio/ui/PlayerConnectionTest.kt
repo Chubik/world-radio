@@ -1,6 +1,8 @@
 package net.vchub.r4dio.ui
 
 import android.os.Bundle
+import net.vchub.r4dio.ARG_UUID
+import net.vchub.r4dio.CMD_PLAY_UUID
 import net.vchub.r4dio.CMD_SHUFFLE
 import net.vchub.r4dio.EXTRA_CATALOG_SIZE
 import org.junit.Assert.assertEquals
@@ -16,7 +18,11 @@ private class FakeHandle(
 ) : ControllerHandle {
     var released = false
     val sent = mutableListOf<String>()
-    override fun sendCustomCommand(command: String) { sent.add(command) }
+    val sentArgs = mutableListOf<Bundle>()
+    override fun sendCustomCommand(command: String, args: Bundle) {
+        sent.add(command)
+        sentArgs.add(args)
+    }
     override fun release() { released = true }
 }
 
@@ -138,5 +144,24 @@ class PlayerConnectionTest {
         ready!!(handle)
         conn.release()
         conn.release()
+    }
+
+    @Test
+    fun a_command_can_carry_an_argument() {
+        val handle = FakeHandle(mediaItemCount = 1)
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        conn.send(CMD_PLAY_UUID, Bundle().apply { putString(ARG_UUID, "abc") })
+        assertEquals(listOf(CMD_PLAY_UUID), handle.sent)
+        assertEquals("abc", handle.sentArgs.single().getString(ARG_UUID))
+    }
+
+    // the catalogue can be tapped before the controller resolves; dropping the
+    // tap is correct, crashing is not.
+    @Test
+    fun an_argument_command_before_connect_is_dropped_not_thrown() {
+        PlayerConnection { }.send(CMD_PLAY_UUID, Bundle().apply { putString(ARG_UUID, "abc") })
     }
 }
