@@ -72,7 +72,6 @@ class MainActivity : ComponentActivity() {
             R4dioTheme(slug) {
                 R4dioApp(
                     state = state,
-                    themeSlug = slug,
                     send = { connection.send(it) },
                     onOpenSync = { startActivity(Intent(this, SyncActivity::class.java)) },
                     keepAwake = keepAwake,
