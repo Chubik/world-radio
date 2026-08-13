@@ -1,6 +1,7 @@
 package net.vchub.r4dio.ui
 
 import android.os.Bundle
+import net.vchub.r4dio.CMD_SHUFFLE
 import net.vchub.r4dio.EXTRA_CATALOG_SIZE
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -11,6 +12,7 @@ import org.robolectric.RobolectricTestRunner
 private class FakeHandle(
     override val isPlaying: Boolean = false,
     override val sessionExtras: Bundle = Bundle(),
+    override val mediaItemCount: Int = 0,
 ) : ControllerHandle {
     var released = false
     val sent = mutableListOf<String>()
@@ -60,6 +62,31 @@ class PlayerConnectionTest {
         assertTrue(handle.released)
     }
 
+    // the product is a radio that plays the moment it opens, without being
+    // looked at. an empty player on connect means a cold start, and the app
+    // must shuffle itself rather than sit silent on "— idle —".
+    @Test
+    fun an_empty_player_shuffles_itself_on_connect() {
+        val handle = FakeHandle(mediaItemCount = 0)
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        assertEquals(listOf(CMD_SHUFFLE), handle.sent)
+    }
+
+    // but a controller reconnecting to a session that is already loaded must
+    // not restart it — coming back from the background would change station.
+    @Test
+    fun a_loaded_player_is_left_alone_on_connect() {
+        val handle = FakeHandle(mediaItemCount = 1)
+        var ready: ((ControllerHandle) -> Unit)? = null
+        val conn = PlayerConnection { onReady -> ready = onReady }
+        conn.connect()
+        ready!!(handle)
+        assertTrue("must not disturb a loaded session", handle.sent.isEmpty())
+    }
+
     // a tab can be tapped before the controller resolves; dropping the command
     // is correct, crashing is not.
     @Test
@@ -70,7 +97,9 @@ class PlayerConnectionTest {
 
     @Test
     fun commands_reach_the_controller_once_connected() {
-        val handle = FakeHandle()
+        // loaded, so the connect-time auto-shuffle does not fire and the only
+        // command on the list is the one this test sends.
+        val handle = FakeHandle(mediaItemCount = 1)
         var ready: ((ControllerHandle) -> Unit)? = null
         val conn = PlayerConnection { onReady -> ready = onReady }
         conn.connect()
@@ -83,7 +112,7 @@ class PlayerConnectionTest {
     // from the background with a permanently dead controller.
     @Test
     fun reconnecting_after_release_works() {
-        val second = FakeHandle()
+        val second = FakeHandle(mediaItemCount = 1)
         var ready: ((ControllerHandle) -> Unit)? = null
         val conn = PlayerConnection { onReady -> ready = onReady }
         conn.connect()
