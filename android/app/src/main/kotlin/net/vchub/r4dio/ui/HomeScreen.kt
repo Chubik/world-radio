@@ -133,7 +133,7 @@ private fun Kicker(isPlaying: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (isPlaying) "NOW PLAYING" else "PAUSED",
+            text = stringResource(if (isPlaying) R.string.home_now_playing else R.string.home_paused),
             color = Color(c.dim),
             fontSize = 10.sp,
             fontFamily = MonoFamily,
@@ -147,7 +147,7 @@ private fun Kicker(isPlaying: Boolean) {
         }
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = if (isPlaying) "LIVE" else "OFF AIR",
+            text = stringResource(if (isPlaying) R.string.home_live else R.string.home_off_air),
             color = Color(if (isPlaying) c.ok else c.mute()),
             fontSize = 10.sp,
             fontFamily = MonoFamily,
@@ -180,7 +180,7 @@ private fun Equaliser() {
 private fun StationName(name: String) {
     val c = R4dioTokens.colors
     Text(
-        text = name.ifBlank { "— idle —" },
+        text = name.ifBlank { stringResource(R.string.home_idle) },
         color = Color(c.peak),
         fontSize = 30.sp,
         fontWeight = FontWeight.Bold,
@@ -228,7 +228,7 @@ private fun ContextLine(state: UiState) {
         }
         Text(
             text = (if (hasContext) "· " else "") +
-                if (state.isFav) "★ FAVOURITE" else "☆ not saved",
+                stringResource(if (state.isFav) R.string.home_fav_yes else R.string.home_fav_no),
             color = Color(if (state.isFav) c.fg else c.mute()),
             fontSize = 11.sp,
             fontFamily = MonoFamily,
@@ -278,16 +278,16 @@ private fun PillRow(
         }
         if (showsHiddenPill(state.hiddenCount, state.scope)) {
             Pill(
-                text = "${state.hiddenCount} COUNTRIES",
+                text = stringResource(R.string.home_countries_n, state.hiddenCount),
                 on = true,
                 modifier = Modifier.padding(end = 6.dp),
             )
         }
         Pill(
             text = when {
-                state.scope != "favs" -> "ALL STATIONS"
-                state.favCount > 0 -> "FAVOURITES ONLY · ${state.favCount}"
-                else -> "FAVOURITES ONLY"
+                state.scope != "favs" -> stringResource(R.string.home_scope_all)
+                state.favCount > 0 -> stringResource(R.string.home_scope_favs_n, state.favCount)
+                else -> stringResource(R.string.home_scope_favs)
             },
             on = state.scope == "favs",
         )
@@ -299,7 +299,7 @@ private fun PillRow(
             modifier = Modifier.padding(start = 6.dp),
         )
         Pill(
-            text = if (overlayOn) "◧ SHOWS" else "◧ HIDDEN",
+            text = stringResource(if (overlayOn) R.string.home_overlay_on else R.string.home_overlay_off),
             on = overlayOn,
             onClick = onOverlay,
             description = stringResource(R.string.home_overlay_desc),
@@ -337,7 +337,7 @@ private fun Hero(state: UiState, modifier: Modifier = Modifier) {
             )
         }
         Text(
-            text = "TAP ANYWHERE — SHUFFLE",
+            text = stringResource(R.string.home_shuffle_label),
             color = tone,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
@@ -347,11 +347,10 @@ private fun Hero(state: UiState, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(top = 18.dp),
         )
         Text(
-            text = warn ?: if (state.scope == "favs") {
-                "random favourite · eyes-free"
-            } else {
-                "random station · eyes-free"
-            },
+            text = warn ?: stringResource(
+                if (state.scope == "favs") R.string.home_shuffle_sub_favs
+                else R.string.home_shuffle_sub_all,
+            ),
             color = Color(if (warn != null) c.err else c.dim),
             fontSize = 10.5.sp,
             fontFamily = MonoFamily,
@@ -362,14 +361,16 @@ private fun Hero(state: UiState, modifier: Modifier = Modifier) {
 }
 
 /** the two reasons shuffle has nothing to pick, each with its own message. */
+@Composable
 private fun warnMessage(state: UiState): String? = when {
-    state.scope == "favs" && state.favCount == 0 -> "NO FAVOURITES YET — STAR ONE FIRST"
+    state.scope == "favs" && state.favCount == 0 ->
+        stringResource(R.string.home_warn_no_favs)
     isAllHiddenWarn(
         state.playableCount,
         state.hiddenCount,
         state.scope,
         state.catalogLoaded,
-    ) -> "NO STATIONS — ALL COUNTRIES HIDDEN"
+    ) -> stringResource(R.string.home_warn_all_hidden)
     else -> null
 }
 
@@ -388,7 +389,7 @@ private fun ButtonRow(
     ) {
         SecButton(
             icon = if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
-            label = if (state.isPlaying) "PAUSE" else "PLAY",
+            label = stringResource(if (state.isPlaying) R.string.home_pause else R.string.home_play),
             tone = Color(c.peak),
             on = false,
             onClick = onToggle,
@@ -396,7 +397,7 @@ private fun ButtonRow(
         )
         SecButton(
             icon = if (state.isFav) R.drawable.ic_star else R.drawable.ic_star_outline,
-            label = if (state.isFav) "STARRED" else "STAR",
+            label = stringResource(if (state.isFav) R.string.home_starred else R.string.home_star),
             tone = Color(c.peak),
             on = state.isFav,
             onClick = onStar,
@@ -416,7 +417,7 @@ private fun ButtonRow(
         )
         SecButton(
             icon = R.drawable.ic_stop,
-            label = "STOP",
+            label = stringResource(R.string.home_stop),
             tone = Color(c.err),
             on = false,
             onClick = onStop,
@@ -491,7 +492,7 @@ private fun SyncBar(onSync: () -> Unit) {
             modifier = Modifier.size(22.dp),
         )
         Text(
-            text = "SYNC",
+            text = stringResource(R.string.home_sync),
             color = Color(c.fg),
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
@@ -501,7 +502,7 @@ private fun SyncBar(onSync: () -> Unit) {
         )
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = "link desktop ↔ phone",
+            text = stringResource(R.string.home_sync_sub),
             color = Color(c.dim),
             fontSize = 10.5.sp,
             fontFamily = MonoFamily,

@@ -70,4 +70,12 @@
     <string name="filter_clear_body">Shuffle is limited to %1$s right now. Clearing brings back every country — on this phone and every device on your account.</string>
     <string name="filter_clear_yes">Play everywhere</string>
     <string name="filter_clear_no">Keep %1$s</string>
+    <string name="tab_home">HOME</string>
+    <string name="tab_catalog">CATALOG</string>
+    <string name="tab_library">LIBRARY</string>
+    <string name="tab_settings">SETTINGS</string>
+    <string name="placeholder_catalog">search and filters land here</string>
+    <string name="placeholder_library">favourites and history land here</string>
+    <string name="placeholder_settings">preferences and themes land here</string>
+    <string name="settings_open_sync">OPEN SYNC</string>
 </resources>

@@ -27,16 +27,19 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import net.vchub.r4dio.CMD_CLEAR_FILTER
 import net.vchub.r4dio.CMD_SCOPE
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
+import net.vchub.r4dio.R
 import net.vchub.r4dio.CMD_SHUFFLE
 import net.vchub.r4dio.CMD_STAR
 import net.vchub.r4dio.CMD_STOP
 import net.vchub.r4dio.CMD_TOGGLE
 
-enum class Tab(val icon: String, val label: String) {
-    HOME("⇄", "HOME"),
-    CATALOG("⌕", "CATALOG"),
-    LIBRARY("★", "LIBRARY"),
-    SETTINGS("⚙", "SETTINGS"),
+enum class Tab(val icon: String, @StringRes val label: Int) {
+    HOME("⇄", R.string.tab_home),
+    CATALOG("⌕", R.string.tab_catalog),
+    LIBRARY("★", R.string.tab_library),
+    SETTINGS("⚙", R.string.tab_settings),
 }
 
 /**
@@ -87,8 +90,14 @@ fun R4dioApp(
                     onKeepAwake = onKeepAwake,
                     onOverlay = onOverlay,
                 )
-                Tab.CATALOG -> Placeholder("CATALOG", "search and filters land here")
-                Tab.LIBRARY -> Placeholder("LIBRARY", "favourites and history land here")
+                Tab.CATALOG -> Placeholder(
+                    stringResource(R.string.tab_catalog),
+                    stringResource(R.string.placeholder_catalog),
+                )
+                Tab.LIBRARY -> Placeholder(
+                    stringResource(R.string.tab_library),
+                    stringResource(R.string.placeholder_library),
+                )
                 Tab.SETTINGS -> SettingsPlaceholder(onOpenSync)
             }
         }
@@ -158,7 +167,7 @@ private fun TabBar(current: Tab, onSelect: (Tab) -> Unit) {
                     fontFamily = MonoFamily,
                 )
                 Text(
-                    text = tab.label,
+                    text = stringResource(tab.label),
                     color = Color(if (on) c.accent else c.dim),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -184,7 +193,7 @@ private fun SettingsPlaceholder(onOpenSync: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "SETTINGS",
+            text = stringResource(R.string.tab_settings),
             color = Color(c.dim),
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
@@ -192,12 +201,12 @@ private fun SettingsPlaceholder(onOpenSync: () -> Unit) {
             letterSpacing = 0.14.em,
         )
         Text(
-            text = "preferences and themes land here",
+            text = stringResource(R.string.placeholder_settings),
             color = Color(c.dim),
             fontSize = 11.sp,
             fontFamily = MonoFamily,
             modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
         )
-        Pill(text = "OPEN SYNC", on = true, onClick = onOpenSync)
+        Pill(text = stringResource(R.string.settings_open_sync), on = true, onClick = onOpenSync)
     }
 }
