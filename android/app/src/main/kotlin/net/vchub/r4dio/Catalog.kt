@@ -45,10 +45,11 @@ fun countriesToPull(filter: Set<String>, alreadyPulled: Set<String>): Set<String
         .toSet()
 }
 
-/** how many stations the background top-up will grow the catalogue to. */
-const val TOP_UP_CEILING = 20_000
+// measured against the live api on 2026-08-13: it holds 62,250 stations. the
+// ceiling is the whole catalogue, not a guessed-at fraction of it.
+const val TOP_UP_CEILING = 62_000
 
-/** one page per opportunity: small enough to be unnoticeable, big enough to matter. */
+/** one page per fetch: small enough to be unnoticeable, big enough to matter. */
 const val TOP_UP_PAGE = 200
 
 /**
@@ -58,6 +59,21 @@ const val TOP_UP_PAGE = 200
  */
 fun topUpAllowed(unmetered: Boolean, charging: Boolean, held: Int, ceiling: Int): Boolean =
     unmetered && charging && held < ceiling
+
+/**
+ * how many pages a single top-up opportunity should fetch. pure so the stopping
+ * rules can be tested; the caller does the fetching and re-reads the conditions
+ * through [allowed] before each page, never caching them.
+ */
+fun topUpRun(held: Int, ceiling: Int, limit: Int = TOP_UP_PAGE, allowed: () -> Boolean): Int {
+    var have = held
+    var pages = 0
+    while (have < ceiling && allowed()) {
+        have += limit
+        pages++
+    }
+    return pages
+}
 
 /**
  * [blocked] outranks everything, including a star: blocking is a pointed "never play
