@@ -424,12 +424,13 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * one page of the world catalogue, but only while the phone is on wi-fi and
+     * pages of the world catalogue, but only while the phone is on wi-fi and
      * charging. this is the baseline for the user who never sets a filter at all:
      * without it they stay on the skewed top-1000 forever.
      *
-     * one page per opportunity rather than a loop to the ceiling — a burst would be
-     * exactly the "load" the user asked to avoid, even on wi-fi.
+     * one opportunity now fetches pages until a condition fails, the ceiling is
+     * reached, or a page adds nothing — unmetered/charging are re-read before
+     * every single page, never cached, so unplugging stops the run within a page.
      */
     private fun topUpCatalogue() {
         if (!topUpInFlight.compareAndSet(false, true)) {
@@ -437,28 +438,38 @@ class PlaybackService : MediaSessionService() {
         }
         thread {
             try {
+                val blocked = runBlocking { favStore.currentBlocked() }
+                var totalAdded = 0
+                var pages = 0
+                var unmetered = false
+                var charging = false
                 // the cache, not `stations`: this can run before loadStations() has
                 // populated the field, and an offset of 0 would re-fetch page one.
-                val held = catalogCache.read().size
-                val unmetered = conditions.unmetered()
-                val charging = conditions.charging()
-                if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                var held = catalogCache.read().size
+                while (true) {
+                    unmetered = conditions.unmetered()
+                    charging = conditions.charging()
+                    if (!topUpAllowed(unmetered, charging, held, TOP_UP_CEILING)) {
+                        break
+                    }
+                    val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
+                    if (page.isEmpty()) {
+                        break
+                    }
+                    val added = catalogCache.merge(page)
+                    if (added == 0) {
+                        break
+                    }
+                    totalAdded += added
+                    pages++
+                    held = catalogCache.read().size
+                }
+                if (totalAdded == 0) {
                     Log.i("r4dio", "top-up skipped: unmetered=$unmetered charging=$charging held=$held")
                     return@thread
                 }
-                val blocked = runBlocking { favStore.currentBlocked() }
-                val page = catalog.fetchPage(offset = held, limit = TOP_UP_PAGE, blocked = blocked)
-                if (page.isEmpty()) {
-                    Log.i("r4dio", "top-up page at offset $held came back empty")
-                    return@thread
-                }
-                val added = catalogCache.merge(page)
-                if (added == 0) {
-                    Log.i("r4dio", "top-up page at offset $held was all stations we hold")
-                    return@thread
-                }
                 stations = catalogCache.read()
-                Log.i("r4dio", "topped up $added stations, holding ${stations.size}")
+                Log.i("r4dio", "topped up $totalAdded stations over $pages pages, holding ${stations.size}")
                 scope.launch { refreshCustomLayout() }
             } finally {
                 topUpInFlight.set(false)

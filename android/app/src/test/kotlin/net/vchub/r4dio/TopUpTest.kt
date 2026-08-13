@@ -76,4 +76,30 @@ class TopUpTest {
         server.enqueue(MockResponse().setResponseCode(500))
         assertTrue(catalog.fetchPage(0, 10).isEmpty())
     }
+
+    // the ceiling exists to stop, not to cap the world at a third of it.
+    @Test
+    fun the_ceiling_is_the_whole_catalogue() {
+        assertTrue(TOP_UP_CEILING >= 62_000)
+    }
+
+    // one page per opportunity took hundreds of launches to fill; a run keeps
+    // going while the moment is still free, and stops the instant it is not.
+    @Test
+    fun a_run_stops_as_soon_as_a_condition_fails() {
+        var calls = 0
+        val pages = topUpRun(held = 1000, ceiling = 62_000, allowed = { calls++ < 3 })
+        assertEquals(3, pages)
+    }
+
+    @Test
+    fun a_run_stops_at_the_ceiling_even_while_conditions_hold() {
+        val pages = topUpRun(held = 61_900, ceiling = 62_000, allowed = { true })
+        assertEquals(1, pages)
+    }
+
+    @Test
+    fun a_run_that_may_not_start_fetches_nothing() {
+        assertEquals(0, topUpRun(held = 1000, ceiling = 62_000, allowed = { false }))
+    }
 }
