@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +35,7 @@ import net.vchub.r4dio.CMD_SHUFFLE
 import net.vchub.r4dio.CMD_STAR
 import net.vchub.r4dio.CMD_STOP
 import net.vchub.r4dio.CMD_TOGGLE
+import net.vchub.r4dio.Station
 
 enum class Tab(val icon: String, @StringRes val label: Int) {
     HOME("⇄", R.string.tab_home),
@@ -48,6 +50,13 @@ enum class Tab(val icon: String, @StringRes val label: Int) {
  */
 fun showsMiniPlayer(tab: Tab, stationName: String): Boolean =
     tab != Tab.HOME && stationName.isNotBlank()
+
+/** the catalogue as the shell sees it: an unread cache and an empty one are not
+ *  the same thing, and the screen must be able to tell them apart. */
+data class CatalogState(
+    val stations: List<Station> = emptyList(),
+    val loading: Boolean = true,
+)
 
 /**
  * the four-tab shell every screen lives in. tab choice is rememberSaveable so
@@ -65,10 +74,22 @@ fun R4dioApp(
     // clearing the filter changes every device on the account, so the host can
     // put a confirmation in front of it instead of sending the command straight.
     onClearFilter: () -> Unit = { send(CMD_CLEAR_FILTER) },
+    catalog: CatalogState = CatalogState(loading = false),
+    favourites: Set<String> = emptySet(),
+    blocked: Set<String> = emptySet(),
+    onPlay: (Station) -> Unit = {},
+    onStar: (Station) -> Unit = {},
+    onBlock: (Station) -> Unit = {},
+    // the host re-reads the 10mb cache when the catalogue tab comes forward,
+    // so a background top-up shows up without a restart.
+    onCatalogShown: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val c = R4dioTokens.colors
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    LaunchedEffect(tab, state.catalogueSize) {
+        if (tab == Tab.CATALOG) onCatalogShown()
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -90,9 +111,14 @@ fun R4dioApp(
                     onKeepAwake = onKeepAwake,
                     onOverlay = onOverlay,
                 )
-                Tab.CATALOG -> Placeholder(
-                    stringResource(R.string.tab_catalog),
-                    stringResource(R.string.placeholder_catalog),
+                Tab.CATALOG -> CatalogScreen(
+                    stations = catalog.stations,
+                    favourites = favourites,
+                    blocked = blocked,
+                    onPlay = onPlay,
+                    onStar = onStar,
+                    onBlock = onBlock,
+                    loading = catalog.loading,
                 )
                 Tab.LIBRARY -> Placeholder(
                     stringResource(R.string.tab_library),
