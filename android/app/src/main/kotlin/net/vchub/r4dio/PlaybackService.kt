@@ -34,6 +34,8 @@ const val CMD_SCOPE = "net.vchub.r4dio.SCOPE"
 const val CMD_STOP = "net.vchub.r4dio.STOP"
 const val CMD_SYNC_UI = "net.vchub.r4dio.SYNC_UI"
 const val CMD_CLEAR_FILTER = "net.vchub.r4dio.CLEAR_FILTER"
+const val CMD_PLAY_UUID = "net.vchub.r4dio.PLAY_UUID"
+const val ARG_UUID = "uuid"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
@@ -119,6 +121,7 @@ class PlaybackService : MediaSessionService() {
     private val stopCommand = SessionCommand(CMD_STOP, android.os.Bundle.EMPTY)
     private val syncUiCommand = SessionCommand(CMD_SYNC_UI, android.os.Bundle.EMPTY)
     private val clearFilterCommand = SessionCommand(CMD_CLEAR_FILTER, android.os.Bundle.EMPTY)
+    private val playUuidCommand = SessionCommand(CMD_PLAY_UUID, android.os.Bundle.EMPTY)
 
     private val shuffleButton = CommandButton.Builder(CommandButton.ICON_SHUFFLE_ON)
         .setDisplayName("shuffle")
@@ -818,6 +821,7 @@ class PlaybackService : MediaSessionService() {
                     .add(stopCommand)
                     .add(syncUiCommand)
                     .add(clearFilterCommand)
+                    .add(playUuidCommand)
                     .build()
             val playerCommands =
                 MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -900,6 +904,20 @@ class PlaybackService : MediaSessionService() {
                 }
                 CMD_SYNC_UI -> {
                     launchSyncActivity()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CMD_PLAY_UUID -> {
+                    val uuid = args.getString(ARG_UUID).orEmpty()
+                    scope.launch {
+                        val station = withReadyCatalog().firstOrNull { it.uuid == uuid }
+                        when (station) {
+                            // the catalogue the screen listed and the one the
+                            // service holds can differ after a refresh; a tap on
+                            // a station that is gone must do nothing, not crash.
+                            null -> Log.w("r4dio", "play requested for unknown station $uuid")
+                            else -> main.post { playPick(station) }
+                        }
+                    }
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
