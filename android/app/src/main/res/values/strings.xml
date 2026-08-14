@@ -87,6 +87,10 @@
     <string name="catalog_loading">BUILDING THE CATALOGUE…</string>
     <string name="filters_title">FILTERS</string>
     <string name="filters_reset">RESET</string>
+    <string name="filters_sort">SORT BY</string>
+    <string name="sort_popular">POPULAR</string>
+    <string name="sort_name">NAME</string>
+    <string name="sort_bitrate">QUALITY</string>
     <string name="filters_country">COUNTRY</string>
     <string name="filters_genre">GENRE</string>
     <string name="filters_codec">CODEC</string>

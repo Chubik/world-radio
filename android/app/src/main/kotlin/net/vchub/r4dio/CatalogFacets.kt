@@ -12,6 +12,26 @@ val OFFERED_GENRES = listOf(
     "blues", "lounge", "60s", "reggae", "hip hop", "chill", "latin",
 )
 
+/**
+ * the genres offered as one-tap chips under the search field, so the common
+ * cases need no trip through the modal sheet — material 3's own guidance is that
+ * filter chips can sit directly beneath a search field.
+ *
+ * six because the row scrolls horizontally and a row nobody scrolls shows about
+ * that many; they are the head of [OFFERED_GENRES], which is already ordered by
+ * how much of the real catalogue each covers.
+ */
+val QUICK_GENRES = OFFERED_GENRES.take(6)
+
+/**
+ * the quick chips to show. a genre already chosen in the sheet is dropped from
+ * the row: it is displayed there as an active chip with a ✕, and offering the
+ * same genre twice in one row invites tapping one and being surprised by the
+ * other.
+ */
+fun quickGenreChips(filters: CatalogFilters): List<String> =
+    QUICK_GENRES.filterNot { it in filters.genres }
+
 /** the bitrate steps the sheet offers. 0 is "any". */
 val BITRATE_STEPS = listOf(0, 64, 128, 192, 256, 320)
 
@@ -103,6 +123,9 @@ fun filtersToList(f: CatalogFilters): List<Any> = listOf(
     f.genres.toList(),
     f.codecs.toList(),
     f.minBitrate,
+    // by name, not ordinal: reordering the enum would otherwise turn a saved
+    // "sort by name" into something else.
+    f.sort.name,
 )
 
 @Suppress("UNCHECKED_CAST")
@@ -111,4 +134,9 @@ fun filtersFromList(saved: List<Any>): CatalogFilters = CatalogFilters(
     genres = (saved[1] as List<String>).toSet(),
     codecs = (saved[2] as List<String>).toSet(),
     minBitrate = saved[3] as Int,
+    // absent from anything saved before sorting existed, and an unknown name
+    // means a downgrade — both are answered by the default rather than a crash.
+    sort = (saved.getOrNull(4) as? String)
+        ?.let { name -> SortOrder.entries.firstOrNull { it.name == name } }
+        ?: SortOrder.POPULAR,
 )
