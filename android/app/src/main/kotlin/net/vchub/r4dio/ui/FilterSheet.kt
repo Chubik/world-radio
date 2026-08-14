@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import net.vchub.r4dio.BITRATE_STEPS
 import net.vchub.r4dio.CatalogFilters
 import net.vchub.r4dio.R
+import net.vchub.r4dio.SortOrder
 import net.vchub.r4dio.toggleValue
 
 /** the rows one group of the sheet offers: a label, the count behind it, and the
@@ -79,8 +80,21 @@ fun FilterSheet(
         contentWindowInsets = { WindowInsets.systemBars },
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            SheetHeader(onReset = { pending = CatalogFilters() }, onDismiss = onDismiss)
+            // reset clears the filters, not the ordering: sort hides nothing, so
+            // silently undoing it would take away a choice the user did not ask
+            // to have cleared.
+            SheetHeader(
+                onReset = { pending = CatalogFilters(sort = pending.sort) },
+                onDismiss = onDismiss,
+            )
             LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                // first because it applies to the whole list rather than
+                // narrowing it, and because a control nobody scrolls to might as
+                // well not exist.
+                item {
+                    GroupTitle(R.string.filters_sort)
+                    SortRow(pending.sort) { pending = pending.copy(sort = it) }
+                }
                 group(
                     title = R.string.filters_country,
                     rows = facets.countries,
@@ -196,6 +210,33 @@ private fun FacetToggle(row: FacetRow, on: Boolean, onToggle: () -> Unit) {
             fontSize = 11.sp,
             fontFamily = MonoFamily,
         )
+    }
+}
+
+/**
+ * single-select, like the bitrate row: a list has one order. POPULAR is the
+ * catalogue's own clickcount ranking, so it is both the default and the way
+ * back to "leave it alone".
+ */
+@Composable
+private fun SortRow(current: SortOrder, onPick: (SortOrder) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        SortOrder.entries.forEach { order ->
+            Pill(
+                text = stringResource(
+                    when (order) {
+                        SortOrder.POPULAR -> R.string.sort_popular
+                        SortOrder.NAME -> R.string.sort_name
+                        SortOrder.BITRATE -> R.string.sort_bitrate
+                    },
+                ),
+                on = order == current,
+                onClick = { onPick(order) },
+            )
+        }
     }
 }
 

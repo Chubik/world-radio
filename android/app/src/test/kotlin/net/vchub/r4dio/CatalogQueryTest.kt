@@ -41,6 +41,140 @@ class CatalogQueryTest {
         assertEquals(2, searchCatalog(all, "  jazz  ", CatalogFilters()).size)
     }
 
+    // measured on the live catalogue: searching names alone found 26 stations
+    // for "french" where 2,226 actually broadcast in french, and 494 for "news"
+    // against 3,920. genre and language have been in the cache since v1.18.6.
+    @Test
+    fun search_finds_stations_by_genre_and_language_not_just_name() {
+        val wide = all + listOf(
+            st("e", "Le Poste", country = "FR", tags = "chanson").copy(language = "french"),
+            st("f", "Morning Report", country = "GB", tags = "news,talk"),
+        )
+        assertEquals(listOf("e"), searchCatalog(wide, "french", CatalogFilters()).map { it.uuid })
+        // "b" and "c" carry the news tag, "f" carries it too
+        assertEquals(
+            setOf("b", "c", "f"),
+            searchCatalog(wide, "news", CatalogFilters()).map { it.uuid }.toSet(),
+        )
+    }
+
+    // the reason ranking exists. a two-letter query matches a country code, and
+    // on real data "us" pulled 7,714 american stations — which must not bury the
+    // stations actually called something starting with "us".
+    @Test
+    fun a_name_match_outranks_a_country_match() {
+        val wide = listOf(
+            st("far", "Radio Warsaw", country = "US"),
+            st("near", "USV Radio", country = "RO"),
+        )
+        assertEquals(listOf("near", "far"), searchCatalog(wide, "us", CatalogFilters()).map { it.uuid })
+    }
+
+    @Test
+    fun a_name_beginning_with_the_query_comes_before_one_merely_containing_it() {
+        val wide = listOf(
+            st("inside", "Smooth Jazz Lounge"),
+            st("start", "Jazz Lounge"),
+        )
+        assertEquals(listOf("start", "inside"), searchCatalog(wide, "jazz", CatalogFilters()).map { it.uuid })
+    }
+
+    // the whole ordering, in one assertion: name-prefix, name-substring, genre,
+    // language, country.
+    @Test
+    fun the_ranking_runs_name_then_genre_then_language_then_country() {
+        val wide = listOf(
+            st("country", "Nothing Alike", country = "PO"),
+            st("language", "Nothing Alike 2", country = "FR").copy(language = "po"),
+            st("genre", "Nothing Alike 3", country = "FR", tags = "po"),
+            st("anywhere", "Radio Po"),
+            st("prefix", "Po Radio"),
+        )
+        assertEquals(
+            listOf("prefix", "anywhere", "genre", "language", "country"),
+            searchCatalog(wide, "po", CatalogFilters()).map { it.uuid },
+        )
+    }
+
+    // a genre is a whole tag, never a substring: "pop" inside "popular" is not a
+    // genre match, and a loosely compared country code turns every query into a
+    // country query.
+    @Test
+    fun genre_and_country_match_whole_values_not_substrings() {
+        val wide = listOf(
+            st("tagged", "Station One", tags = "popular"),
+            st("exact", "Station Two", tags = "pop"),
+        )
+        assertEquals(listOf("exact"), searchCatalog(wide, "pop", CatalogFilters()).map { it.uuid })
+    }
+
+    // stations that match nothing must not ride along at the end of the list.
+    @Test
+    fun a_station_matching_nothing_is_left_out() {
+        assertTrue(searchCatalog(all, "zzzznothing", CatalogFilters()).isEmpty())
+    }
+
+    // filters still apply to a ranked search; ranking only orders what survives.
+    @Test
+    fun ranking_does_not_bypass_the_filters() {
+        val f = CatalogFilters(countries = setOf("PL"))
+        assertEquals(listOf("d"), searchCatalog(all, "jazz", f).map { it.uuid })
+    }
+
+    // the catalogue arrives ranked by upstream clickcount, which is the only
+    // ordering carrying real information — so the default must not disturb it.
+    @Test
+    fun the_default_sort_leaves_the_catalogue_order_alone() {
+        assertEquals(
+            all.map { it.uuid },
+            searchCatalog(all, "", CatalogFilters()).map { it.uuid },
+        )
+    }
+
+    @Test
+    fun sorting_by_name_is_alphabetical_and_case_insensitive() {
+        val out = searchCatalog(all, "", CatalogFilters(sort = SortOrder.NAME))
+        assertEquals(listOf("Jazz Cafe", "Kyiv Talk", "Radio Trek", "Warsaw Jazz"), out.map { it.name })
+    }
+
+    @Test
+    fun sorting_by_bitrate_puts_the_best_stream_first() {
+        val out = searchCatalog(all, "", CatalogFilters(sort = SortOrder.BITRATE))
+        assertEquals(listOf(256, 128, 128, 64), out.map { it.bitrate })
+    }
+
+    // someone who typed a name wants the closest name, whatever sort is set.
+    @Test
+    fun a_query_outranks_the_chosen_sort() {
+        val wide = listOf(
+            st("loud", "Smooth Jazz", bitrate = 320),
+            st("quiet", "Jazz Hall", bitrate = 32),
+        )
+        val out = searchCatalog(wide, "jazz", CatalogFilters(sort = SortOrder.BITRATE))
+        // "Jazz Hall" starts with the query, so it leads despite the lower bitrate
+        assertEquals(listOf("quiet", "loud"), out.map { it.uuid })
+    }
+
+    // within one rank the chosen sort still decides.
+    @Test
+    fun the_sort_breaks_ties_between_equally_relevant_stations() {
+        val wide = listOf(
+            st("quiet", "Jazz Hall", bitrate = 32),
+            st("loud", "Jazz Club", bitrate = 320),
+        )
+        val out = searchCatalog(wide, "jazz", CatalogFilters(sort = SortOrder.BITRATE))
+        assertEquals(listOf("loud", "quiet"), out.map { it.uuid })
+    }
+
+    // sort never hides a station, so it must not read as an active filter — the
+    // chip row and CLEAR ALL both key off these.
+    @Test
+    fun choosing_a_sort_is_not_an_active_filter() {
+        val f = CatalogFilters(sort = SortOrder.NAME)
+        assertTrue(f.isEmpty)
+        assertEquals(0, f.activeCount)
+    }
+
     @Test
     fun the_country_filter_narrows_to_those_countries() {
         val f = CatalogFilters(countries = setOf("PL"))
