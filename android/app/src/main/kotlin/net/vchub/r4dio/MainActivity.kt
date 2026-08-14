@@ -111,6 +111,14 @@ class MainActivity : ComponentActivity() {
                     catalog = catalog,
                     library = library,
                     onClearHistory = { lifecycleScope.launch { favStore.clearPlayHistory() } },
+                    // by uuid rather than a Station: the playing station reaches
+                    // the ui as extras, and blocking only needs its id.
+                    onBlockPlaying = {
+                        val uuid = state.stationUuid
+                        if (uuid.isNotBlank()) {
+                            lifecycleScope.launch { favStore.toggleBlocked(uuid) }
+                        }
+                    },
                     favourites = favourites,
                     blocked = blocked,
                     onPlay = ::playStation,
