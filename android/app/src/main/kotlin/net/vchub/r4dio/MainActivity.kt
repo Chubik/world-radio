@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
             // never shows "off" for an instant before the real value lands.
             val fillOnMobile by favStore.fillOnMobile.collectAsStateWithLifecycle(initialValue = true)
             val cachedFavs by favStore.cachedFavs.collectAsStateWithLifecycle(initialValue = emptyList())
+            val hidden by favStore.excludedCountries.collectAsStateWithLifecycle(initialValue = emptySet())
             val history by favStore.playHistory.collectAsStateWithLifecycle(initialValue = emptyList())
             // naming the blocked walks the whole catalogue, so it is done off the
             // composing thread and only when the inputs actually change.
@@ -106,6 +107,14 @@ class MainActivity : ComponentActivity() {
                     fillOnMobile = fillOnMobile,
                     onFillOnMobile = {
                         lifecycleScope.launch { favStore.setFillOnMobile(!fillOnMobile) }
+                    },
+                    theme = slug,
+                    hiddenCountries = hidden,
+                    // setTheme stamps the change for last-write-wins, so the next
+                    // sync carries it to the desktop without a command of its own.
+                    onTheme = { picked -> lifecycleScope.launch { favStore.setTheme(picked) } },
+                    onShowCountry = { code ->
+                        lifecycleScope.launch { favStore.setExcluded(hidden - code) }
                     },
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
                     catalog = catalog,
