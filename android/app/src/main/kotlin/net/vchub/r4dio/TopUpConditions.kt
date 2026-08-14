@@ -22,6 +22,22 @@ class TopUpConditions(private val context: Context) {
             caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    /**
+     * whether android has been told to hold back background data. this became
+     * obligatory the moment the catalogue started fetching on mobile: an app
+     * must not pull background data while data saver is on, and being
+     * whitelisted is the user's decision to make, not ours.
+     *
+     * only ENABLED restrains us — WHITELISTED means this app was explicitly
+     * exempted, and DISABLED means the feature is off.
+     */
+    fun dataSaverOn(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        return cm.restrictBackgroundStatus ==
+            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
+    }
+
     fun charging(): Boolean {
         val status = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)

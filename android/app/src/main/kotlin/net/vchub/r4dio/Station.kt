@@ -33,14 +33,21 @@ fun Station.genres(): List<String> =
 fun ApiStation.toStation(): Station =
     Station(stationuuid, name, urlResolved, countrycode, codec, bitrate, tags, language)
 
+/**
+ * the on-disk and over-the-wire shape of a station. every field carries a
+ * default on purpose: this decodes the whole ~59k catalogue in one go, and
+ * without them a single station missing a codec would fail the entire parse and
+ * leave the app with nothing. a station that arrives without a uuid or a url is
+ * dropped later by allowedStation, not here.
+ */
 @Serializable
 data class FavStation(
-    val uuid: String,
-    val name: String,
-    val url: String,
-    val country: String,
-    val codec: String,
-    val bitrate: Int,
+    val uuid: String = "",
+    val name: String = "",
+    val url: String = "",
+    val country: String = "",
+    val codec: String = "",
+    val bitrate: Int = 0,
     val tags: String = "",
     val language: String = "",
 ) {

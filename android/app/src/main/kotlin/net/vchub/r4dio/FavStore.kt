@@ -84,6 +84,7 @@ class FavStore(context: Context) {
     private val keyDeviceId = stringPreferencesKey("device_id")
     private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
     private val keyKeepAwake = booleanPreferencesKey("keep_awake")
+    private val keyFillOnMobile = booleanPreferencesKey("fill_on_mobile")
     private val keyFilterCountries = stringSetPreferencesKey("filter_countries")
     private val keyFilterAt = longPreferencesKey("filter_countries_at")
     // the scope as it travels, kept beside the local enum: the desktop has scopes
@@ -297,6 +298,20 @@ class FavStore(context: Context) {
 
     suspend fun setKeepAwake(on: Boolean) {
         store.edit { it[keyKeepAwake] = on }
+    }
+
+    /**
+     * whether the catalogue may be fetched over mobile data. on by default:
+     * the whole catalogue is one 4.3 mb request, and a phone that never meets
+     * wi-fi would otherwise sit on the skewed top-1000 forever. android's own
+     * data saver still outranks this — see catalogueFetchAllowed.
+     */
+    val fillOnMobile: Flow<Boolean> = store.data.map { it[keyFillOnMobile] ?: true }
+
+    suspend fun currentFillOnMobile(): Boolean = fillOnMobile.first()
+
+    suspend fun setFillOnMobile(on: Boolean) {
+        store.edit { it[keyFillOnMobile] = on }
     }
 
     suspend fun currentFavUuids(): Set<String> = favUuids.first()

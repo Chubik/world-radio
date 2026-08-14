@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -99,13 +101,19 @@ private fun Stage(
 ) {
     val c = R4dioTokens.colors
     val shape = RoundedCornerShape(22.dp)
+    BoxWithConstraints(modifier = modifier) {
+    val scrollable = maxHeight < STAGE_COMFORTABLE_HEIGHT
     Column(
         modifier = modifier
-            .fillMaxWidth()
+            .fillMaxSize()
             .background(Color(c.panel()), shape)
             .border(1.dp, Color(c.rule()), shape)
             .clickable { onShuffle() }
-            .verticalScroll(rememberScrollState())
+            // scrolls only when the panel is too short for its content, which is
+            // landscape. in portrait a scrolling column would give the hero
+            // infinite height to grow into, so weight() below could never fill
+            // the spare space and a third of the panel sat empty.
+            .verticalScroll(rememberScrollState(), enabled = scrollable)
             .padding(horizontal = 22.dp, vertical = 20.dp),
     ) {
         Kicker(state.isPlaying)
@@ -117,13 +125,26 @@ private fun Stage(
         // with weight there pushed the pills and the station line out of the
         // panel entirely — the old landscape layout dropped it for the same
         // reason. the whole stage still shuffles on tap either way.
-        Hero(state, modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT))
+        // fills whatever is left rather than a fixed block: on a tall phone a
+        // fixed hero leaves a third of the panel empty under it, and the hero is
+        // the eyes-free target — the bigger it is, the better it does its job.
+        Hero(
+            state,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (scrollable) Modifier.height(HERO_MIN_HEIGHT) else Modifier.weight(1f)),
+        )
+    }
     }
 }
 
-/** the ring plus its two lines. fixed rather than weighted so the stage can
- *  scroll: a weighted child inside a scrolling column has no height to take. */
-private val HERO_HEIGHT = 300.dp
+/** below this the panel cannot hold its content plus a usable hero, so it
+ *  scrolls instead of squeezing — measured against the landscape stage. */
+private val STAGE_COMFORTABLE_HEIGHT = 460.dp
+
+/** the floor the ring plus its two lines need. above this the hero grows into
+ *  whatever the panel has spare; below it the stage scrolls instead. */
+private val HERO_MIN_HEIGHT = 300.dp
 
 @Composable
 private fun Kicker(isPlaying: Boolean) {
@@ -255,7 +276,11 @@ private fun PillRow(
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val count = catalogueLabel(state.catalogueSize, state.catalogueGrowing)
+        val count = catalogueLabel(
+            state.catalogueSize,
+            state.catalogueGrowing,
+            state.catalogueFetching,
+        )
         if (count.isNotEmpty()) {
             Text(
                 text = count,
