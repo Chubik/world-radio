@@ -1,6 +1,7 @@
 package net.vchub.r4dio
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -127,6 +128,29 @@ class CatalogFacetsTest {
         assertEquals(listOf("UA" to 352), offeredCountryRows(listOf("UA" to 352, "ZZ" to 0)))
     }
 
+    // one tap under the search field, where the same genre through the sheet is
+    // four. they come from the head of the curated list, so they are the genres
+    // covering most of the real catalogue.
+    @Test
+    fun the_quick_chips_offer_the_commonest_genres() {
+        assertEquals(6, quickGenreChips(CatalogFilters()).size)
+        assertEquals(OFFERED_GENRES.take(6), quickGenreChips(CatalogFilters()))
+    }
+
+    // an active genre already shows in the row as a chip with a ✕. offering it
+    // again beside itself would let someone tap one and watch the other change.
+    @Test
+    fun a_genre_already_chosen_is_not_offered_again() {
+        val out = quickGenreChips(CatalogFilters(genres = setOf("pop")))
+        assertFalse(out.contains("pop"))
+        assertEquals(5, out.size)
+    }
+
+    @Test
+    fun a_genre_chosen_outside_the_quick_list_leaves_the_row_alone() {
+        assertEquals(6, quickGenreChips(CatalogFilters(genres = setOf("reggae"))).size)
+    }
+
     // a rotation must not silently drop a filter the user set. every field has
     // to survive the flatten/restore round trip, or the screen quietly forgets.
     @Test
@@ -136,6 +160,7 @@ class CatalogFacetsTest {
             genres = setOf("jazz"),
             codecs = setOf("AAC"),
             minBitrate = 128,
+            sort = SortOrder.BITRATE,
         )
         assertEquals(f, filtersFromList(filtersToList(f)))
     }
@@ -143,5 +168,30 @@ class CatalogFacetsTest {
     @Test
     fun an_empty_filter_set_round_trips_too() {
         assertEquals(CatalogFilters(), filtersFromList(filtersToList(CatalogFilters())))
+    }
+
+    @Test
+    fun every_sort_order_survives_the_round_trip() {
+        for (order in SortOrder.entries) {
+            val f = CatalogFilters(sort = order)
+            assertEquals(order, filtersFromList(filtersToList(f)).sort)
+        }
+    }
+
+    // state saved by a build that had no sort control is four items long, and a
+    // rotation right after an update must not crash on the missing fifth.
+    @Test
+    fun state_saved_before_sorting_existed_still_restores() {
+        val old = listOf(listOf("UA"), listOf<String>(), listOf<String>(), 0)
+        val restored = filtersFromList(old)
+        assertEquals(setOf("UA"), restored.countries)
+        assertEquals(SortOrder.POPULAR, restored.sort)
+    }
+
+    // a saved name this build does not know (a downgrade) is not a crash.
+    @Test
+    fun an_unknown_sort_name_falls_back_to_the_default() {
+        val odd = listOf(listOf<String>(), listOf<String>(), listOf<String>(), 0, "SOMETHING_ELSE")
+        assertEquals(SortOrder.POPULAR, filtersFromList(odd).sort)
     }
 }

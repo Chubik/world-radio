@@ -1,11 +1,26 @@
 package net.vchub.r4dio
 
+/**
+ * how the results are ordered. [POPULAR] is the catalogue's own order, which is
+ * upstream's clickcount ranking — the only one carrying real information, so it
+ * is the default. the others exist because a list of 54k stations in someone
+ * else's order is hard to navigate for a specific thing.
+ *
+ * a query overrides this with relevance ranking: someone who typed a name wants
+ * the closest name first, not the loudest station.
+ */
+enum class SortOrder { POPULAR, NAME, BITRATE }
+
 data class CatalogFilters(
     val countries: Set<String> = emptySet(),
     val genres: Set<String> = emptySet(),
     val codecs: Set<String> = emptySet(),
     val minBitrate: Int = 0,
+    val sort: SortOrder = SortOrder.POPULAR,
 ) {
+    // sort is deliberately not counted as a filter by either of these: it never
+    // hides a station, so a chip saying "filters are in force" would be a lie,
+    // and CLEAR ALL must not silently reset the ordering someone chose.
     val isEmpty: Boolean
         get() = countries.isEmpty() && genres.isEmpty() && codecs.isEmpty() && minBitrate <= 0
 
@@ -69,16 +84,30 @@ fun searchCatalog(stations: List<Station>, query: String, filters: CatalogFilter
         .filter { filters.codecs.isEmpty() || it.codec.uppercase() in filters.codecs }
         .filter { it.bitrate >= filters.minBitrate }
     if (needle.isEmpty()) {
-        return filtered.toList()
+        return sortStations(filtered.toList(), filters.sort)
     }
-    // sortedBy is stable, so stations of equal rank keep the catalogue's order
-    // rather than being shuffled by the sort itself.
-    return filtered
+    // with a query, relevance wins over the chosen sort: someone who typed a
+    // name wants the closest name first, not the loudest station. the sort is
+    // applied first and the rank sort runs over it — sortedBy is stable, so
+    // stations of equal rank keep the order the sort gave them.
+    val matching = filtered
         .map { it to matchRank(it, needle) }
         .filter { it.second != RANK_NO_MATCH }
-        .sortedBy { it.second }
-        .map { it.first }
         .toList()
+    val ordered = sortStations(matching.map { it.first }, filters.sort)
+    val rankOf = matching.associate { it.first.uuid to it.second }
+    return ordered.sortedBy { rankOf[it.uuid] ?: RANK_NO_MATCH }
+}
+
+/**
+ * [SortOrder.POPULAR] is the catalogue's own order and therefore a no-op: the
+ * list arrives ranked by upstream clickcount, and re-sorting it by anything
+ * would throw that away.
+ */
+internal fun sortStations(stations: List<Station>, sort: SortOrder): List<Station> = when (sort) {
+    SortOrder.POPULAR -> stations
+    SortOrder.NAME -> stations.sortedBy { it.name.lowercase() }
+    SortOrder.BITRATE -> stations.sortedByDescending { it.bitrate }
 }
 
 private fun <T> facetsOf(stations: List<Station>, key: (Station) -> T): List<Pair<T, Int>> {

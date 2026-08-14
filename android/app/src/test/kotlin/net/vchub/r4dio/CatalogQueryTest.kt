@@ -121,6 +121,60 @@ class CatalogQueryTest {
         assertEquals(listOf("d"), searchCatalog(all, "jazz", f).map { it.uuid })
     }
 
+    // the catalogue arrives ranked by upstream clickcount, which is the only
+    // ordering carrying real information — so the default must not disturb it.
+    @Test
+    fun the_default_sort_leaves_the_catalogue_order_alone() {
+        assertEquals(
+            all.map { it.uuid },
+            searchCatalog(all, "", CatalogFilters()).map { it.uuid },
+        )
+    }
+
+    @Test
+    fun sorting_by_name_is_alphabetical_and_case_insensitive() {
+        val out = searchCatalog(all, "", CatalogFilters(sort = SortOrder.NAME))
+        assertEquals(listOf("Jazz Cafe", "Kyiv Talk", "Radio Trek", "Warsaw Jazz"), out.map { it.name })
+    }
+
+    @Test
+    fun sorting_by_bitrate_puts_the_best_stream_first() {
+        val out = searchCatalog(all, "", CatalogFilters(sort = SortOrder.BITRATE))
+        assertEquals(listOf(256, 128, 128, 64), out.map { it.bitrate })
+    }
+
+    // someone who typed a name wants the closest name, whatever sort is set.
+    @Test
+    fun a_query_outranks_the_chosen_sort() {
+        val wide = listOf(
+            st("loud", "Smooth Jazz", bitrate = 320),
+            st("quiet", "Jazz Hall", bitrate = 32),
+        )
+        val out = searchCatalog(wide, "jazz", CatalogFilters(sort = SortOrder.BITRATE))
+        // "Jazz Hall" starts with the query, so it leads despite the lower bitrate
+        assertEquals(listOf("quiet", "loud"), out.map { it.uuid })
+    }
+
+    // within one rank the chosen sort still decides.
+    @Test
+    fun the_sort_breaks_ties_between_equally_relevant_stations() {
+        val wide = listOf(
+            st("quiet", "Jazz Hall", bitrate = 32),
+            st("loud", "Jazz Club", bitrate = 320),
+        )
+        val out = searchCatalog(wide, "jazz", CatalogFilters(sort = SortOrder.BITRATE))
+        assertEquals(listOf("loud", "quiet"), out.map { it.uuid })
+    }
+
+    // sort never hides a station, so it must not read as an active filter — the
+    // chip row and CLEAR ALL both key off these.
+    @Test
+    fun choosing_a_sort_is_not_an_active_filter() {
+        val f = CatalogFilters(sort = SortOrder.NAME)
+        assertTrue(f.isEmpty)
+        assertEquals(0, f.activeCount)
+    }
+
     @Test
     fun the_country_filter_narrows_to_those_countries() {
         val f = CatalogFilters(countries = setOf("PL"))

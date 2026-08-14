@@ -46,6 +46,7 @@ import net.vchub.r4dio.CatalogFilters
 import net.vchub.r4dio.R
 import net.vchub.r4dio.Station
 import net.vchub.r4dio.activeChips
+import net.vchub.r4dio.quickGenreChips
 import net.vchub.r4dio.codecFacets
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
@@ -91,6 +92,7 @@ fun CatalogScreen(
     }
 
     val chips by remember(filters) { derivedStateOf { activeChips(filters) } }
+    val quickGenres by remember(filters) { derivedStateOf { quickGenreChips(filters) } }
     val listState = rememberLazyListState()
     // a narrowed list the user cannot see the top of reads as "nothing changed".
     LaunchedEffect(query, filters) { listState.scrollToItem(0) }
@@ -104,16 +106,19 @@ fun CatalogScreen(
         SearchField(query) { query = it }
         ChipRow(
             chips = chips,
+            quickGenres = quickGenres,
             onOpenFilters = { sheetOpen = true },
             onDrop = { filters = withoutChip(filters, it) },
-            onClearAll = { filters = CatalogFilters() },
+            onPickGenre = { filters = filters.copy(genres = filters.genres + it) },
+            // the ordering is not one of the chips being cleared, so it survives.
+            onClearAll = { filters = CatalogFilters(sort = filters.sort) },
         )
         Box(modifier = Modifier.weight(1f)) {
             when {
                 loading -> Notice(stringResource(R.string.catalog_loading))
                 results.isEmpty() -> EmptyState(query, filters) {
                     query = ""
-                    filters = CatalogFilters()
+                    filters = CatalogFilters(sort = filters.sort)
                 }
                 else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(results, key = { it.uuid }) { station ->
@@ -223,8 +228,10 @@ private fun SearchField(query: String, onQuery: (String) -> Unit) {
 @Composable
 private fun ChipRow(
     chips: List<net.vchub.r4dio.FilterChip>,
+    quickGenres: List<String>,
     onOpenFilters: () -> Unit,
     onDrop: (net.vchub.r4dio.FilterChip) -> Unit,
+    onPickGenre: (String) -> Unit,
     onClearAll: () -> Unit,
 ) {
     Row(
@@ -241,6 +248,11 @@ private fun ChipRow(
         }
         if (chips.isNotEmpty()) {
             Pill(text = stringResource(R.string.catalog_clear_all), on = false, onClick = onClearAll)
+        }
+        // after the active chips, so what is in force is always read first. these
+        // are one tap where the same genre through the sheet is four.
+        quickGenres.forEach { genre ->
+            Pill(text = genre.uppercase(), on = false, onClick = { onPickGenre(genre) })
         }
     }
 }
