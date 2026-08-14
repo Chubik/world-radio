@@ -150,6 +150,29 @@ class HomeStateTest {
         assertEquals("", catalogueLabel(0, growing = false))
     }
 
+    // a download is the sharper fact: "+" only says more exists somewhere, this
+    // says it is arriving right now.
+    @Test
+    fun a_download_in_flight_outranks_the_plus() {
+        assertEquals(
+            "1 240 STATIONS · LOADING…",
+            catalogueLabel(1240, growing = true, fetching = true),
+        )
+    }
+
+    // a fresh install has nothing to count, and silence there reads as a broken
+    // app rather than a working one.
+    @Test
+    fun the_very_first_download_says_something_rather_than_nothing() {
+        assertEquals("LOADING STATIONS…", catalogueLabel(0, growing = false, fetching = true))
+    }
+
+    // once it lands the label goes back to being a plain count.
+    @Test
+    fun a_finished_download_leaves_no_trace_in_the_label() {
+        assertEquals("58 932 STATIONS", catalogueLabel(58932, growing = false, fetching = false))
+    }
+
     // the separator is a space, not a comma or a dot: this screen is read at a
     // glance in a car, and both of those read as decimals in some locales.
     @Test

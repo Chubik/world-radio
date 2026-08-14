@@ -77,6 +77,9 @@ class MainActivity : ComponentActivity() {
             val synced by favStore.theme.collectAsStateWithLifecycle(initialValue = "")
             val favourites by favStore.favUuids.collectAsStateWithLifecycle(initialValue = emptySet())
             val blocked by favStore.blockedUuids.collectAsStateWithLifecycle(initialValue = emptySet())
+            // the initial value matches the store's own default, so the pill
+            // never shows "off" for an instant before the real value lands.
+            val fillOnMobile by favStore.fillOnMobile.collectAsStateWithLifecycle(initialValue = true)
             val slug = resolveTheme(synced, DEFAULT_THEME)
             var clearing by remember { mutableStateOf(false) }
             R4dioTheme(slug) {
@@ -88,6 +91,10 @@ class MainActivity : ComponentActivity() {
                     overlayOn = overlayOn,
                     onKeepAwake = ::toggleKeepAwake,
                     onOverlay = ::askOverlay,
+                    fillOnMobile = fillOnMobile,
+                    onFillOnMobile = {
+                        lifecycleScope.launch { favStore.setFillOnMobile(!fillOnMobile) }
+                    },
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
                     catalog = catalog,
                     favourites = favourites,

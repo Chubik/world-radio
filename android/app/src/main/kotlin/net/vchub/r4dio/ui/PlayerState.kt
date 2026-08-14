@@ -1,6 +1,7 @@
 package net.vchub.r4dio.ui
 
 import android.os.Bundle
+import net.vchub.r4dio.EXTRA_CATALOG_FETCHING
 import net.vchub.r4dio.EXTRA_CATALOG_GROWING
 import net.vchub.r4dio.EXTRA_CATALOG_LOADED
 import net.vchub.r4dio.EXTRA_CATALOG_SIZE
@@ -28,6 +29,7 @@ data class UiState(
     val playableCount: Int = 0,
     val catalogueSize: Int = 0,
     val catalogueGrowing: Boolean = false,
+    val catalogueFetching: Boolean = false,
     val catalogLoaded: Boolean = false,
     val filterCountries: List<String> = emptyList(),
 )
@@ -45,6 +47,7 @@ fun uiStateFromExtras(extras: Bundle, previous: UiState): UiState = previous.cop
     playableCount = extras.getInt(EXTRA_PLAYABLE_COUNT, previous.playableCount),
     catalogueSize = extras.getInt(EXTRA_CATALOG_SIZE, previous.catalogueSize),
     catalogueGrowing = extras.getBoolean(EXTRA_CATALOG_GROWING, previous.catalogueGrowing),
+    catalogueFetching = extras.getBoolean(EXTRA_CATALOG_FETCHING, previous.catalogueFetching),
     catalogLoaded = extras.getBoolean(EXTRA_CATALOG_LOADED, previous.catalogLoaded),
     filterCountries = extras.getStringArray(EXTRA_FILTER_COUNTRIES)?.toList()
         ?: previous.filterCountries,

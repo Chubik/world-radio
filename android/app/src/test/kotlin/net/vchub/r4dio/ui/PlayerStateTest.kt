@@ -1,6 +1,7 @@
 package net.vchub.r4dio.ui
 
 import android.os.Bundle
+import net.vchub.r4dio.EXTRA_CATALOG_FETCHING
 import net.vchub.r4dio.EXTRA_CATALOG_GROWING
 import net.vchub.r4dio.EXTRA_CATALOG_SIZE
 import net.vchub.r4dio.EXTRA_FAV
@@ -48,5 +49,32 @@ class PlayerStateTest {
     fun a_missing_scope_reads_as_all() {
         assertEquals("all", uiStateFromExtras(Bundle(), UiState()).scope)
         assertFalse(uiStateFromExtras(Bundle(), UiState()).isFav)
+    }
+
+    @Test
+    fun a_download_in_flight_reaches_the_state() {
+        val b = Bundle().apply { putBoolean(EXTRA_CATALOG_FETCHING, true) }
+        assertTrue(uiStateFromExtras(b, UiState()).catalogueFetching)
+    }
+
+    // the service publishes the fetching flag on its own, in a bundle holding
+    // nothing else — that is what keeps it off the expensive path that counts
+    // 59k stations. so the fold must carry everything the bundle omits, or the
+    // pill would blank its own count the instant a download started.
+    @Test
+    fun the_fetching_flag_alone_does_not_blank_the_counts() {
+        val previous = UiState(
+            stationName = "Radio Trek",
+            catalogueSize = 58932,
+            favCount = 12,
+            catalogueGrowing = true,
+        )
+        val b = Bundle().apply { putBoolean(EXTRA_CATALOG_FETCHING, true) }
+        val s = uiStateFromExtras(b, previous)
+        assertTrue(s.catalogueFetching)
+        assertEquals(58932, s.catalogueSize)
+        assertEquals(12, s.favCount)
+        assertEquals("Radio Trek", s.stationName)
+        assertTrue(s.catalogueGrowing)
     }
 }
