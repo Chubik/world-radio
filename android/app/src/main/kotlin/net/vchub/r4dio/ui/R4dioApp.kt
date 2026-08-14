@@ -85,6 +85,10 @@ fun R4dioApp(
     onOverlay: (() -> Unit)? = null,
     fillOnMobile: Boolean = true,
     onFillOnMobile: (() -> Unit)? = null,
+    theme: String = "",
+    hiddenCountries: Set<String> = emptySet(),
+    onTheme: (String) -> Unit = {},
+    onShowCountry: (String) -> Unit = {},
     // clearing the filter changes every device on the account, so the host can
     // put a confirmation in front of it instead of sending the command straight.
     onClearFilter: () -> Unit = { send(CMD_CLEAR_FILTER) },
@@ -153,10 +157,14 @@ fun R4dioApp(
                     onBlock = onBlock,
                     onClearHistory = onClearHistory,
                 )
-                Tab.SETTINGS -> SettingsPlaceholder(
-                    onOpenSync = onOpenSync,
+                Tab.SETTINGS -> SettingsScreen(
+                    theme = theme,
+                    hiddenCountries = hiddenCountries,
                     fillOnMobile = fillOnMobile,
+                    onTheme = onTheme,
+                    onShowCountry = onShowCountry,
                     onFillOnMobile = onFillOnMobile,
+                    onOpenSync = onOpenSync,
                 )
             }
         }
@@ -259,54 +267,3 @@ private fun TabBar(current: Tab, onSelect: (Tab) -> Unit) {
     }
 }
 
-/** settings placeholder, with the live controls this phase needs. */
-@Composable
-private fun SettingsPlaceholder(
-    onOpenSync: () -> Unit,
-    fillOnMobile: Boolean,
-    onFillOnMobile: (() -> Unit)?,
-) {
-    val c = R4dioTokens.colors
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(c.bg))
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = stringResource(R.string.tab_settings),
-            color = Color(c.dim),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            fontFamily = MonoFamily,
-            letterSpacing = 0.14.em,
-        )
-        Text(
-            text = stringResource(R.string.placeholder_settings),
-            color = Color(c.dim),
-            fontSize = 11.sp,
-            fontFamily = MonoFamily,
-            modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
-        )
-        Pill(text = stringResource(R.string.settings_open_sync), on = true, onClick = onOpenSync)
-        if (onFillOnMobile != null) {
-            Pill(
-                text = stringResource(R.string.settings_fill_on_mobile),
-                on = fillOnMobile,
-                onClick = onFillOnMobile,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            // the size is the whole reason this can default to on, so it is
-            // worth saying rather than leaving the user to guess.
-            Text(
-                text = stringResource(R.string.settings_fill_on_mobile_hint),
-                color = Color(c.dim),
-                fontSize = 10.sp,
-                fontFamily = MonoFamily,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-    }
-}

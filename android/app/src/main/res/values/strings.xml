@@ -98,6 +98,11 @@
     <string name="library_hint_history">the last 100 stations land here</string>
     <string name="placeholder_settings">preferences and themes land here</string>
     <string name="settings_open_sync">OPEN SYNC</string>
+    <string name="settings_theme">THEME</string>
+    <string name="settings_hidden">HIDDEN COUNTRIES</string>
+    <string name="settings_hidden_none">none — shuffle can reach everywhere</string>
+    <string name="settings_data">DATA</string>
+    <string name="settings_account">ACCOUNT</string>
     <string name="settings_fill_on_mobile">FILL ON MOBILE DATA</string>
     <string name="settings_fill_on_mobile_hint">the full catalogue is one 4 mb download</string>
     <string name="catalog_search_hint">search stations</string>
