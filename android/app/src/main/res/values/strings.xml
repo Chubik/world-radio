@@ -75,6 +75,16 @@
     <string name="tab_library">LIBRARY</string>
     <string name="tab_settings">SETTINGS</string>
     <string name="placeholder_library">favourites and history land here</string>
+    <string name="library_favourites">FAVOURITES</string>
+    <string name="library_blocked">BLOCKED</string>
+    <string name="library_history">HISTORY</string>
+    <string name="library_clear">CLEAR</string>
+    <string name="library_empty_favourites">NOTHING STARRED YET</string>
+    <string name="library_hint_favourites">tap ☆ on any station to keep it</string>
+    <string name="library_empty_blocked">NOTHING BLOCKED</string>
+    <string name="library_hint_blocked">long-press a station to stop it coming back</string>
+    <string name="library_empty_history">NOTHING PLAYED YET</string>
+    <string name="library_hint_history">the last 100 stations land here</string>
     <string name="placeholder_settings">preferences and themes land here</string>
     <string name="settings_open_sync">OPEN SYNC</string>
     <string name="settings_fill_on_mobile">FILL ON MOBILE DATA</string>

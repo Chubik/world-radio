@@ -59,6 +59,17 @@ data class CatalogState(
 )
 
 /**
+ * the three library lists, resolved by the host: favourites come from the fav
+ * cache whole, blocked are uuids named from the catalogue, and history is the
+ * local play list.
+ */
+data class LibraryState(
+    val favourites: List<Station> = emptyList(),
+    val blocked: List<Station> = emptyList(),
+    val history: List<Station> = emptyList(),
+)
+
+/**
  * the four-tab shell every screen lives in. tab choice is rememberSaveable so
  * a rotation does not throw the user back to home, unlike plain remember.
  */
@@ -77,6 +88,8 @@ fun R4dioApp(
     // put a confirmation in front of it instead of sending the command straight.
     onClearFilter: () -> Unit = { send(CMD_CLEAR_FILTER) },
     catalog: CatalogState = CatalogState(loading = false),
+    library: LibraryState = LibraryState(),
+    onClearHistory: () -> Unit = {},
     favourites: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
     onPlay: (Station) -> Unit = {},
@@ -89,8 +102,11 @@ fun R4dioApp(
 ) {
     val c = R4dioTokens.colors
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    // library needs it too, to put names on blocked uuids — without this a user
+    // who opens library first sees bare ids, which is exactly when the name
+    // matters most.
     LaunchedEffect(tab, state.catalogueSize) {
-        if (tab == Tab.CATALOG) onCatalogShown()
+        if (tab == Tab.CATALOG || tab == Tab.LIBRARY) onCatalogShown()
     }
     Column(
         modifier = modifier
@@ -122,9 +138,16 @@ fun R4dioApp(
                     onBlock = onBlock,
                     loading = catalog.loading,
                 )
-                Tab.LIBRARY -> Placeholder(
-                    stringResource(R.string.tab_library),
-                    stringResource(R.string.placeholder_library),
+                Tab.LIBRARY -> LibraryScreen(
+                    favourites = library.favourites,
+                    blocked = library.blocked,
+                    history = library.history,
+                    favouriteUuids = favourites,
+                    blockedUuids = blocked,
+                    onPlay = onPlay,
+                    onStar = onStar,
+                    onBlock = onBlock,
+                    onClearHistory = onClearHistory,
                 )
                 Tab.SETTINGS -> SettingsPlaceholder(
                     onOpenSync = onOpenSync,

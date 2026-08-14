@@ -19,6 +19,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,17 @@ class MainActivity : ComponentActivity() {
             // the initial value matches the store's own default, so the pill
             // never shows "off" for an instant before the real value lands.
             val fillOnMobile by favStore.fillOnMobile.collectAsStateWithLifecycle(initialValue = true)
+            val cachedFavs by favStore.cachedFavs.collectAsStateWithLifecycle(initialValue = emptyList())
+            val history by favStore.playHistory.collectAsStateWithLifecycle(initialValue = emptyList())
+            // naming the blocked walks the whole catalogue, so it is done off the
+            // composing thread and only when the inputs actually change.
+            var library by remember { mutableStateOf(net.vchub.r4dio.ui.LibraryState()) }
+            LaunchedEffect(cachedFavs, blocked, history, catalog.stations) {
+                val named = withContext(Dispatchers.Default) {
+                    blockedStations(blocked, catalog.stations, cachedFavs)
+                }
+                library = net.vchub.r4dio.ui.LibraryState(cachedFavs, named, history)
+            }
             val slug = resolveTheme(synced, DEFAULT_THEME)
             var clearing by remember { mutableStateOf(false) }
             R4dioTheme(slug) {
@@ -97,6 +109,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
                     catalog = catalog,
+                    library = library,
+                    onClearHistory = { lifecycleScope.launch { favStore.clearPlayHistory() } },
                     favourites = favourites,
                     blocked = blocked,
                     onPlay = ::playStation,

@@ -839,6 +839,9 @@ class PlaybackService : MediaSessionService() {
                 // remote one and pin them all at the top of the cap.
                 scope.launch {
                     favStore.recordPlay(pick.uuid, nowSecs())
+                    // the local history, which the push queue above cannot serve:
+                    // it drops entries on sync and keeps no names.
+                    favStore.recordPlayed(pick, nowSecs())
                     refreshCustomLayout()
                 }
                 mirrorAnnounce(pick)
