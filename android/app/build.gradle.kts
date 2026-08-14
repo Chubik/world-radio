@@ -41,7 +41,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // an unshrunk release ships 11.9 mb where a shrunk one is a fifth of
+            // that. what r8 cannot see as reached is listed in proguard-rules.pro,
+            // each rule naming what breaks without it.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             if (!System.getenv("R4DIO_KEYSTORE").isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
             }
