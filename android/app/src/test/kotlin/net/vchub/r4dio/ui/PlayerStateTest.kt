@@ -7,6 +7,7 @@ import net.vchub.r4dio.EXTRA_CATALOG_SIZE
 import net.vchub.r4dio.EXTRA_FAV
 import net.vchub.r4dio.EXTRA_FILTER_COUNTRIES
 import net.vchub.r4dio.EXTRA_SCOPE
+import net.vchub.r4dio.EXTRA_UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -49,6 +50,20 @@ class PlayerStateTest {
     fun a_missing_scope_reads_as_all() {
         assertEquals("all", uiStateFromExtras(Bundle(), UiState()).scope)
         assertFalse(uiStateFromExtras(Bundle(), UiState()).isFav)
+    }
+
+    // without the id a screen can name what is playing but cannot star or block
+    // it — which is the whole point of the now-playing screen.
+    @Test
+    fun the_playing_stations_id_reaches_the_state() {
+        val b = Bundle().apply { putString(EXTRA_UUID, "abc-123") }
+        assertEquals("abc-123", uiStateFromExtras(b, UiState()).stationUuid)
+    }
+
+    @Test
+    fun a_bundle_without_an_id_keeps_the_one_already_shown() {
+        val previous = UiState(stationUuid = "abc-123")
+        assertEquals("abc-123", uiStateFromExtras(Bundle(), previous).stationUuid)
     }
 
     @Test

@@ -6,6 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CatalogScreenLogicTest {
+    // a station that reported neither field must not leave a bare separator
+    // sitting under its name.
+    @Test
+    fun the_now_playing_meta_skips_what_the_station_did_not_report() {
+        assertEquals("UA · MP3", nowPlayingMeta("UA", "MP3"))
+        assertEquals("UA", nowPlayingMeta("UA", ""))
+        assertEquals("MP3", nowPlayingMeta("", "MP3"))
+        assertTrue(nowPlayingMeta("", "").isEmpty())
+    }
+
     @Test
     fun the_meta_line_drops_an_unknown_bitrate_without_a_dangling_dot() {
         assertEquals("MP3", stationMeta("mp3", ""))
