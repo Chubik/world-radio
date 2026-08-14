@@ -96,6 +96,10 @@ class FavStore(context: Context) {
     private val keyThemeAt = longPreferencesKey("theme_at")
     private val keyHistoryPending = stringSetPreferencesKey("history_pending")
 
+    // the local play history, which is NOT keyHistoryPending: that one is a push
+    // queue emptied by sync. see PlayHistory.
+    private val keyPlayHistory = stringPreferencesKey("play_history")
+
     val favUuids: Flow<Set<String>> = store.data.map { it[keyFavs] ?: emptySet() }
 
     val blockedUuids: Flow<Set<String>> = store.data.map { it[keyBlocked] ?: emptySet() }
@@ -284,6 +288,41 @@ class FavStore(context: Context) {
         store.edit { prefs ->
             prefs[keyHistoryPending] = HistoryQueue.append(prefs[keyHistoryPending] ?: emptySet(), uuid, now)
         }
+    }
+
+    /**
+     * what this phone has played, newest first. survives sync, needs no account,
+     * and carries whole stations so a row renders and replays offline — none of
+     * which the push queue behind [recordPlay] can do.
+     */
+    val playHistory: Flow<List<Station>> = store.data.map { prefs ->
+        PlayHistory.stations(decodeHistory(prefs[keyPlayHistory]))
+    }
+
+    /**
+     * takes the whole station, not a uuid: the caller has it, and looking it up
+     * later would fail for exactly the stations that have since left the
+     * catalogue — the ones a listener is most likely to be hunting for.
+     */
+    suspend fun recordPlayed(station: Station, now: Long = System.currentTimeMillis() / 1000) {
+        store.edit { prefs ->
+            val next = PlayHistory.append(decodeHistory(prefs[keyPlayHistory]), station, now)
+            prefs[keyPlayHistory] =
+                json.encodeToString(ListSerializer(HistoryEntry.serializer()), next)
+        }
+    }
+
+    suspend fun clearPlayHistory() {
+        store.edit { it.remove(keyPlayHistory) }
+    }
+
+    private fun decodeHistory(raw: String?): List<HistoryEntry> {
+        if (raw == null) return emptyList()
+        // unreadable history is not worth crashing over, and an empty list is
+        // exactly what an untouched install shows anyway.
+        return runCatching {
+            json.decodeFromString(ListSerializer(HistoryEntry.serializer()), raw)
+        }.getOrDefault(emptyList())
     }
 
     suspend fun drainPlays(pushed: List<HistoryRecord>) {
