@@ -75,6 +75,17 @@
     <string name="tab_library">LIBRARY</string>
     <string name="tab_settings">SETTINGS</string>
     <string name="placeholder_library">favourites and history land here</string>
+    <string name="now_close">✕ CLOSE</string>
+    <string name="now_live">LIVE</string>
+    <string name="now_paused">PAUSED</string>
+    <string name="now_nothing">NOTHING PLAYING</string>
+    <string name="now_star">☆ STAR</string>
+    <string name="now_starred">★ STARRED</string>
+    <string name="now_block">BLOCK</string>
+    <string name="now_shuffle">SHUFFLE</string>
+    <string name="now_play">PLAY</string>
+    <string name="now_pause">PAUSE</string>
+    <string name="now_stop">STOP</string>
     <string name="library_favourites">FAVOURITES</string>
     <string name="library_blocked">BLOCKED</string>
     <string name="library_history">HISTORY</string>

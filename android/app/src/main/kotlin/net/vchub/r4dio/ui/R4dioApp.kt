@@ -1,5 +1,6 @@
 package net.vchub.r4dio.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,6 +91,8 @@ fun R4dioApp(
     catalog: CatalogState = CatalogState(loading = false),
     library: LibraryState = LibraryState(),
     onClearHistory: () -> Unit = {},
+    /** blocks whatever is playing; the screen holds its uuid, the host the store. */
+    onBlockPlaying: () -> Unit = {},
     favourites: Set<String> = emptySet(),
     blocked: Set<String> = emptySet(),
     onPlay: (Station) -> Unit = {},
@@ -102,6 +105,7 @@ fun R4dioApp(
 ) {
     val c = R4dioTokens.colors
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    var nowPlaying by rememberSaveable { mutableStateOf(false) }
     // library needs it too, to put names on blocked uuids — without this a user
     // who opens library first sees bare ids, which is exactly when the name
     // matters most.
@@ -157,15 +161,34 @@ fun R4dioApp(
             }
         }
         if (showsMiniPlayer(tab, state.stationName)) {
-            MiniPlayer(state)
+            MiniPlayer(state) { nowPlaying = true }
         }
         TabBar(tab) { tab = it }
     }
+
+    // over the whole shell rather than inside the tab body: now playing is not a
+    // tab, and covering the tab bar is what makes it read as a full screen.
+    if (nowPlaying) {
+        // a station that stops while the screen is open leaves nothing to show.
+        BackHandler { nowPlaying = false }
+        NowPlayingScreen(
+            state = state,
+            onToggle = { send(CMD_TOGGLE) },
+            onShuffle = { send(CMD_SHUFFLE) },
+            onStar = { send(CMD_STAR) },
+            onBlock = onBlockPlaying,
+            onStop = {
+                send(CMD_STOP)
+                nowPlaying = false
+            },
+            onClose = { nowPlaying = false },
+        )
+    }
 }
 
-/** now-playing, reachable from every tab but home. tapping it does nothing yet. */
+/** now-playing, reachable from every tab but home. tapping it opens the full screen. */
 @Composable
-private fun MiniPlayer(state: UiState) {
+private fun MiniPlayer(state: UiState, onOpen: () -> Unit) {
     val c = R4dioTokens.colors
     Row(
         modifier = Modifier
@@ -173,6 +196,7 @@ private fun MiniPlayer(state: UiState) {
             .height(48.dp)
             .background(Color(c.panel()))
             .border(1.dp, Color(c.rule()))
+            .clickable(onClick = onOpen)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

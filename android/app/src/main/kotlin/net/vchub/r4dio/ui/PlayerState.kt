@@ -11,6 +11,7 @@ import net.vchub.r4dio.EXTRA_FILTER_COUNTRIES
 import net.vchub.r4dio.EXTRA_HIDDEN_COUNT
 import net.vchub.r4dio.EXTRA_PLAYABLE_COUNT
 import net.vchub.r4dio.EXTRA_SCOPE
+import net.vchub.r4dio.EXTRA_UUID
 
 /**
  * everything the screens read, in one immutable value. replaces the eleven
@@ -19,6 +20,8 @@ import net.vchub.r4dio.EXTRA_SCOPE
  */
 data class UiState(
     val stationName: String = "",
+    /** empty when nothing is playing; needed to star or block what is. */
+    val stationUuid: String = "",
     val country: String = "",
     val codec: String = "",
     val isPlaying: Boolean = false,
@@ -41,6 +44,7 @@ data class UiState(
  */
 fun uiStateFromExtras(extras: Bundle, previous: UiState): UiState = previous.copy(
     isFav = extras.getBoolean(EXTRA_FAV, previous.isFav),
+    stationUuid = extras.getString(EXTRA_UUID) ?: previous.stationUuid,
     scope = extras.getString(EXTRA_SCOPE) ?: previous.scope,
     favCount = extras.getInt(EXTRA_FAV_COUNT, previous.favCount),
     hiddenCount = extras.getInt(EXTRA_HIDDEN_COUNT, previous.hiddenCount),

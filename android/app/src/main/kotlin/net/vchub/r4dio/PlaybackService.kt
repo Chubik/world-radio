@@ -38,6 +38,9 @@ const val CMD_PLAY_UUID = "net.vchub.r4dio.PLAY_UUID"
 const val ARG_UUID = "uuid"
 const val ACTION_SYNC_NOW = "net.vchub.r4dio.SYNC_NOW"
 const val EXTRA_FAV = "net.vchub.r4dio.EXTRA_FAV"
+
+/** the playing station's id, so a screen can act on it rather than only name it. */
+const val EXTRA_UUID = "net.vchub.r4dio.EXTRA_UUID"
 const val EXTRA_SCOPE = "net.vchub.r4dio.EXTRA_SCOPE"
 const val EXTRA_FAV_COUNT = "net.vchub.r4dio.EXTRA_FAV_COUNT"
 const val EXTRA_HIDDEN_COUNT = "net.vchub.r4dio.EXTRA_HIDDEN_COUNT"
@@ -178,6 +181,9 @@ class PlaybackService : MediaSessionService() {
         session?.setCustomLayout(listOf(starButton(isFav), shuffleButton, scopeButton(sc), stopButton))
         val extras = android.os.Bundle().apply {
             putBoolean(EXTRA_FAV, isFav)
+            // the id, not just the name: without it a screen can show what is
+            // playing but cannot star or block it.
+            putString(EXTRA_UUID, current?.uuid ?: "")
             putString(EXTRA_SCOPE, if (sc == Scope.FAVS) "favs" else "all")
             putInt(EXTRA_FAV_COUNT, favs.size)
             putInt(EXTRA_HIDDEN_COUNT, hidden.size)
