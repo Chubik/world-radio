@@ -27,6 +27,10 @@ data class Station(
 )
 
 /** the api sends tags as one comma-separated string; every consumer wants a list. */
+/** language arrives comma-separated too, and a station may broadcast in several. */
+fun Station.languages(): List<String> =
+    language.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+
 fun Station.genres(): List<String> =
     tags.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
 
