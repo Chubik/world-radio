@@ -1,5 +1,5 @@
 import {
-  flagFor, countryName, resultHeading, isSearchable, stationCount,
+  flagFor, countryName, resultHeading, isSearchable, stationCount, matchesCountry,
 } from "../labels.js";
 import { el, headRow, stationRow, cursor } from "./stationlist.js";
 
@@ -22,6 +22,7 @@ export function mountBrowse(host) {
   // results instead — the two never share it, so the cursor always has one
   // list to walk.
   let country = null;
+  let countryTerm = "";
   let page = null;
   const at = cursor();
   let searchInput = null;
@@ -137,12 +138,34 @@ export function mountBrowse(host) {
     filterHost.replaceChildren();
     const group = el("div", "fgroup");
     group.appendChild(el("div", "flabel", "COUNTRY"));
-    countries.forEach((row) => {
+
+    // the catalogue carries 239 countries. scrolling to Ukraine past two hundred
+    // rows is not browsing, so the column filters itself.
+    const field = el("div", "ffilter");
+    const input = el("input");
+    input.type = "search";
+    input.placeholder = "filter…";
+    input.value = countryTerm;
+    input.addEventListener("input", () => {
+      countryTerm = input.value;
+      paintFilters();
+      // repainting moves focus off the field the user is typing in.
+      const again = filterHost.querySelector(".ffilter input");
+      again.focus();
+      again.setSelectionRange(again.value.length, again.value.length);
+    });
+    field.appendChild(input);
+    group.appendChild(field);
+
+    const shown = countries.filter((row) => matchesCountry(row, countryTerm));
+    if (shown.length === 0) {
+      group.appendChild(el("div", "fopt", "no country matches"));
+    }
+    shown.forEach((row) => {
       const opt = el("div", `fopt${row.code === country ? " on" : ""}`);
       opt.appendChild(el("span", "car", row.code === country ? "▸" : ""));
       opt.appendChild(el("span", "box", row.code === country ? "[✓]" : "[ ]"));
-      opt.appendChild(el("span", null, `${flagFor(row.code)} ${countryName(row.code)}`));
-      opt.appendChild(el("span", "cnt", ""));
+      opt.appendChild(el("span", "cname", `${flagFor(row.code)} ${countryName(row.code)}`));
       opt.title = `${stationCount(row.count)} stations`;
       opt.addEventListener("click", () => openCountry(row.code));
       group.appendChild(opt);

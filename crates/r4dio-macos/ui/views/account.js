@@ -184,7 +184,9 @@ export function mountAccount(host, onFilters = () => {}) {
       canvas.hidden = true;
       return;
     }
-    const n = grid.length;
+    // a failed call is caught above; a call that answers with nothing is a
+    // different case, and reading .length off it would take the pane down.
+    const n = grid?.length ?? 0;
     if (n === 0) {
       canvas.hidden = true;
       return;
