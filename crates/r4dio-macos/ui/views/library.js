@@ -35,6 +35,12 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
   // the reply to an earlier keystroke can land after a later one; only the
   // newest query may paint, or a slow search overwrites a fresher list.
   let queryId = 0;
+  // the phase of whatever is playing, so the row for it can say "buffering"
+  // without every row polling the backend for itself.
+  let playingPhase = "idle";
+  // the chips above the list. null means "Any", which the design draws dimmed
+  // rather than hiding — the rule is that nothing narrowing the list is unseen.
+  const filters = { genre: null, codec: null, bitrateMin: null };
 
   async function loadFavouriteIds() {
     try {
@@ -55,8 +61,14 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
         rows = await invoke("favourites");
       } else if (segment === "history") {
         rows = await invoke("history");
-      } else if (isSearchable(term)) {
-        const page = await invoke("search", { name: term.trim() });
+      } else if (isSearchable(term) || hasFilter()) {
+        const page = await invoke("search", {
+          name: term.trim(),
+          genre: filters.genre,
+          country: null,
+          codec: filters.codec,
+          bitrateMin: filters.bitrateMin,
+        });
         rows = page.stations ?? [];
         capped = !!page.capped;
       } else {
@@ -79,6 +91,10 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     at = rows.length === 0 ? 0 : Math.min(Math.max(at, 0), rows.length - 1);
   }
 
+  function hasFilter() {
+    return Object.values(filters).some((v) => v !== null);
+  }
+
   function isFavourite(row) {
     return favourites.has(row.uuid) || !!row.is_favorite;
   }
@@ -99,27 +115,66 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     // every filter in one row, active and inactive alike: the design's rule is
     // that nothing narrowing the list may hide behind a panel.
     statebar.replaceChildren();
-    const chips = [];
-    if (segment === "favourites") chips.push(["★ favourites only", true]);
-    if (segment === "history") chips.push(["recently played", true]);
-    if (segment === "all") {
-      chips.push([
-        isSearchable(term) ? `search: ${term.trim()}` : "every station",
-        isSearchable(term),
-      ]);
+    if (segment !== "all") {
+      statebar.appendChild(
+        el("span", "chip on", segment === "favourites" ? "★ favourites only" : "recently played")
+      );
+      return;
     }
-    for (const [text, on] of chips) {
-      const chip = el("span", `chip ${on ? "on" : "off"}`, text);
-      if (on && segment === "all") {
-        chip.appendChild(el("span", "x", "✕"));
-        chip.addEventListener("click", () => {
-          term = "";
-          search.value = "";
-          load();
-        });
-      }
-      statebar.appendChild(chip);
+
+    statebar.appendChild(el("span", "lbl", "FILTERS"));
+
+    // a chip is either a value the user set, which can be cleared, or the word
+    // "Any" dimmed — so the row reads the same whether or not anything is on.
+    const chip = (label, value, clear, choose) => {
+      const on = value !== null;
+      const node = el("span", `chip ${on ? "on" : "off"}`, on ? `${label}: ${value}` : `${label}: Any`);
+      node.addEventListener("click", () => (on ? clear() : choose()));
+      if (on) node.appendChild(el("span", "x", "✕"));
+      statebar.appendChild(node);
+    };
+
+    chip("Genre", filters.genre, () => setFilter("genre", null), () => askGenre());
+    chip(
+      "Min",
+      filters.bitrateMin ? `${filters.bitrateMin}k` : null,
+      () => setFilter("bitrateMin", null),
+      () => setFilter("bitrateMin", 128)
+    );
+    chip("Codec", filters.codec, () => setFilter("codec", null), () => setFilter("codec", "MP3"));
+
+    if (hasFilter() || isSearchable(term)) {
+      const clear = el("span", "clearall", "Clear all");
+      clear.addEventListener("click", () => {
+        filters.genre = null;
+        filters.codec = null;
+        filters.bitrateMin = null;
+        term = "";
+        search.value = "";
+        load();
+      });
+      statebar.appendChild(clear);
     }
+  }
+
+  function setFilter(key, value) {
+    filters[key] = value;
+    at = 0;
+    load();
+  }
+
+  /** the genre chip has no fixed set to cycle: radio-browser carries thousands
+   *  of tags. the search box doubles as the way to name one, so pressing it
+   *  takes whatever is typed there. */
+  function askGenre() {
+    const typed = search.value.trim();
+    if (!typed) {
+      search.focus();
+      return;
+    }
+    search.value = "";
+    term = "";
+    setFilter("genre", typed.toLowerCase());
   }
 
   function paintHead() {
@@ -148,6 +203,19 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     return cell;
   }
 
+  /** what the SIGNAL column shows. a station that keeps failing, or the one
+   *  buffering right now, says so instead of showing a quality reading — the
+   *  meter answers "how good is this stream", these answer "is there one". */
+  function stateCell(row) {
+    if (row.dead) {
+      return el("span", "sig dead", "✗ dead");
+    }
+    if (row.is_playing && playingPhase === "buffering") {
+      return el("span", "sig buffering", "⏳ buffering");
+    }
+    return signalCell(row);
+  }
+
   function codecLabel(row) {
     const codec = (row.codec ?? "").trim();
     const rate = Number(row.bitrate) || 0;
@@ -170,13 +238,15 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     });
     node.appendChild(star);
 
-    node.appendChild(el("span", "nm", row.name));
+    const nm = el("span", "nm", row.name);
+    if (row.genre) nm.appendChild(el("span", "genre", row.genre));
+    node.appendChild(nm);
     node.appendChild(el("span", "flag", `${flagFor(row.country)} ${row.country ?? ""}`.trim()));
     node.appendChild(el("span", "cod", codecLabel(row)));
     if (segment === "history") {
       node.appendChild(el("span", "when", playedWhen(row.played_at, Date.now() / 1000)));
     } else {
-      node.appendChild(signalCell(row));
+      node.appendChild(stateCell(row));
     }
 
     node.addEventListener("click", () => {
@@ -274,6 +344,7 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
       console.error("now_state failed", e);
       return;
     }
+    playingPhase = live.phase;
     rows = rows.map((row) => ({ ...row, is_playing: row.name === live.station }));
     await loadFavouriteIds();
     paint();

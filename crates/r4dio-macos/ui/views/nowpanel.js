@@ -16,6 +16,13 @@ const BARS = 34;
 export function mountNowPanel({ onChanged }) {
   const art = document.getElementById("art");
   const name = document.getElementById("np_name");
+  const track = document.getElementById("np_track");
+  const uprow = document.getElementById("np_uprow");
+  const up = document.getElementById("np_up");
+  const upbar = document.getElementById("np_upbar");
+  const retryBtn = document.getElementById("np_retry");
+  const info = document.getElementById("np_info");
+  const mute = document.getElementById("np_mute");
   const meta = document.getElementById("np_meta");
   const status = document.getElementById("np_status");
   const play = document.getElementById("np_play");
@@ -24,6 +31,7 @@ export function mountNowPanel({ onChanged }) {
   const volbar = document.getElementById("np_volbar");
   const vol = document.getElementById("np_vol");
   const scopeLine = document.getElementById("np_scope");
+  const clock = document.getElementById("clock");
 
   let state = null;
   let specTimer = null;
@@ -99,32 +107,58 @@ export function mountNowPanel({ onChanged }) {
 
     name.textContent = s.station ?? "nothing playing";
     name.classList.toggle("idle", idle);
+    // many stations send no icy metadata at all, so this is empty far more
+    // often than not — and an empty line collapses rather than holding a gap.
+    track.textContent = s.track ? `♪ ${s.track}` : "";
 
     meta.replaceChildren();
-    for (const part of (s.meta ?? "").split("·").map((p) => p.trim()).filter(Boolean)) {
+    const parts = (s.meta ?? "").split("·").map((p) => p.trim()).filter(Boolean);
+    if (s.genre) parts.push(s.genre);
+    for (const part of parts) {
       const span = document.createElement("span");
       span.textContent = part;
       meta.appendChild(span);
     }
 
+    // retrying is its own state: the stream is failing, not filling.
     const tone = { playing: "", buffering: "buffering", error: "error" }[s.phase] ?? "idle";
     status.className = `status ${tone}`;
     status.replaceChildren();
     const dot = document.createElement("span");
     dot.className = "dot";
     dot.textContent = "●";
-    status.append(dot, label.text);
+    status.append(dot, s.retries > 0 ? `RETRYING ${s.retries}` : label.text);
+
+    uprow.classList.toggle("hidden", !s.uptime && s.uptime !== 0);
+    if (s.uptime || s.uptime === 0) {
+      up.textContent = uptimeLabel(s.uptime);
+      // an hour fills the bar; past that it simply stays full, because the
+      // point is "this has held", not a precise fraction of nothing.
+      upbar.style.width = `${Math.min(100, (s.uptime / 3600) * 100)}%`;
+    }
 
     play.textContent = s.phase === "playing" ? "⏸" : "▶";
-    star.textContent = s.is_favorite ? "★" : "☆";
-    star.classList.toggle("on", !!s.is_favorite);
-    // nothing playing is nothing to star, and a button that silently does
-    // nothing is worse than one that looks unavailable.
+    const starIcon = star.querySelector(".ic");
+    starIcon.textContent = s.is_favorite ? "★" : "☆";
+    starIcon.classList.toggle("on", !!s.is_favorite);
+    // nothing playing is nothing to star or retry, and a button that silently
+    // does nothing is worse than one that looks unavailable.
     star.classList.toggle("off", idle);
+    retryBtn.classList.toggle("off", idle);
+    info.classList.toggle("off", idle);
 
     const level = Math.round((s.volume ?? 0) * 100);
     volbar.firstElementChild.style.width = `${level}%`;
     vol.textContent = `${level}`;
+    mute.classList.toggle("muted", !!s.muted);
+    mute.textContent = s.muted ? "╳" : "▮▮";
+
+    // the header line: the state, and the wall clock the design puts beside it.
+    clock.replaceChildren();
+    const cdot = document.createElement("span");
+    cdot.className = `dot${idle ? " idle" : ""}${s.phase === "error" ? " err" : ""}`;
+    cdot.textContent = "●";
+    clock.append(cdot, ` ${s.retries > 0 ? "RETRYING" : label.text} · ${wallClock()}`);
 
     scopeLine.replaceChildren();
     const scope = s.scope === "favorites" ? "★ favourites" : "all stations";
@@ -189,6 +223,15 @@ export function mountNowPanel({ onChanged }) {
   }
 
   play.addEventListener("click", () => toggle());
+  retryBtn.addEventListener("click", () => {
+    if (!state?.station) return;
+    send("retry");
+  });
+  mute.addEventListener("click", () => send("toggle_mute"));
+  info.addEventListener("click", () => {
+    if (!state?.station) return;
+    showInfo();
+  });
   shuffleBtn.addEventListener("click", () => shuffle());
   star.addEventListener("click", () => {
     if (!state?.station) return;
@@ -199,6 +242,30 @@ export function mountNowPanel({ onChanged }) {
     const v = Math.max(0, Math.min(1, (e.clientX - box.left) / box.width));
     send("set_volume", { v });
   });
+
+  /** the stream's own details, in place rather than in a dialog: a modal over a
+   *  radio is a thing to dismiss, and the url is the only fact worth showing. */
+  function showInfo() {
+    const line = [state.meta, state.url].filter(Boolean).join(" · ");
+    track.textContent = line;
+    // it replaces the track line for a few seconds, then the next poll paints
+    // whatever is actually playing back over it.
+    setTimeout(() => paint(), 6000);
+  }
+
+  function wallClock() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  }
+
+  function uptimeLabel(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    return `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+  }
 
   function toggle() {
     send(state?.phase === "playing" ? "stop" : "resume");
@@ -231,5 +298,5 @@ export function mountNowPanel({ onChanged }) {
     .then((eq) => setStyle(eq.style))
     .catch((e) => console.error("eq_settings failed", e));
 
-  return { refresh, toggle, shuffle, sleep, wake, setStyle };
+  return { refresh, toggle, shuffle, sleep, wake, setStyle, mute: () => send("toggle_mute"), retry: () => send("retry") };
 }

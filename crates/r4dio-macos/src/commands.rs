@@ -16,6 +16,17 @@ pub struct NowState {
     /// the state poll rather than a command of its own so it cannot lag a scope
     /// switch — the label is hidden in favourites, which the same poll carries.
     pub filter: String,
+    /// seconds the current station has been up, for the "UP 14m" line.
+    pub uptime: Option<i64>,
+    pub muted: bool,
+    /// how many times the engine has retried without giving up — the design
+    /// shows retrying apart from buffering.
+    pub retries: u32,
+    /// the station's first tag, which reads as its genre.
+    pub genre: String,
+    /// the stream url, for the info line. it is already public in the catalogue,
+    /// so showing it reveals nothing the user could not look up.
+    pub url: String,
 }
 
 fn phase_str(phase: Phase) -> &'static str {
@@ -91,7 +102,7 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
     let now = b.state.now.clone();
     NowState {
         station: now.as_ref().map(|n| n.name.clone()),
-        track: String::new(),
+        track: b.state.track.clone().unwrap_or_default(),
         phase: phase_str(b.phase()).to_string(),
         volume: b.state.volume,
         scope: scope_str(b.state.scope).to_string(),
@@ -101,6 +112,14 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
             .map(|n| crate::state::meta_label(&n.country, &n.codec, n.bitrate))
             .unwrap_or_default(),
         filter: crate::tray::filter_label(b.state.filter(), b.state.scope),
+        uptime: b.uptime(),
+        muted: b.is_muted(),
+        retries: b.state.retries,
+        genre: now
+            .as_ref()
+            .map(|n| crate::state::first_tag(&n.tags))
+            .unwrap_or_default(),
+        url: now.as_ref().map(|n| n.url.clone()).unwrap_or_default(),
     }
 }
 
@@ -116,6 +135,16 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
 pub struct EqSettings {
     pub style: String,
     pub gain: f32,
+}
+
+#[tauri::command]
+pub fn toggle_mute(state: tauri::State<Shared>) {
+    state.lock().unwrap().toggle_mute();
+}
+
+#[tauri::command]
+pub fn retry(state: tauri::State<Shared>) {
+    state.lock().unwrap().retry();
 }
 
 #[tauri::command]
@@ -137,6 +166,11 @@ pub struct StationRow {
     pub codec: String,
     pub bitrate: u32,
     pub is_playing: bool,
+    /// the station's first tag, shown beside its name as a genre.
+    pub genre: String,
+    /// the user has played this and it failed enough times to be hidden from
+    /// shuffle. the row still shows, marked, rather than vanishing.
+    pub dead: bool,
 }
 
 #[tauri::command]
@@ -151,6 +185,8 @@ pub fn favourites(state: tauri::State<Shared>) -> Vec<StationRow> {
 pub struct HistoryRow {
     pub uuid: String,
     pub name: String,
+    pub genre: String,
+    pub dead: bool,
     pub country: String,
     pub codec: String,
     pub bitrate: u32,
@@ -217,8 +253,19 @@ pub struct StationPage {
 }
 
 #[tauri::command]
-pub fn search(state: tauri::State<Shared>, name: String) -> StationPage {
-    state.lock().unwrap().search(&name)
+pub fn search(
+    state: tauri::State<Shared>,
+    name: String,
+    genre: Option<String>,
+    country: Option<String>,
+    codec: Option<String>,
+    // tauri maps the window's camelCase argument onto this snake_case name.
+    bitrate_min: Option<u32>,
+) -> StationPage {
+    state
+        .lock()
+        .unwrap()
+        .search_filtered(&name, genre, country, codec, bitrate_min)
 }
 
 #[tauri::command]
@@ -304,6 +351,11 @@ mod tests {
             is_favorite: false,
             meta: String::new(),
             filter: crate::tray::filter_label(&["UA".to_string()], Scope::All),
+            uptime: None,
+            muted: false,
+            retries: 0,
+            genre: String::new(),
+            url: String::new(),
         };
         let json = serde_json::to_value(&now).unwrap();
         assert_eq!(json["filter"], "FILTER: UA");

@@ -19,18 +19,36 @@
         <aside class="nowpanel">
           <div class="art" id="art"></div>
 
+          <div class="gaugerow" id="np_uprow">
+            <span class="lbl">UP</span>
+            <div class="bar"><i id="np_upbar"></i></div>
+            <span class="val" id="np_up">—</span>
+          </div>
+
           <div class="stationnm" id="np_name">nothing playing</div>
+          <div class="songnm" id="np_track"></div>
           <div class="stmeta" id="np_meta"></div>
           <div class="status" id="np_status"></div>
 
           <div class="transport">
             <div class="sm shuffle" id="np_shuffle" title="Shuffle (r)">⇄</div>
             <div class="big" id="np_play" title="Play / stop (space)">▶</div>
-            <div class="sm" id="np_star" title="Favourite (f)">☆</div>
+          </div>
+
+          <div class="npactions">
+            <div id="np_star" title="Favourite (F)">
+              <span class="ic">☆</span>favourite <span class="kk">F</span>
+            </div>
+            <div id="np_retry" title="Reopen the stream (R)">
+              <span class="ic">↺</span>retry <span class="kk">R</span>
+            </div>
+            <div id="np_info" title="Stream details (I)">
+              <span class="ic">ℹ</span>info <span class="kk">I</span>
+            </div>
           </div>
 
           <div class="volrow">
-            <span class="lbl">VOL</span>
+            <span class="ic" id="np_mute" title="Mute (M)">▮▮</span>
             <div class="bar" id="np_volbar"><i></i></div>
             <span class="val" id="np_vol">—</span>
           </div>

@@ -483,6 +483,8 @@ fn run(backend: backend::Backend) {
             commands::add_favourite,
             commands::favourite_ids,
             commands::history,
+            commands::toggle_mute,
+            commands::retry,
             commands::eq_settings,
             commands::set_eq,
             open_window,

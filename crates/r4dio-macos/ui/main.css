@@ -78,16 +78,36 @@
 }
 .art.idle i { background: var(--rule); }
 
+/* the uptime gauge: how long this station has held, which is the one thing a
+   listener wants to know about a stream that has not dropped yet. */
+.gaugerow {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  font-size: 10px; color: var(--dim);
+}
+.gaugerow .lbl { width: 24px; flex: none; letter-spacing: .06em; }
+.gaugerow .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+.gaugerow .bar i { display: block; height: 100%; background: var(--info); width: 0; transition: width .4s linear; }
+.gaugerow .val { width: 34px; text-align: right; flex: none; }
+.gaugerow.hidden { display: none; }
+
 .stationnm {
   color: var(--bright); font-size: 16px; font-weight: 600; margin-top: 16px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* the track, when the stream says one. it wraps rather than truncating: a song
+   title cut mid-word is worth less than two lines. */
+.songnm { color: var(--hot); font-size: 12px; margin-top: 5px; line-height: 1.5; }
+.songnm:empty { display: none; }
 .stationnm.idle { color: var(--dim); font-weight: 400; }
+/* the parts are separate spans, so they need the gap to read as a list rather
+   than one run ("PLMP3 192kdance"). */
 .stmeta {
   display: flex; gap: 10px; color: var(--dim); font-size: 10.5px;
   margin-top: 8px; flex-wrap: wrap;
 }
+.stmeta span { white-space: nowrap; }
 .status { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10.5px; }
+.status .dot { flex: none; }
 .status .dot { color: var(--ok); }
 .status.buffering .dot { color: var(--info); }
 .status.error .dot { color: var(--err); }
@@ -119,8 +139,28 @@
 .transport .sm.off { opacity: .35; cursor: default; }
 .transport .sm.off:hover { box-shadow: inset 0 0 0 1px var(--rule); color: var(--fg); }
 
+/* the three secondary actions, named and keyed. they are text under an icon
+   rather than more circles: only play and shuffle are worth a button that big,
+   and a row of five identical circles says nothing about which does what. */
+.npactions {
+  display: flex; justify-content: center; gap: 26px; margin-top: 18px;
+  font-size: 10.5px; color: var(--dim);
+}
+.npactions > div {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer;
+}
+.npactions .ic { font-size: 16px; color: var(--fg); }
+.npactions .ic.on { color: var(--hi); }
+.npactions > div:hover .ic { color: var(--hi); }
+.npactions .kk { opacity: .5; }
+.npactions > div.off { opacity: .35; cursor: default; }
+.npactions > div.off:hover .ic { color: var(--fg); }
+
 .volrow { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 10.5px; color: var(--dim); }
 .volrow .lbl { letter-spacing: .1em; flex: none; }
+.volrow .ic { flex: none; cursor: pointer; font-size: 9px; letter-spacing: -1px; }
+.volrow .ic:hover { color: var(--hi); }
+.volrow .ic.muted { color: var(--err); }
 .volrow .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; cursor: pointer; }
 .volrow .bar i { display: block; height: 100%; background: var(--hi); }
 .volrow .val { width: 28px; text-align: right; flex: none; }
@@ -161,7 +201,11 @@
 }
 .chip.on { color: var(--bg); background: var(--hi); border-color: var(--hi); font-weight: 600; cursor: pointer; }
 .chip.off { opacity: .45; }
+.chip { cursor: pointer; }
+.chip.off:hover { opacity: .7; }
 .chip .x { margin-left: 5px; opacity: .7; }
+.clearall { margin-left: auto; text-decoration: underline; cursor: pointer; color: var(--dim); }
+.clearall:hover { color: var(--hi); }
 
 .listhead {
   display: flex; gap: 10px; padding: 8px 20px; color: var(--dim);
@@ -189,6 +233,16 @@
 .row:hover .nm, .row.sel .nm { color: var(--bg); font-weight: 600; }
 .row.playing .nm { color: var(--hot); font-weight: 600; }
 .row.playing:hover .nm, .row.playing.sel .nm { color: var(--bg); }
+/* the genre rides the name rather than taking a column: most stations have one
+   short tag and a column of them would be mostly empty. */
+.row .nm .genre { color: var(--dim); font-size: 10.5px; margin-left: 8px; }
+.row:hover .nm .genre, .row.sel .nm .genre { color: #5a4529; }
+/* a dead or buffering station replaces its signal reading — the meter is about
+   how good the stream is, and these say whether there is one at all. */
+.row .sig.dead { color: var(--err); font-size: 11px; }
+.row .sig.buffering { color: var(--info); font-size: 11px; }
+.row:hover .sig.dead, .row.sel .sig.dead,
+.row:hover .sig.buffering, .row.sel .sig.buffering { color: var(--bg); }
 .row .flag, .listhead .flag { width: 44px; flex: none; color: var(--dim); white-space: nowrap; }
 .row:hover .flag, .row.sel .flag { color: var(--bg); }
 .row .cod, .listhead .cod { width: 100px; flex: none; color: var(--dim); font-size: 11.5px; }
