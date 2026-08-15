@@ -38,6 +38,9 @@ const library = mountLibrary(document.getElementById("listbody"), {
   statebar: document.getElementById("statebar"),
   search: document.getElementById("search"),
   onPlayed: () => now.refresh(),
+  // the scope line in the panel is drawn from now_state, so it has to re-read
+  // when the segment moves it rather than waiting for the next poll.
+  onScope: () => now.refresh(),
 });
 
 const REFRESH = {

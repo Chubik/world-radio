@@ -6,6 +6,10 @@ use std::sync::Mutex;
 #[derive(Serialize)]
 pub struct NowState {
     pub station: Option<String>,
+    /// the uuid of what is playing. the window matches rows on this rather than
+    /// on the name: two stations can share a name, and a row matched by name
+    /// puts the cursor and the ▸ marker on the wrong one.
+    pub uuid: Option<String>,
     pub track: String,
     pub phase: String,
     pub volume: f32,
@@ -109,6 +113,7 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
     let now = b.state.now.clone();
     NowState {
         station: now.as_ref().map(|n| n.name.clone()),
+        uuid: now.as_ref().map(|n| n.uuid.clone()),
         track: b.state.track.clone().unwrap_or_default(),
         phase: phase_str(b.phase()).to_string(),
         volume: b.state.volume,
@@ -354,6 +359,7 @@ mod tests {
     fn both_windows_receive_the_filter_under_the_name_they_read() {
         let now = NowState {
             station: None,
+            uuid: None,
             track: String::new(),
             phase: "idle".into(),
             volume: 0.8,

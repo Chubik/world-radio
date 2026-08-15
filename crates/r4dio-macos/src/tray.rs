@@ -3,9 +3,9 @@
 // shortcut are therefore the only controls that reach a user who works
 // fullscreen, so both are built to work with no window on screen at all.
 
-// tauri parses this into the ⌥⇧R glyphs macos draws beside the menu item, so the
+// tauri parses this into the ⌥R glyphs macos draws beside the menu item, so the
 // menu label and the registered shortcut cannot drift apart.
-pub const SHUFFLE_ACCELERATOR: &str = "Alt+Shift+R";
+pub const SHUFFLE_ACCELERATOR: &str = "Alt+R";
 
 pub const SHUFFLE_ALL: &str = "Shuffle — all stations";
 pub const SHUFFLE_FAVOURITES: &str = "Shuffle — favorites";
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn accelerator_is_the_combination_the_menu_advertises() {
-        assert_eq!(SHUFFLE_ACCELERATOR, "Alt+Shift+R");
+        assert_eq!(SHUFFLE_ACCELERATOR, "Alt+R");
     }
 
     #[test]

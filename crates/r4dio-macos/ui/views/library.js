@@ -22,7 +22,7 @@ function el(tag, className, text) {
  * history — and nothing else about the layout, so switching one never moves
  * anything the eye is already resting on.
  */
-export function mountLibrary(host, { head, count, segrow, statebar, search, onPlayed }) {
+export function mountLibrary(host, { head, count, segrow, statebar, search, onPlayed, onScope }) {
   let segment = "all";
   let rows = [];
   let favourites = new Set();
@@ -61,7 +61,10 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
         rows = await invoke("favourites");
       } else if (segment === "history") {
         rows = await invoke("history");
-      } else if (isSearchable(term) || hasFilter()) {
+      } else {
+        // an empty search is not an empty list: "All" means the catalogue, and
+        // it opens showing it. the backend caps a page at 200 rows, so asking
+        // for everything costs the same as asking for one word.
         const page = await invoke("search", {
           name: term.trim(),
           genre: filters.genre,
@@ -71,8 +74,6 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
         });
         rows = page.stations ?? [];
         capped = !!page.capped;
-      } else {
-        rows = [];
       }
     } catch (e) {
       console.error(`load ${segment} failed`, e);
@@ -84,11 +85,23 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     loading = false;
     await loadFavouriteIds();
     clampCursor();
+    cursorToPlaying();
     paint();
   }
 
   function clampCursor() {
     at = rows.length === 0 ? 0 : Math.min(Math.max(at, 0), rows.length - 1);
+  }
+
+  /** puts the cursor on the station that is playing, when this list holds it.
+   *  the row you are looking at and the one you are hearing should be the same
+   *  row, so ↓ moves on from what is on air rather than from wherever the
+   *  cursor happened to be left. */
+  function cursorToPlaying() {
+    const live = rows.findIndex((row) => row.is_playing);
+    if (live >= 0) {
+      at = live;
+    }
   }
 
   function hasFilter() {
@@ -106,11 +119,7 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
       node.classList.toggle("on", node.dataset.seg === segment)
     );
 
-    count.textContent = (() => {
-      if (loading || failed) return "";
-      if (segment === "all" && !isSearchable(term)) return "";
-      return resultHeading(rows.length, capped);
-    })();
+    count.textContent = loading || failed ? "" : resultHeading(rows.length, capped);
 
     // every filter in one row, active and inactive alike: the design's rule is
     // that nothing narrowing the list may hide behind a panel.
@@ -287,10 +296,10 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     if (segment === "history") {
       return "nothing played yet. every station you listen to shows up here.";
     }
-    if (isSearchable(term)) {
-      return "nothing found. try a shorter word.";
+    if (isSearchable(term) || hasFilter()) {
+      return "nothing found. try a shorter word, or clear a filter.";
     }
-    return "type to search every station by name, or press r to shuffle one.";
+    return "the catalogue has not been downloaded yet.";
   }
 
   function scrollCursorIntoView() {
@@ -334,7 +343,7 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
   /** re-reads only what a play changes: which row is live, and the stars. a
    *  full reload would clear a typed search and lose the cursor. */
   async function markPlaying() {
-    if (segment === "all" && !isSearchable(term)) {
+    if (rows.length === 0) {
       return;
     }
     let live = null;
@@ -345,7 +354,12 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
       return;
     }
     playingPhase = live.phase;
-    rows = rows.map((row) => ({ ...row, is_playing: row.name === live.station }));
+    rows = rows.map((row) => ({ ...row, is_playing: !!live.uuid && row.uuid === live.uuid }));
+    // the cursor follows the station that is playing: the row the user is
+    // looking at and the one they are hearing should be the same row, so
+    // pressing ↓ moves on from what is on air rather than from wherever the
+    // cursor was left.
+    cursorToPlaying();
     await loadFavouriteIds();
     paint();
   }
@@ -358,10 +372,22 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     load();
   }
 
-  function showSegment(next) {
+  async function showSegment(next) {
     if (segment === next) return;
     segment = next;
     at = 0;
+    // the segment is also what shuffle draws from: a user looking at All and
+    // pressing shuffle means "surprise me from everything", not "from the
+    // favourites I am not looking at". history has no scope of its own, so it
+    // leaves shuffle where it was.
+    if (next === "all" || next === "favourites") {
+      try {
+        await invoke("set_scope", { scope: next === "all" ? "all" : "favorites" });
+      } catch (e) {
+        console.error("set_scope failed", e);
+      }
+      if (onScope) onScope();
+    }
     load();
   }
 

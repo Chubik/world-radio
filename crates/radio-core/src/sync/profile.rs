@@ -256,8 +256,10 @@ mod tests {
     fn set_setting_merges_rather_than_replaces() {
         // the bag is shared with clients this build knows nothing about, so
         // writing one key must leave the others exactly where they were.
-        let mut p = Profile::default();
-        p.settings = serde_json::json!({"theme_variant": "high-contrast"});
+        let mut p = Profile {
+            settings: serde_json::json!({"theme_variant": "high-contrast"}),
+            ..Default::default()
+        };
         p.set_setting("eq_style", serde_json::json!("wave"), 10);
 
         assert_eq!(p.setting("eq_style").unwrap(), "wave");
@@ -333,7 +335,12 @@ mod tests {
         let mut p = Profile::default();
         p.set_scope("ALL", 10);
         p.set_theme("amber-crt", 10);
-        let changed = p.apply_newer(None, Some(("FAVS".into(), 20)), Some(("nord".into(), 20)), None);
+        let changed = p.apply_newer(
+            None,
+            Some(("FAVS".into(), 20)),
+            Some(("nord".into(), 20)),
+            None,
+        );
         assert!(changed.scope);
         assert!(changed.theme);
         assert!(!changed.countries);
