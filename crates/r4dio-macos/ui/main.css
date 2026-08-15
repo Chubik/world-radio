@@ -166,7 +166,7 @@
 
 .volrow { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 10.5px; color: var(--dim); }
 .volrow .lbl { letter-spacing: .1em; flex: none; }
-.volrow .ic { flex: none; cursor: pointer; font-size: 9px; letter-spacing: -1px; }
+.volrow .ic { flex: none; cursor: pointer; font-size: 10px; letter-spacing: .08em; min-width: 34px; }
 .volrow .ic:hover { color: var(--hi); }
 .volrow .ic.muted { color: var(--err); }
 .volrow .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--rule); overflow: hidden; cursor: pointer; }
