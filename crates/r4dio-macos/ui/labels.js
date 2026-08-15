@@ -79,25 +79,33 @@ function favouritesLine(n) {
 
 // the window's tabs, in the order they sit on the bar. the list is the authority
 // on what a valid tab is, so a tab and a pane cannot drift apart.
-export const TABS = ["now", "browse", "library", "settings"];
+export const TABS = ["library", "settings"];
 
-const LANDING = "now";
+const LANDING = "library";
 
-// the tray still asks for the old sidebar sections by name, and so do older
-// windows restored by macos. each one names a sub-view now, so arriving by that
-// name must open the tab holding it rather than a blank pane.
+// the tray still asks for the old section names, and so do older windows
+// restored by macos. everything that is not settings is now one screen, so
+// those names select a segment of the list rather than a tab of their own.
 const SECTION_TAB = {
-  now: ["now", null],
-  browse: ["browse", null],
-  library: ["library", "favourites"],
+  library: ["library", "all"],
+  now: ["library", "all"],
+  browse: ["library", "all"],
+  all: ["library", "all"],
   favourites: ["library", "favourites"],
-  blocked: ["library", "blocked"],
+  history: ["library", "history"],
+  // blocked has no screen of its own any more — unblocking lives in settings,
+  // which is where the rest of the "what never plays" rules already are.
+  blocked: ["settings", "countries"],
   settings: ["settings", "countries"],
   countries: ["settings", "countries"],
   sync: ["settings", "account"],
   account: ["settings", "account"],
   shortcuts: ["settings", "shortcuts"],
 };
+
+/** the three views of one list. they filter rows; they never change the layout,
+ *  so switching one cannot move anything the eye is already resting on. */
+export const SEGMENTS = ["all", "favourites", "history"];
 
 /** where a section id lands: the tab to open, and the sub-view inside it (or
  *  null when the tab has none). an unknown id lands on a real tab — a window
@@ -130,19 +138,50 @@ export function signalBars(bitrate) {
 }
 
 /** the keyboard hints under each tab. they change per tab because a hint for a
- *  key that does nothing here teaches the user to stop reading the row. */
+ *  key that does nothing here teaches the user to stop reading the row.
+ *  every key listed here is handled — a hint for a key that does nothing is
+ *  worse than no hint at all. */
 const HINTS = {
-  now: [["SPACE", "play / stop"], ["⌥⇧R", "shuffle"], ["⌘1–4", "switch tab"]],
-  browse: [
-    ["↑ ↓", "select"], ["↵", "play"], ["F", "favorite"], ["B", "block"],
-    ["⌘F", "search"], ["⌘1–4", "switch tab"],
+  library: [
+    ["↑ ↓", "select"], ["↵", "play"], ["SPACE", "play / stop"], ["F", "favourite"],
+    ["r", "shuffle"], ["1–3", "segment"], ["⌘F", "search"],
   ],
-  library: [["↑ ↓", "select"], ["↵", "play"], ["F", "favorite"], ["⌘1–4", "switch tab"]],
-  settings: [["↑ ↓", "select"], ["↵", "toggle"], ["⌘1–4", "switch tab"]],
+  settings: [["SPACE", "play / stop"], ["r", "shuffle"], ["⌘1–2", "switch tab"]],
 };
 
 export function hintsFor(tab) {
   return HINTS[activeTab(tab)] ?? HINTS[LANDING];
+}
+
+/** "18 min ago" — history rows carry a unix stamp in **seconds** (radio-core's
+ *  now_secs), and a raw one tells the user nothing at a glance. `nowSeconds` is
+ *  passed in rather than read here so the wording can be tested without
+ *  freezing the clock. */
+export function playedWhen(at, nowSeconds) {
+  const seconds = Math.floor(nowSeconds - (Number(at) || 0));
+  if (!at || seconds < 0) {
+    return "";
+  }
+  if (seconds < 90) {
+    return "just now";
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  const days = Math.round(hours / 24);
+  if (days === 1) {
+    return "yesterday";
+  }
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+  const weeks = Math.round(days / 7);
+  return weeks === 1 ? "last week" : `${weeks}w ago`;
 }
 
 const A = "A".codePointAt(0);
@@ -160,29 +199,6 @@ export function flagFor(code) {
     REGIONAL_A + c.codePointAt(0) - A,
     REGIONAL_A + c.codePointAt(1) - A
   );
-}
-
-// one line, one job: the live row announces itself, every other row shows the
-// format. showing both would put the format where the eye looks for the marker.
-export function rowSubtitle(station, isPlaying) {
-  if (isPlaying) {
-    return "● now playing";
-  }
-  const s = station ?? {};
-  const codec = s.codec ?? "";
-  const rate = s.bitrate ? `${s.bitrate}k` : "";
-  return [codec, rate].filter((p) => p !== "").join(" ");
-}
-
-export function filterSummary(excluded, blocked) {
-  return `◔ ${excluded ?? 0} excluded · ⛌ ${blocked ?? 0} blocked`;
-}
-
-// a blocked station the catalogue can no longer resolve still needs a row to be
-// unblocked from, so the uuid stands in for a name rather than leaving it blank.
-export function blockedName(station) {
-  const name = (station?.name ?? "").trim();
-  return name === "" ? "Unknown station" : name;
 }
 
 // "3 of 194" — how many of the countries on offer are switched off.
@@ -235,16 +251,6 @@ export function matchesCountry(row, term) {
 }
 
 // a new account has no favourites, and that is a normal state — the header says
-
-// browse rows carry a ☆ that adds. a station already starred has to say so, or
-// the button reads as an action that is still available.
-export function browseSubtitle(station, isFavourite) {
-  const format = rowSubtitle(station, false);
-  if (!isFavourite) {
-    return format;
-  }
-  return [format, "already in ★"].filter((p) => p !== "").join(" · ");
-}
 
 // the offline catalogue answers 671 rows for "jazz" and 7,666 for one country,
 // and only the first slice is ever drawn. saying so is what stops the list

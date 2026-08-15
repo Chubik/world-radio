@@ -1,27 +1,36 @@
-import { el } from "./stationlist.js";
-
-/** the shortcut list. it is written here rather than derived from the footer
- *  hints: the footer shows only what the current tab answers, while this is the
- *  whole set, including the one key that works when the window is not even
- *  in front. */
+/** every key the window answers, and nothing it does not: a shortcut list that
+ *  promises a key nothing handles is worse than no list. the footer shows the
+ *  subset that applies to the current tab; this is the whole set, including the
+ *  one that works when the window is not even in front. */
 const KEYS = [
-  ["⌥⇧R", "shuffle — all stations, works from any app"],
+  ["⌥⇧R", "shuffle — works system-wide, from any app"],
+  ["r", "shuffle a station"],
   ["SPACE", "play / stop"],
-  ["↑ ↓", "move the cursor in a list"],
+  ["↑ ↓", "move the cursor"],
   ["↵", "play the selected station"],
-  ["F", "favorite the selected station"],
-  ["B", "block the selected station"],
-  ["⌘F", "search in browse"],
-  ["⌘1–4", "switch tab"],
+  ["F", "favourite the selected station"],
+  ["1 2 3", "all / favourites / history"],
+  ["⌘F", "search"],
+  ["ESC", "leave the search field"],
+  ["⌘1 ⌘2", "library / settings"],
 ];
 
 export function mountShortcuts(host) {
   host.replaceChildren();
-  host.appendChild(el("div", "sectlbl", "KEYBOARD SHORTCUTS"));
+  const label = document.createElement("div");
+  label.className = "sectlbl";
+  label.textContent = "KEYBOARD SHORTCUTS";
+  host.appendChild(label);
   for (const [key, desc] of KEYS) {
-    const row = el("div", "kbdrow");
-    row.appendChild(el("span", "k", key));
-    row.appendChild(el("span", "d", desc));
+    const row = document.createElement("div");
+    row.className = "kbdrow";
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    const d = document.createElement("span");
+    d.className = "d";
+    d.textContent = desc;
+    row.append(k, d);
     host.appendChild(row);
   }
 }
