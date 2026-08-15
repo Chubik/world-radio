@@ -54,13 +54,6 @@ pub fn state_labels(phase: Phase) -> (&'static str, &'static str) {
     }
 }
 
-pub fn spectrum_bars(n: usize) -> Vec<f32> {
-    const SEED: [f32; 14] = [
-        5.0, 7.0, 4.0, 8.0, 6.0, 3.0, 7.0, 5.0, 8.0, 4.0, 6.0, 7.0, 3.0, 5.0,
-    ];
-    (0..n).map(|i| SEED[i % SEED.len()] / 8.0).collect()
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     All,
@@ -449,14 +442,6 @@ mod tests {
         assert_eq!(state_labels(Phase::Buffering), ("···", "SHUFFLE"));
         assert_eq!(state_labels(Phase::Playing), ("LIVE", "SHUFFLE"));
         assert_eq!(state_labels(Phase::Error), ("OFFLINE", "RETRY"));
-    }
-
-    #[test]
-    fn spectrum_bars_returns_n_values_in_range() {
-        let b = spectrum_bars(16);
-        assert_eq!(b.len(), 16);
-        assert!(b.iter().all(|&v| (0.0..=1.0).contains(&v)));
-        assert_eq!(spectrum_bars(0).len(), 0);
     }
 
     #[test]

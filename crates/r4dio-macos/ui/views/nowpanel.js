@@ -2,10 +2,14 @@ import { stateLabels } from "../labels.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
-/** the spectrum is read far more often than the rest of the state: it is the
- *  one thing on screen that is supposed to move, and a once-a-second read makes
- *  it lurch rather than play. the state behind it changes at human speed. */
-const SPECTRUM_MS = 100;
+/** the spectrum is read more often than the rest of the state — it is the one
+ *  thing on screen meant to move, and a once-a-second read makes it lurch.
+ *
+ *  every read is an ipc round trip, so the rate is a cpu cost, not a free one:
+ *  at 10/s this window sat at ~7% cpu. reading 5 times a second and letting css
+ *  carry each bar to its next value looks the same and costs half. the state
+ *  behind it changes at human speed and stays at 1s. */
+const SPECTRUM_MS = 200;
 const STATE_MS = 1000;
 const BARS = 34;
 
@@ -24,6 +28,9 @@ export function mountNowPanel({ onChanged }) {
   let state = null;
   let specTimer = null;
   let stateTimer = null;
+  // whether the bars are already parked at their silent height, so a stopped
+  // stream repaints them once instead of on every tick.
+  let atRest = false;
 
   const bars = [];
   for (let i = 0; i < BARS; i++) {
@@ -35,12 +42,16 @@ export function mountNowPanel({ onChanged }) {
 
   function paintSpectrum(values) {
     // an idle station keeps the bars at rest rather than at zero: a flat row of
-    // nothing reads as a broken meter, a low flat row reads as silence.
+    // nothing reads as a broken meter, a low flat row reads as silence. writing
+    // that row once is enough — repainting it on a timer is work with no pixels
+    // to show for it.
     if (!values || values.length === 0) {
+      atRest = true;
       art.classList.add("idle");
       bars.forEach((bar) => (bar.style.height = "6%"));
       return;
     }
+    atRest = false;
     art.classList.remove("idle");
     bars.forEach((bar, i) => {
       const v = values[i % values.length] ?? 0;
@@ -107,8 +118,10 @@ export function mountNowPanel({ onChanged }) {
   }
 
   async function tickSpectrum() {
-    if (!state?.station || state.phase === "idle") {
-      paintSpectrum(null);
+    // nothing playing means nothing to meter: the bars are already at rest, so
+    // asking the backend five times a second for silence is pure cpu.
+    if (state?.phase !== "playing") {
+      if (!atRest) paintSpectrum(null);
       return;
     }
     try {

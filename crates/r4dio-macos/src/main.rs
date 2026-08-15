@@ -199,6 +199,7 @@ fn open_window(app: tauri::AppHandle) {
     show_main(&app, "now");
 }
 
+
 fn account_masked() -> String {
     radio_core::sync::load_key()
         .map(|key| account::mask_key(&key))
