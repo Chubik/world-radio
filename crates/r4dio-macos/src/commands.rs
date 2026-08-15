@@ -18,6 +18,10 @@ pub struct NowState {
     pub filter: String,
     /// seconds the current station has been up, for the "UP 14m" line.
     pub uptime: Option<i64>,
+    /// decode buffer occupancy, 0.0-1.0, or None when nothing is playing.
+    pub buffer: Option<f32>,
+    /// the station shuffle will play next, already drawn.
+    pub next: Option<String>,
     pub muted: bool,
     /// how many times the engine has retried without giving up — the design
     /// shows retrying apart from buffering.
@@ -113,6 +117,8 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
             .unwrap_or_default(),
         filter: crate::tray::filter_label(b.state.filter(), b.state.scope),
         uptime: b.uptime(),
+        buffer: b.buffer_level(),
+        next: b.queued_next().map(|p| p.name.clone()),
         muted: b.is_muted(),
         retries: b.state.retries,
         genre: now
@@ -352,6 +358,8 @@ mod tests {
             meta: String::new(),
             filter: crate::tray::filter_label(&["UA".to_string()], Scope::All),
             uptime: None,
+            buffer: None,
+            next: None,
             muted: false,
             retries: 0,
             genre: String::new(),

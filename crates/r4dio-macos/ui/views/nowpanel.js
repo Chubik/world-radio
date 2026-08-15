@@ -17,6 +17,9 @@ export function mountNowPanel({ onChanged }) {
   const art = document.getElementById("art");
   const name = document.getElementById("np_name");
   const track = document.getElementById("np_track");
+  const bufrow = document.getElementById("np_bufrow");
+  const buf = document.getElementById("np_buf");
+  const bufbar = document.getElementById("np_bufbar");
   const uprow = document.getElementById("np_uprow");
   const up = document.getElementById("np_up");
   const upbar = document.getElementById("np_upbar");
@@ -129,6 +132,17 @@ export function mountNowPanel({ onChanged }) {
     dot.textContent = "●";
     status.append(dot, s.retries > 0 ? `RETRYING ${s.retries}` : label.text);
 
+    // the buffer is the one number that says a stutter is coming, so it reads
+    // green when healthy and red as it drains rather than staying one colour.
+    const filled = s.buffer;
+    bufrow.classList.toggle("hidden", filled === null || filled === undefined);
+    if (filled !== null && filled !== undefined) {
+      const pctFull = Math.round(filled * 100);
+      buf.textContent = `${pctFull}%`;
+      bufbar.style.width = `${pctFull}%`;
+      bufbar.style.background = pctFull < 15 ? "var(--err)" : "var(--ok)";
+    }
+
     uprow.classList.toggle("hidden", !s.uptime && s.uptime !== 0);
     if (s.uptime || s.uptime === 0) {
       up.textContent = uptimeLabel(s.uptime);
@@ -161,10 +175,19 @@ export function mountNowPanel({ onChanged }) {
     clock.append(cdot, ` ${s.retries > 0 ? "RETRYING" : label.text} · ${wallClock()}`);
 
     scopeLine.replaceChildren();
+    if (s.next) {
+      const label = document.createElement("span");
+      label.className = "lbl";
+      label.textContent = "NEXT";
+      const b = document.createElement("b");
+      b.textContent = s.next;
+      scopeLine.append(label, " ", b, " · queued via shuffle");
+      scopeLine.appendChild(document.createElement("br"));
+    }
     const scope = s.scope === "favorites" ? "★ favourites" : "all stations";
-    const b = document.createElement("b");
-    b.textContent = scope;
-    scopeLine.append("shuffle draws from ", b);
+    const from = document.createElement("b");
+    from.textContent = scope;
+    scopeLine.append("shuffle draws from ", from);
     if (s.filter) {
       scopeLine.append(` · ${s.filter}`);
     }
