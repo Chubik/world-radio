@@ -105,8 +105,10 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
 }
 
 #[tauri::command]
+/// 34 bands, which is what the window's meter draws — asking for fewer and
+/// repeating them across the bars is what makes a meter look like wallpaper.
 pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
-    state.lock().unwrap().read_spectrum(16)
+    state.lock().unwrap().read_spectrum(34)
 }
 
 #[derive(Serialize)]

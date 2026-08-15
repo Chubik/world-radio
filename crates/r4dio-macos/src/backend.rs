@@ -13,6 +13,9 @@ pub const SERVER: &str = "https://r4dio.net";
 pub struct Backend {
     pub state: MiniState,
     engine: Option<AudioEngine>,
+    // the analyser smooths each frame against the last, so it has to live as
+    // long as the meter does rather than be rebuilt per read.
+    spectrum: radio_core::spectrum::Spectrum,
     catalog: Catalog,
     fav_path: PathBuf,
     hist_path: PathBuf,
@@ -208,6 +211,7 @@ impl Backend {
         Ok(Backend {
             state,
             engine,
+            spectrum: radio_core::spectrum::Spectrum::new(),
             catalog,
             fav_path,
             hist_path,
@@ -415,9 +419,26 @@ impl Backend {
         }
     }
 
-    pub fn read_spectrum(&self, bars: usize) -> Vec<f32> {
-        let _ = bars;
-        crate::state::spectrum_bars(bars)
+    /// the levels the window draws, taken from the audio actually being played.
+    ///
+    /// the engine keeps a tap of the mixed output, and radio-core's Spectrum
+    /// turns it into bands — the same analyser the terminal client has always
+    /// used, so both meters move the same way for the same sound.
+    pub fn read_spectrum(&mut self, bars: usize) -> Vec<f32> {
+        if bars == 0 {
+            return Vec::new();
+        }
+        // silence has to read as silence: nothing playing means an empty tap,
+        // and inventing a level for it is what made the old meter a decoration.
+        let Some(engine) = &self.engine else {
+            return vec![0.0; bars];
+        };
+        if self.state.phase != Phase::Playing {
+            return vec![0.0; bars];
+        }
+        let mut buf = vec![0.0f32; 2048];
+        let got = engine.read_tap(&mut buf);
+        self.spectrum.analyze(&buf[..got], bars)
     }
 
     pub fn phase(&self) -> Phase {
@@ -791,6 +812,7 @@ mod tests {
         Backend {
             state: MiniState::new(),
             engine: None,
+            spectrum: radio_core::spectrum::Spectrum::new(),
             catalog,
             fav_path: dir.join("favorites.json"),
             hist_path: dir.join("history.json"),

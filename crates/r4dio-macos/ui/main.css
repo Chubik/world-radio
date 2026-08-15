@@ -43,11 +43,20 @@
    one screen rather than two tabs. the left panel never changes, so the answer
    to "what is this?" stays on screen while the right list answers "what next?" */
 
-.libgrid { display: grid; grid-template-columns: 300px 1fr; flex: 1; min-height: 0; width: 100%; }
+/* grid rows size to their content by default, so a 200-row list would push both
+   columns past the bottom of the window and drag the footer with them. the row
+   is pinned to the available height and each cell is allowed to shrink inside
+   it — without `min-height: 0` on the cells a flex child refuses to. */
+.libgrid {
+  display: grid; grid-template-columns: 300px 1fr; grid-template-rows: 100%;
+  flex: 1; min-height: 0; width: 100%; overflow: hidden;
+}
+.libgrid > * { min-height: 0; min-width: 0; overflow: hidden; }
 
 .nowpanel {
   border-right: 1px solid var(--rule); padding: 22px 20px;
-  display: flex; flex-direction: column; background: var(--panel); min-width: 0;
+  display: flex; flex-direction: column; background: var(--panel);
+  min-width: 0; overflow-y: auto;
 }
 
 /* the spectrum sits where cover art would in any other player. radio has no
@@ -59,10 +68,13 @@
   display: flex; align-items: flex-end; justify-content: center; gap: 2.5px;
   padding: 10px 12px; overflow: hidden;
 }
+/* the transition is what carries each bar between reads, so it is matched to
+   the poll interval — shorter and the meter stutters, longer and it lags the
+   sound it is meant to be showing. */
 .art i {
   width: 5px; display: block; border-radius: 1px;
   background: linear-gradient(to top, var(--fg), var(--hi));
-  transition: height .12s ease;
+  transition: height .2s linear;
 }
 .art.idle i { background: var(--rule); }
 
@@ -96,6 +108,14 @@
 }
 .transport .sm:hover { box-shadow: inset 0 0 0 1px var(--hi); color: var(--hi); }
 .transport .sm.on { color: var(--hi); box-shadow: inset 0 0 0 1.5px var(--hi); }
+/* shuffle is the one action this app is built around — the gesture the steering
+   wheel key is bound to — so it is outlined rather than left as one grey circle
+   among three. */
+.transport .shuffle {
+  width: 44px; height: 44px; font-size: 17px;
+  color: var(--hi); box-shadow: inset 0 0 0 1.5px var(--hi);
+}
+.transport .shuffle:hover { background: rgba(255,196,87,.12); }
 .transport .sm.off { opacity: .35; cursor: default; }
 .transport .sm.off:hover { box-shadow: inset 0 0 0 1px var(--rule); color: var(--fg); }
 

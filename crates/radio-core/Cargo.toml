@@ -7,6 +7,7 @@ description = "Portable core for World Radio: catalog, cache and pure audio logi
 repository = "https://github.com/Chubik/world-radio"
 
 [dependencies]
+rustfft = "6.4"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 sha2 = "0.10"
 flate2 = "1"
