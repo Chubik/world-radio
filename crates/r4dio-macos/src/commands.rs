@@ -28,6 +28,9 @@ pub struct NowState {
     pub retries: u32,
     /// the station's first tag, which reads as its genre.
     pub genre: String,
+    /// the meter's style, carried on the state poll so a change made on another
+    /// device reaches the window without it asking a second question.
+    pub eq_style: String,
     /// the stream url, for the info line. it is already public in the catalogue,
     /// so showing it reveals nothing the user could not look up.
     pub url: String,
@@ -121,6 +124,7 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
         next: b.queued_next().map(|p| p.name.clone()),
         muted: b.is_muted(),
         retries: b.state.retries,
+        eq_style: b.eq_settings().0,
         genre: now
             .as_ref()
             .map(|n| crate::state::first_tag(&n.tags))
@@ -363,6 +367,7 @@ mod tests {
             muted: false,
             retries: 0,
             genre: String::new(),
+            eq_style: "bars".into(),
             url: String::new(),
         };
         let json = serde_json::to_value(&now).unwrap();

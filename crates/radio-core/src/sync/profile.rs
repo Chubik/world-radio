@@ -18,6 +18,14 @@ pub struct Profile {
     pub theme: String,
     #[serde(default)]
     pub theme_at: i64,
+    /// display preferences that are not worth a field each — the equalizer's
+    /// style and gain today. it travels as one json object under one stamp, so
+    /// a new key needs no server change; the cost is that two devices changing
+    /// different keys at once resolve to whichever wrote last.
+    #[serde(default)]
+    pub settings: serde_json::Value,
+    #[serde(default)]
+    pub settings_at: i64,
     /// set once **this device** has run the legacy migration, so a launch that
     /// has nothing left to adopt stops rewriting this file every time.
     ///
@@ -72,6 +80,25 @@ impl Profile {
         self.scope_at = now;
     }
 
+    /// merges one key into the settings bag. it is a merge rather than a
+    /// replace because the bag is shared: writing the whole object would drop
+    /// a key this build does not know about but another client set.
+    pub fn set_setting(&mut self, key: &str, value: serde_json::Value, now: i64) {
+        if !self.settings.is_object() {
+            self.settings = serde_json::json!({});
+        }
+        let map = self.settings.as_object_mut().expect("just made an object");
+        if map.get(key) == Some(&value) {
+            return;
+        }
+        map.insert(key.to_string(), value);
+        self.settings_at = now;
+    }
+
+    pub fn setting(&self, key: &str) -> Option<&serde_json::Value> {
+        self.settings.as_object()?.get(key)
+    }
+
     pub fn set_theme(&mut self, theme: &str, now: i64) {
         if self.theme == theme {
             return;
@@ -120,6 +147,7 @@ impl Profile {
         filter: Option<(Vec<String>, i64)>,
         scope: Option<(String, i64)>,
         theme: Option<(String, i64)>,
+        settings: Option<(serde_json::Value, i64)>,
     ) -> ProfileChange {
         let mut changed = ProfileChange::default();
         if let Some((countries, at)) = filter {
@@ -143,6 +171,13 @@ impl Profile {
                 changed.theme = true;
             }
         }
+        if let Some((settings, at)) = settings {
+            if at > self.settings_at {
+                self.settings = settings;
+                self.settings_at = at;
+                changed.settings = true;
+            }
+        }
         changed
     }
 }
@@ -153,11 +188,12 @@ pub struct ProfileChange {
     pub countries: bool,
     pub scope: bool,
     pub theme: bool,
+    pub settings: bool,
 }
 
 impl ProfileChange {
     pub fn any(&self) -> bool {
-        self.countries || self.scope || self.theme
+        self.countries || self.scope || self.theme || self.settings
     }
 }
 
@@ -217,10 +253,65 @@ mod tests {
     }
 
     #[test]
+    fn set_setting_merges_rather_than_replaces() {
+        // the bag is shared with clients this build knows nothing about, so
+        // writing one key must leave the others exactly where they were.
+        let mut p = Profile::default();
+        p.settings = serde_json::json!({"theme_variant": "high-contrast"});
+        p.set_setting("eq_style", serde_json::json!("wave"), 10);
+
+        assert_eq!(p.setting("eq_style").unwrap(), "wave");
+        assert_eq!(p.setting("theme_variant").unwrap(), "high-contrast");
+        assert_eq!(p.settings_at, 10);
+    }
+
+    #[test]
+    fn setting_the_same_value_does_not_move_the_stamp() {
+        // an unchanged write must not win a merge against another device's real
+        // change — that is how a no-op reverts someone else's edit.
+        let mut p = Profile::default();
+        p.set_setting("eq_style", serde_json::json!("bars"), 10);
+        p.set_setting("eq_style", serde_json::json!("bars"), 50);
+        assert_eq!(p.settings_at, 10);
+    }
+
+    #[test]
+    fn a_newer_remote_settings_bag_wins() {
+        let mut p = Profile::default();
+        p.set_setting("eq_style", serde_json::json!("bars"), 10);
+
+        let changed = p.apply_newer(
+            None,
+            None,
+            None,
+            Some((serde_json::json!({"eq_style": "dots"}), 20)),
+        );
+
+        assert!(changed.settings);
+        assert_eq!(p.setting("eq_style").unwrap(), "dots");
+    }
+
+    #[test]
+    fn an_older_remote_settings_bag_is_ignored() {
+        let mut p = Profile::default();
+        p.set_setting("eq_style", serde_json::json!("mirror"), 30);
+
+        let changed = p.apply_newer(
+            None,
+            None,
+            None,
+            Some((serde_json::json!({"eq_style": "bars"}), 10)),
+        );
+
+        assert!(!changed.settings);
+        assert_eq!(p.setting("eq_style").unwrap(), "mirror");
+    }
+
+    #[test]
     fn apply_newer_takes_a_newer_remote_filter() {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 10);
-        let changed = p.apply_newer(Some((vec!["PL".into()], 20)), None, None);
+        let changed = p.apply_newer(Some((vec!["PL".into()], 20)), None, None, None);
         assert!(changed.any());
         assert!(changed.countries);
         assert_eq!(p.countries, vec!["PL".to_string()]);
@@ -231,7 +322,7 @@ mod tests {
     fn apply_newer_rejects_an_older_remote_filter() {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 20);
-        let changed = p.apply_newer(Some((vec!["PL".into()], 10)), None, None);
+        let changed = p.apply_newer(Some((vec!["PL".into()], 10)), None, None, None);
         assert!(!changed.any());
         assert_eq!(p.countries, vec!["UA".to_string()]);
         assert_eq!(p.countries_at, 20);
@@ -242,7 +333,7 @@ mod tests {
         let mut p = Profile::default();
         p.set_scope("ALL", 10);
         p.set_theme("amber-crt", 10);
-        let changed = p.apply_newer(None, Some(("FAVS".into(), 20)), Some(("nord".into(), 20)));
+        let changed = p.apply_newer(None, Some(("FAVS".into(), 20)), Some(("nord".into(), 20)), None);
         assert!(changed.scope);
         assert!(changed.theme);
         assert!(!changed.countries);
@@ -262,6 +353,7 @@ mod tests {
             Some((vec!["PL".into()], 5)),
             Some(("FAVS".into(), 5)),
             Some(("nord".into(), 5)),
+            None,
         );
         assert!(!changed.any());
     }
@@ -270,7 +362,7 @@ mod tests {
     fn apply_newer_with_all_none_is_a_no_op() {
         let mut p = Profile::default();
         p.set_countries(vec!["UA".into()], 20);
-        assert!(!p.apply_newer(None, None, None).any());
+        assert!(!p.apply_newer(None, None, None, None).any());
     }
 
     #[test]
@@ -285,6 +377,7 @@ mod tests {
             Some((vec!["UA".into()], 50)),
             Some(("FAVS".into(), 50)),
             Some(("nord".into(), 200)),
+            None,
         );
         assert!(changed.theme);
         assert!(!changed.scope);
