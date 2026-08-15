@@ -77,16 +77,72 @@ function favouritesLine(n) {
   return `★ ${n} favorite${n === 1 ? "" : "s"} synced.`;
 }
 
-// the window's sections, in sidebar order. the list is the authority on what a
-// valid section is, so a nav item and a pane cannot drift apart.
-export const SECTIONS = ["favourites", "browse", "countries", "blocked", "sync"];
+// the window's tabs, in the order they sit on the bar. the list is the authority
+// on what a valid tab is, so a tab and a pane cannot drift apart.
+export const TABS = ["now", "browse", "library", "settings"];
 
-const LANDING = "favourites";
+const LANDING = "now";
 
-// an unknown id must resolve to a real section: a window whose content pane is
-// blank because a nav id was misspelled looks broken rather than empty.
-export function activeSection(id) {
-  return SECTIONS.includes(id) ? id : LANDING;
+// the tray still asks for the old sidebar sections by name, and so do older
+// windows restored by macos. each one names a sub-view now, so arriving by that
+// name must open the tab holding it rather than a blank pane.
+const SECTION_TAB = {
+  now: ["now", null],
+  browse: ["browse", null],
+  library: ["library", "favourites"],
+  favourites: ["library", "favourites"],
+  blocked: ["library", "blocked"],
+  settings: ["settings", "countries"],
+  countries: ["settings", "countries"],
+  sync: ["settings", "account"],
+  account: ["settings", "account"],
+  shortcuts: ["settings", "shortcuts"],
+};
+
+/** where a section id lands: the tab to open, and the sub-view inside it (or
+ *  null when the tab has none). an unknown id lands on a real tab — a window
+ *  blank because an id was misspelled looks broken rather than empty. */
+export function targetFor(id) {
+  const hit = SECTION_TAB[id];
+  if (!hit) {
+    return { tab: LANDING, sub: null };
+  }
+  return { tab: hit[0], sub: hit[1] };
+}
+
+export function activeTab(id) {
+  return targetFor(id).tab;
+}
+
+/** the signal column. there is no per-station signal measurement anywhere in
+ *  this project, so the scale is bitrate — which is what actually differs
+ *  between two streams of the same station — and never a guess dressed as one. */
+export function signalBars(bitrate) {
+  const kbps = Number(bitrate) || 0;
+  if (kbps <= 0) {
+    return 0;
+  }
+  if (kbps >= 256) return 5;
+  if (kbps >= 192) return 4;
+  if (kbps >= 128) return 3;
+  if (kbps >= 64) return 2;
+  return 1;
+}
+
+/** the keyboard hints under each tab. they change per tab because a hint for a
+ *  key that does nothing here teaches the user to stop reading the row. */
+const HINTS = {
+  now: [["SPACE", "play / stop"], ["⌥⇧R", "shuffle"], ["⌘1–4", "switch tab"]],
+  browse: [
+    ["↑ ↓", "select"], ["↵", "play"], ["F", "favorite"], ["B", "block"],
+    ["⌘F", "search"], ["⌘1–4", "switch tab"],
+  ],
+  library: [["↑ ↓", "select"], ["↵", "play"], ["F", "favorite"], ["⌘1–4", "switch tab"]],
+  settings: [["↑ ↓", "select"], ["↵", "toggle"], ["⌘1–4", "switch tab"]],
+};
+
+export function hintsFor(tab) {
+  return HINTS[activeTab(tab)] ?? HINTS[LANDING];
 }
 
 const A = "A".codePointAt(0);
@@ -127,12 +183,6 @@ export function filterSummary(excluded, blocked) {
 export function blockedName(station) {
   const name = (station?.name ?? "").trim();
   return name === "" ? "Unknown station" : name;
-}
-
-// the header counts the rows the user can act on, and "none" reads as a state
-// rather than as a count that failed to load.
-export function blockedHeading(n) {
-  return n ? String(n) : "none";
 }
 
 // "3 of 194" — how many of the countries on offer are switched off.
@@ -185,10 +235,6 @@ export function matchesCountry(row, term) {
 }
 
 // a new account has no favourites, and that is a normal state — the header says
-// "none yet" rather than a bare 0, which reads like a count that failed.
-export function favouritesHeading(n) {
-  return n ? String(n) : "none yet";
-}
 
 // browse rows carry a ☆ that adds. a station already starred has to say so, or
 // the button reads as an action that is still available.

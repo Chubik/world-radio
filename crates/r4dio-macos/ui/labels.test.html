@@ -2,8 +2,9 @@
 <html><head><meta charset="UTF-8" /></head>
 <body><pre id="out"></pre><script type="module">
 import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
-         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading,
-         blockedName, blockedHeading, countryHeading, countryName, matchesCountry,
+         activeTab, targetFor, signalBars, hintsFor,
+         flagFor, rowSubtitle, filterSummary,
+         blockedName, countryHeading, countryName, matchesCountry,
          browseSubtitle, resultHeading, isSearchable, stationCount } from "./labels.js";
 const out = [];
 let failed = 0;
@@ -80,18 +81,42 @@ eq("status carries only the masked id",
    accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).masked,
    "r4-7K2P-····-4DF1");
 
-// the sidebar drives which pane is visible, so this decides the whole window's
-// section state; every nav id must resolve and nothing else may.
-eq("favourites is the landing section", activeSection(undefined), "favourites");
-eq("a known id selects itself", activeSection("blocked"), "blocked");
-eq("browse is known", activeSection("browse"), "browse");
-eq("countries is known", activeSection("countries"), "countries");
-eq("sync is known", activeSection("sync"), "sync");
-eq("favourites is known", activeSection("favourites"), "favourites");
-// an unknown id must land somewhere real rather than blanking the content pane.
-eq("unknown id falls back", activeSection("nonsense"), "favourites");
-eq("empty id falls back", activeSection(""), "favourites");
-eq("null id falls back", activeSection(null), "favourites");
+// the tabs drive which pane is visible, so this decides the whole window's
+// state; every id must resolve and nothing else may.
+eq("now is the landing tab", activeTab(undefined), "now");
+eq("a tab selects itself", activeTab("browse"), "browse");
+eq("library is a tab", activeTab("library"), "library");
+eq("settings is a tab", activeTab("settings"), "settings");
+// an unknown id must land somewhere real rather than blanking the pane.
+eq("unknown id falls back", activeTab("nonsense"), "now");
+eq("empty id falls back", activeTab(""), "now");
+eq("null id falls back", activeTab(null), "now");
+
+// the tray still opens the window by the old sidebar section names. each one is
+// a sub-view now, so it has to open the tab holding it — and select that
+// sub-view, or "Open r4dio" lands on the wrong half of Library.
+eq("favourites opens library", targetFor("favourites"), { tab: "library", sub: "favourites" });
+eq("blocked opens library", targetFor("blocked"), { tab: "library", sub: "blocked" });
+eq("sync opens the account", targetFor("sync"), { tab: "settings", sub: "account" });
+eq("countries opens settings", targetFor("countries"), { tab: "settings", sub: "countries" });
+eq("a tab with no sub-view says so", targetFor("browse"), { tab: "browse", sub: null });
+eq("an unknown id still lands", targetFor("nonsense"), { tab: "now", sub: null });
+
+// the signal column is bitrate, not a measurement — the scale must be monotonic
+// and a station with no bitrate must not claim one bar.
+eq("no bitrate shows nothing", signalBars(0), 0);
+eq("missing bitrate shows nothing", signalBars(undefined), 0);
+eq("320k is full", signalBars(320), 5);
+eq("256k is full", signalBars(256), 5);
+eq("192k is four", signalBars(192), 4);
+eq("128k is three", signalBars(128), 3);
+eq("64k is two", signalBars(64), 2);
+eq("32k is one", signalBars(32), 1);
+
+// a hint for a key the tab does not answer teaches the user to stop reading.
+eq("browse offers search", hintsFor("browse").some(([k]) => k === "⌘F"), true);
+eq("now playing does not", hintsFor("now").some(([k]) => k === "⌘F"), false);
+eq("an unknown tab still has hints", hintsFor("nonsense").length > 0, true);
 
 // rows lead with a flag; radio-browser country codes are two-letter and cased
 // inconsistently, and plenty of stations carry none at all.
@@ -121,10 +146,6 @@ eq("nothing filtered reads as zero", filterSummary(0, 0), "◔ 0 excluded · ⛌
 eq("missing counts read as zero", filterSummary(undefined, undefined), "◔ 0 excluded · ⛌ 0 blocked");
 
 // the pane header carries the count; an empty list must not read as a failure.
-eq("a count is shown", favouritesHeading(7), "7");
-eq("one favourite is not pluralised away", favouritesHeading(1), "1");
-eq("none reads as none, not an error", favouritesHeading(0), "none yet");
-eq("missing count reads as none", favouritesHeading(undefined), "none yet");
 
 // a blocked uuid the catalogue dropped still needs a row to be unblocked from.
 eq("a named station keeps its name", blockedName({ name: "Talk Radio" }), "Talk Radio");
@@ -132,9 +153,6 @@ eq("an unresolved station still reads", blockedName({ name: "" }), "Unknown stat
 eq("a whitespace name is not a name", blockedName({ name: "   " }), "Unknown station");
 eq("a missing station does not throw", blockedName(undefined), "Unknown station");
 
-eq("blocked count is shown", blockedHeading(14), "14");
-eq("no blocks reads as none", blockedHeading(0), "none");
-eq("missing block count reads as none", blockedHeading(undefined), "none");
 
 // "3 of 194": how many of the countries on offer are switched off.
 eq("excluded out of total", countryHeading(3, 194), "3 of 194");
