@@ -80,8 +80,10 @@ mountCountries(chost, () => changed++);
 await settle();
 
 eq("every country gets a row", chost.querySelectorAll(".srow").length, 5);
-eq("the header counts the excluded ones", chost.querySelector(".paneh .cnt").textContent, "3 of 5");
-eq("the excluded ones are switched on", chost.querySelectorAll(".toggle.on").length, 3);
+// the switch reads "this country plays", so the header counts what is on air
+// and the lit switches are the two that are NOT excluded.
+eq("the header counts what plays", chost.querySelector(".paneh .cnt").textContent, "2 of 5");
+eq("the playing ones are switched on", chost.querySelectorAll(".toggle.on").length, 2);
 eq("a code becomes a readable name", chost.querySelectorAll(".srow .nm")[0].textContent, "Switzerland");
 
 // RU/BY are hard-filtered before the window ever sees them; nothing the view
@@ -98,11 +100,13 @@ await settle();
 eq("the filter narrows the list", chost.querySelectorAll(".srow").length, 1);
 eq("the filter kept the match", chost.querySelector(".srow .nm").textContent, "Ukraine");
 
-// excluding the one visible row must not switch the three hidden ones back on.
+// switching the one visible row OFF must not switch the three hidden ones back
+// on — and what travels to the account is still the exclusion list, whatever
+// way round the switch is drawn.
 chost.querySelector(".srow").click();
 await settle();
 const sent = calls.at(-1);
-eq("the save sent the whole set, not the view", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
+eq("the save sends exclusions, not what is on air", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
 eq("the hidden exclusions survived", countryRows.filter((r) => r.excluded).length, 4);
 
 // two quick toggles overlap; the last click must be the last write, whichever
@@ -128,11 +132,13 @@ window.__TAURI__.core.invoke = real;
 eq("both quick toggles survive",
    countryRows.filter((r) => r.excluded).map((r) => r.code).sort(),
    ["CN", "IN", "PL", "UA"]);
-// what the window draws must agree with what was stored.
+// what the window draws must agree with what was stored — inverted, since a lit
+// switch means "on air" and the stored list is the excluded one. CN/IN/PL/UA are
+// excluded, so Switzerland is the only country left playing.
 const onNow = [...chost.querySelectorAll(".srow")]
   .filter((r) => r.querySelector(".toggle.on"))
   .map((r) => r.querySelector(".nm").textContent).sort();
-eq("the drawn switches match what was stored", onNow, ["China", "India", "Poland", "Ukraine"]);
+eq("the drawn switches match what was stored", onNow, ["Switzerland"]);
 
 // an unmatched filter is an empty state, not a broken list.
 input.value = "zzzz";

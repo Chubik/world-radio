@@ -157,8 +157,8 @@ eq("digits are not a flag", flagFor("12"), "");
 
 
 // "3 of 194": how many of the countries on offer are switched off.
-eq("excluded out of total", countryHeading(3, 194), "3 of 194");
-eq("none excluded is still honest", countryHeading(0, 194), "0 of 194");
+eq("on air out of total", countryHeading(191, 194), "191 of 194");
+eq("everything off is still honest", countryHeading(0, 194), "0 of 194");
 eq("missing counts read as zero", countryHeading(undefined, undefined), "0 of 0");
 
 // names come from the browser's own table rather than a shipped list of 194.
