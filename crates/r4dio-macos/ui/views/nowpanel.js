@@ -165,7 +165,9 @@ export function mountNowPanel({ onChanged }) {
     volbar.firstElementChild.style.width = `${level}%`;
     vol.textContent = `${level}`;
     mute.classList.toggle("muted", !!s.muted);
-    mute.textContent = s.muted ? "╳" : "▮▮";
+    // a word rather than a glyph: the two bars read as a pause button, and the
+    // one thing this control must not be mistaken for is play/stop.
+    mute.textContent = s.muted ? "MUTED" : "VOL";
 
     // the header line: the state, and the wall clock the design puts beside it.
     clock.replaceChildren();
