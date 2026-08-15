@@ -30,6 +30,11 @@ pub struct Backend {
     started_at: Option<i64>,
     /// the level to come back to when unmuting; None means not muted.
     premute: Option<f32>,
+    /// the station shuffle will play next, chosen ahead of time so the panel can
+    /// name it. it is drawn from the same pool at the same odds — the only
+    /// difference is when the die is rolled, and a "NEXT" line that then played
+    /// something else would be a lie.
+    queued: Option<StationPick>,
     mirror_seq: u64,
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
@@ -251,6 +256,7 @@ impl Backend {
             settings,
             started_at: None,
             premute: None,
+            queued: None,
             catalog,
             fav_path,
             hist_path,
@@ -374,9 +380,26 @@ impl Backend {
     }
 
     pub fn shuffle(&mut self) {
-        if let Some(pick) = self.state.pick_shuffle() {
+        // whatever was queued is what the panel promised, so it is what plays.
+        let pick = self.queued.take().or_else(|| self.state.pick_shuffle());
+        if let Some(pick) = pick {
             self.play_pick(pick);
         }
+        self.queue_next();
+    }
+
+    /// picks the station after this one. a scope or filter change invalidates it,
+    /// so it is re-rolled on every play rather than held across one.
+    fn queue_next(&mut self) {
+        self.queued = self.state.pick_shuffle().filter(|p| {
+            // queueing the station already playing would show "NEXT" naming what
+            // is on air, which reads as a bug even when the roll is honest.
+            self.state.now.as_ref().map(|n| &n.uuid) != Some(&p.uuid)
+        });
+    }
+
+    pub fn queued_next(&self) -> Option<&StationPick> {
+        self.queued.as_ref()
     }
 
     pub fn play_last(&mut self) {
@@ -443,6 +466,15 @@ impl Backend {
         self.started_at = Some(now_secs());
     }
 
+    /// how full the decode buffer is, 0.0-1.0. this is the number that predicts
+    /// a stutter before the listener hears one.
+    pub fn buffer_level(&self) -> Option<f32> {
+        if self.state.phase == Phase::Idle {
+            return None;
+        }
+        self.engine.as_ref().map(|e| e.buffer_level())
+    }
+
     /// how long the station now playing has been up, in seconds.
     pub fn uptime(&self) -> Option<i64> {
         let started = self.started_at?;
@@ -464,6 +496,9 @@ impl Backend {
     // the stamp is taken here, at the moment the user changes the scope, never
     // at sync time — a sync-time stamp would always outrank the other device.
     pub fn set_scope(&mut self, scope: Scope) {
+        // the pool changed, so the station queued from the old one is no longer
+        // a fair draw.
+        self.queued = None;
         self.state.set_scope(scope);
         let wire = match scope {
             Scope::All => radio_core::sync::Scope::All,
@@ -930,6 +965,7 @@ mod tests {
             settings: Settings::default(),
             started_at: None,
             premute: None,
+            queued: None,
             catalog,
             fav_path: dir.join("favorites.json"),
             hist_path: dir.join("history.json"),
@@ -1009,6 +1045,45 @@ mod tests {
             bitrate: 0,
             tags: String::new(),
         }
+    }
+
+    // the panel names the station shuffle will play next, so the promise has to
+    // be kept: whatever is queued is what plays, and it is never the station
+    // already on air.
+    #[test]
+    fn the_queued_station_is_the_one_that_plays() {
+        let mut b = test_backend();
+        b.state
+            .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        b.queue_next();
+        let promised = b.queued_next().map(|p| p.uuid.clone());
+        assert!(promised.is_some());
+
+        b.shuffle();
+        assert_eq!(b.state.now.as_ref().map(|n| n.uuid.clone()), promised);
+    }
+
+    #[test]
+    fn the_queue_never_names_the_station_already_playing() {
+        let mut b = test_backend();
+        // one station only: the next roll can only come up with that one, and it
+        // is what is already on air.
+        b.state.load_stations(vec![pick("a", "UA")], Vec::new());
+        b.shuffle();
+        assert_eq!(b.state.now.as_ref().unwrap().uuid, "a");
+        assert!(b.queued_next().is_none());
+    }
+
+    #[test]
+    fn changing_scope_drops_a_queue_drawn_from_the_old_pool() {
+        let mut b = test_backend();
+        b.state
+            .load_stations(vec![pick("a", "UA")], vec![pick("f", "PL")]);
+        b.queue_next();
+        assert!(b.queued_next().is_some());
+
+        b.set_scope(Scope::Favorites);
+        assert!(b.queued_next().is_none());
     }
 
     // the filter lives in profile.json, which another device may have written

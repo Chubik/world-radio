@@ -4,6 +4,13 @@ export JAVA_HOME
 EMULATOR_ID ?= $(shell $(ANDROID_HOME)/emulator/emulator -list-avds 2>/dev/null | head -1)
 ADB := $(ANDROID_HOME)/platform-tools/adb
 
+.PHONY: check-window
+# the macos window is javascript, which `cargo test` never looks at: a duplicate
+# const once shipped a blank window with every rust test green. this parses every
+# module and drives the now-playing panel against a fake backend.
+check-window:
+	node --experimental-vm-modules crates/r4dio-macos/ui/check.mjs
+
 .PHONY: android-emu android-build android-run android-install
 
 android-emu:

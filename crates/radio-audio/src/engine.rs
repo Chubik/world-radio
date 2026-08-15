@@ -54,6 +54,10 @@ pub struct AudioEngine {
     volume: SharedVolume,
     crossfade_on: Arc<AtomicBool>,
     tap: std::sync::Mutex<SampleCons>,
+    /// the two decode rings, so how full they are can be read without going
+    /// through the playback thread. a listener's "is this about to stutter?"
+    /// is answered by exactly this number.
+    rings: [Arc<std::sync::Mutex<SampleCons>>; 2],
     stop: Arc<AtomicBool>,
     done_rx: Receiver<()>,
 }
@@ -143,6 +147,7 @@ impl AudioEngine {
             volume,
             crossfade_on,
             tap: std::sync::Mutex::new(tap_cons),
+            rings: [Arc::clone(&cons_a), Arc::clone(&cons_b)],
             stop,
             done_rx,
         })
@@ -165,6 +170,23 @@ impl AudioEngine {
     pub fn poll_status(&self) -> Option<Status> {
         self.status_rx.try_recv().ok()
     }
+    /// how full the fuller of the two decode rings is, 0.0 to 1.0.
+    ///
+    /// the two slots alternate across a crossfade, so at any moment one of them
+    /// holds the stream that is playing and the other is draining or empty —
+    /// the max is the one that matters. a lock held by the playback thread is
+    /// skipped rather than waited on: this is drawn on a timer and must never
+    /// stall audio.
+    pub fn buffer_level(&self) -> f32 {
+        use ringbuf::traits::Observer;
+        let cap = RING_CAP as f32;
+        self.rings
+            .iter()
+            .filter_map(|r| r.try_lock().ok().map(|c| c.occupied_len() as f32 / cap))
+            .fold(0.0_f32, f32::max)
+            .clamp(0.0, 1.0)
+    }
+
     pub fn read_tap(&self, out: &mut [f32]) -> usize {
         use ringbuf::traits::Consumer;
         let mut tap = self.tap.lock().unwrap();
