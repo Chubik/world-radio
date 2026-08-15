@@ -3,6 +3,7 @@ import { mountAccount } from "./views/account.js";
 import { mountCountries } from "./views/countries.js";
 import { mountBlocked } from "./views/blocked.js";
 import { mountShortcuts } from "./views/shortcuts.js";
+import { mountAppearance } from "./views/appearance.js";
 import { mountLibrary } from "./views/library.js";
 import { mountNowPanel } from "./views/nowpanel.js";
 
@@ -19,6 +20,11 @@ const account = mountAccount(document.getElementById("account_host"), () => {
   blocked.refresh();
 });
 mountShortcuts(document.getElementById("pane_shortcuts"));
+// the meter lives in the now-panel but is configured here, so the choice is
+// pushed straight at it rather than waiting for the next window open.
+const appearance = mountAppearance(document.getElementById("pane_appearance"), {
+  onStyle: (style) => now.setStyle(style),
+});
 
 // the two halves of the library are separate because they answer separate
 // questions — "what is this" and "what next" — and only the list reloads when
@@ -35,6 +41,7 @@ const library = mountLibrary(document.getElementById("listbody"), {
 });
 
 const REFRESH = {
+  appearance: () => appearance.refresh(),
   countries: () => countries.refresh(),
   blocked: () => blocked.refresh(),
   account: () => account.refresh(),

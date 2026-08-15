@@ -215,6 +215,28 @@
 .sub.active { display: block; }
 
 .sectlbl { color: var(--dim); font-size: 10.5px; letter-spacing: .1em; margin: 14px 0 8px; }
+.themerow { display: flex; align-items: center; gap: 10px; padding: 6px 4px; font-size: 12.5px; cursor: pointer; }
+.themerow:hover, .themerow.sel { background: rgba(212,154,58,.1); }
+.themerow .car { width: 10px; color: var(--hot); flex: none; }
+.themerow .nm { width: 90px; flex: none; color: var(--bright); }
+.themerow.sel .nm { color: var(--hi); font-weight: 600; }
+.themerow .desc { color: var(--dim); font-size: 11px; }
+
+.gainrow { display: flex; align-items: center; gap: 12px; padding: 6px 4px; max-width: 420px; }
+.gainrow .lbl { font-size: 10.5px; color: var(--dim); letter-spacing: .08em; flex: none; }
+.gainrow input[type="range"] {
+  flex: 1; appearance: none; height: 4px; border-radius: 2px;
+  background: var(--rule); outline: none;
+}
+.gainrow input[type="range"]::-webkit-slider-thumb {
+  appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--hi); cursor: pointer;
+}
+
+/* the meter's own off state: the panel keeps its frame so the layout does not
+   jump, but nothing is drawn inside it. */
+.art.off i { display: none; }
+
 .kbdrow { display: flex; gap: 14px; padding: 3px 4px; font-size: 12px; }
 .kbdrow .k { color: var(--hi); width: 70px; flex: none; }
 .kbdrow .d { color: var(--dim); }

@@ -111,6 +111,24 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
     state.lock().unwrap().read_spectrum(34)
 }
 
+/// how the meter is drawn and how hard it is driven. per-machine, like volume.
+#[derive(Serialize)]
+pub struct EqSettings {
+    pub style: String,
+    pub gain: f32,
+}
+
+#[tauri::command]
+pub fn eq_settings(state: tauri::State<Shared>) -> EqSettings {
+    let (style, gain) = state.lock().unwrap().eq_settings();
+    EqSettings { style, gain }
+}
+
+#[tauri::command]
+pub fn set_eq(state: tauri::State<Shared>, style: String, gain: f32) {
+    state.lock().unwrap().set_eq(style, gain);
+}
+
 #[derive(Serialize)]
 pub struct StationRow {
     pub uuid: String,

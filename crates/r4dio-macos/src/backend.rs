@@ -24,6 +24,7 @@ pub struct Backend {
     pending_path: PathBuf,
     profile_path: PathBuf,
     settings_path: PathBuf,
+    settings: Settings,
     mirror_seq: u64,
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
@@ -137,33 +138,62 @@ fn startup_profile(
     profile
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Settings {
-    #[serde(default)]
+    #[serde(default = "default_volume")]
     volume: f32,
+    /// how the meter is drawn. it is a name rather than an enum here because the
+    /// window owns the drawing; the backend only remembers the choice.
+    #[serde(default = "default_eq_style")]
+    eq_style: String,
+    /// the analyser's divisor: lower reads quieter music, higher tames a loud
+    /// station. mirrors the tui's `fft_divisor`.
+    #[serde(default = "default_eq_gain")]
+    eq_gain: f32,
 }
 
-/// volume is per-machine — unlike everything in `profile.json`, it must never
-/// travel to another device, so it gets its own file instead.
-fn load_volume(path: &std::path::Path) -> f32 {
+fn default_volume() -> f32 {
+    0.8
+}
+
+fn default_eq_style() -> String {
+    "bars".to_string()
+}
+
+fn default_eq_gain() -> f32 {
+    12.0
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            volume: default_volume(),
+            eq_style: default_eq_style(),
+            eq_gain: default_eq_gain(),
+        }
+    }
+}
+
+/// these are per-machine — unlike everything in `profile.json`, they must never
+/// travel to another device, so they get their own file. a screen the user sits
+/// two feet from and one across the room want different gain.
+fn load_settings(path: &std::path::Path) -> Settings {
     let Ok(raw) = std::fs::read_to_string(path) else {
-        return 0.8;
+        return Settings::default();
     };
-    serde_json::from_str::<Settings>(&raw)
-        .map(|s| s.volume)
-        .unwrap_or(0.8)
+    serde_json::from_str::<Settings>(&raw).unwrap_or_default()
 }
 
-fn save_volume(path: &std::path::Path, volume: f32) {
-    let body = match serde_json::to_string(&Settings { volume }) {
+fn save_settings(path: &std::path::Path, settings: &Settings) {
+    let body = match serde_json::to_string(settings) {
         Ok(body) => body,
         Err(e) => {
-            eprintln!("encode volume failed: {e}");
+            eprintln!("encode settings failed: {e}");
             return;
         }
     };
     if let Err(e) = std::fs::write(path, body) {
-        eprintln!("save volume failed: {e}");
+        eprintln!("save settings failed: {e}");
     }
 }
 
@@ -201,7 +231,8 @@ impl Backend {
         // open on the same scope and shuffle inside the same filter.
         let profile = startup_profile(&profile_path, &data.join("config.toml"));
         seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
-        state.set_volume(load_volume(&settings_path));
+        let settings = load_settings(&settings_path);
+        state.set_volume(settings.volume);
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
@@ -212,6 +243,7 @@ impl Backend {
             state,
             engine,
             spectrum: radio_core::spectrum::Spectrum::new(),
+            settings,
             catalog,
             fav_path,
             hist_path,
@@ -375,7 +407,8 @@ impl Backend {
         if let Some(engine) = &self.engine {
             engine.set_volume(self.state.volume);
         }
-        save_volume(&self.settings_path, self.state.volume);
+        self.settings.volume = self.state.volume;
+        save_settings(&self.settings_path, &self.settings);
     }
 
     // the stamp is taken here, at the moment the user changes the scope, never
@@ -438,6 +471,7 @@ impl Backend {
         }
         let mut buf = vec![0.0f32; 2048];
         let got = engine.read_tap(&mut buf);
+        self.spectrum.set_divisor(self.settings.eq_gain);
         self.spectrum.analyze(&buf[..got], bars)
     }
 
@@ -472,6 +506,18 @@ impl Backend {
                 bitrate: s.bitrate,
             })
             .collect()
+    }
+
+    pub fn eq_settings(&self) -> (String, f32) {
+        (self.settings.eq_style.clone(), self.settings.eq_gain)
+    }
+
+    pub fn set_eq(&mut self, style: String, gain: f32) {
+        self.settings.eq_style = style;
+        // the analyser divides by this, so zero would be a division by nothing
+        // and a negative one would invert the meter.
+        self.settings.eq_gain = gain.clamp(2.0, 40.0);
+        save_settings(&self.settings_path, &self.settings);
     }
 
     pub fn history_rows(&mut self) -> Vec<crate::commands::HistoryRow> {
@@ -813,6 +859,7 @@ mod tests {
             state: MiniState::new(),
             engine: None,
             spectrum: radio_core::spectrum::Spectrum::new(),
+            settings: Settings::default(),
             catalog,
             fav_path: dir.join("favorites.json"),
             hist_path: dir.join("history.json"),
@@ -1336,7 +1383,7 @@ mod tests {
     // volume is per-machine, so it lives in its own file rather than in
     // profile.json — a loud desktop must not push its level onto a phone.
     #[test]
-    fn a_saved_volume_survives_a_restart() {
+    fn saved_settings_survive_a_restart() {
         let dir = std::env::temp_dir().join(format!(
             "r4dio-volume-{}-{}",
             std::process::id(),
@@ -1345,10 +1392,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let settings_path = dir.join("settings.json");
 
-        save_volume(&settings_path, 0.35);
-        let loaded = load_volume(&settings_path);
+        save_settings(
+            &settings_path,
+            &Settings {
+                volume: 0.35,
+                eq_style: "wave".into(),
+                eq_gain: 6.0,
+            },
+        );
+        let loaded = load_settings(&settings_path);
 
-        assert_eq!(loaded, 0.35);
+        assert_eq!(loaded.volume, 0.35);
+        // the meter's settings ride the same file, so they have to survive with it.
+        assert_eq!(loaded.eq_style, "wave");
+        assert_eq!(loaded.eq_gain, 6.0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

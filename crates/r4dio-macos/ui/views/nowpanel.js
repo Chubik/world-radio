@@ -31,6 +31,7 @@ export function mountNowPanel({ onChanged }) {
   // whether the bars are already parked at their silent height, so a stopped
   // stream repaints them once instead of on every tick.
   let atRest = false;
+  let style = "bars";
 
   const bars = [];
   for (let i = 0; i < BARS; i++) {
@@ -40,22 +41,54 @@ export function mountNowPanel({ onChanged }) {
     bars.push(bar);
   }
 
-  function paintSpectrum(values) {
+  /** each style is the same levels drawn a different way, so switching one
+   *  never touches the analyser — only what the bars do with what it says. */
+  const SHAPES = {
+    // a level per bar, growing from the floor.
+    bars: (v) => ({ height: pct(v), offset: 0 }),
+    // the same, hung from the middle so it grows both ways.
+    mirror: (v) => ({ height: pct(v), offset: (100 - clamp(v)) / 2 }),
+    // a single mark riding the top of where the bar would end.
+    dots: (v) => ({ height: 8, offset: Math.max(0, clamp(v) - 8) }),
+    // neighbours averaged into the level, which rounds the profile off.
+    wave: (v) => ({ height: pct(v), offset: 0 }),
+  };
+
+  const clamp = (v) => Math.max(6, Math.min(100, Math.round(v * 100)));
+  const pct = (v) => clamp(v);
+
+  function smooth(values) {
+    // wave reads the shape rather than the peaks, so each bar is pulled towards
+    // its neighbours — the same levels, with the spikes taken off.
+    return values.map((v, i) => {
+      const a = values[i - 1] ?? v;
+      const b = values[i + 1] ?? v;
+      return (a + v * 2 + b) / 4;
+    });
+  }
+
+  function paintSpectrum(input) {
     // an idle station keeps the bars at rest rather than at zero: a flat row of
     // nothing reads as a broken meter, a low flat row reads as silence. writing
     // that row once is enough — repainting it on a timer is work with no pixels
     // to show for it.
-    if (!values || values.length === 0) {
+    if (!input || input.length === 0) {
       atRest = true;
       art.classList.add("idle");
-      bars.forEach((bar) => (bar.style.height = "6%"));
+      bars.forEach((bar) => {
+        bar.style.height = "6%";
+        bar.style.marginBottom = "0";
+      });
       return;
     }
     atRest = false;
     art.classList.remove("idle");
+    const values = style === "wave" ? smooth(input) : input;
+    const shape = SHAPES[style] ?? SHAPES.bars;
     bars.forEach((bar, i) => {
-      const v = values[i % values.length] ?? 0;
-      bar.style.height = `${Math.max(6, Math.min(100, Math.round(v * 100)))}%`;
+      const { height, offset } = shape(values[i % values.length] ?? 0);
+      bar.style.height = `${height}%`;
+      bar.style.marginBottom = `${offset}%`;
     });
   }
 
@@ -117,7 +150,22 @@ export function mountNowPanel({ onChanged }) {
     if (was !== next.station && onChanged) onChanged();
   }
 
+  /** the meter's own settings, told to it by the settings pane. `off` stops the
+   *  polling outright rather than drawing an empty meter on a timer. */
+  function setStyle(next) {
+    style = next;
+    art.classList.toggle("off", next === "off");
+    if (next === "off") {
+      paintSpectrum(null);
+      return;
+    }
+    atRest = false;
+  }
+
   async function tickSpectrum() {
+    if (style === "off") {
+      return;
+    }
     // nothing playing means nothing to meter: the bars are already at rest, so
     // asking the backend five times a second for silence is pure cpu.
     if (state?.phase !== "playing") {
@@ -179,6 +227,9 @@ export function mountNowPanel({ onChanged }) {
 
   paint();
   paintSpectrum(null);
+  invoke("eq_settings")
+    .then((eq) => setStyle(eq.style))
+    .catch((e) => console.error("eq_settings failed", e));
 
-  return { refresh, toggle, shuffle, sleep, wake };
+  return { refresh, toggle, shuffle, sleep, wake, setStyle };
 }
