@@ -9,6 +9,7 @@ fn to_pick(s: &radio_core::catalog::Station) -> StationPick {
         country: s.countrycode.clone(),
         codec: s.codec.clone(),
         bitrate: s.bitrate,
+        tags: s.tags.clone(),
     }
 }
 
@@ -24,6 +25,22 @@ pub fn last_played(catalog: &Catalog) -> anyhow::Result<Option<StationPick>> {
     };
     let station = catalog.station_by_uuid(uuid)?;
     Ok(station.as_ref().map(to_pick))
+}
+
+/// the stations played before, newest first, with the moment each was played.
+///
+/// history is stored as ids and stamps; a station whose id no longer resolves in
+/// the catalogue is dropped rather than shown as a blank row — the catalogue is
+/// re-fetched often and an id can leave it.
+pub fn played_before(catalog: &Catalog) -> anyhow::Result<Vec<(StationPick, i64)>> {
+    let mut out = Vec::new();
+    for play in catalog.history_plays() {
+        let Some(station) = catalog.station_by_uuid(&play.id)? else {
+            continue;
+        };
+        out.push((to_pick(&station), play.at));
+    }
+    Ok(out)
 }
 
 pub fn toggle_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Vec<StationPick>> {
@@ -72,6 +89,7 @@ pub fn blocked_stations(catalog: &Catalog) -> anyhow::Result<Vec<StationPick>> {
                 country: String::new(),
                 codec: String::new(),
                 bitrate: 0,
+                tags: String::new(),
             }),
         }
     }
@@ -149,11 +167,34 @@ fn bounded(catalog: &Catalog, q: &radio_core::catalog::SearchQuery) -> anyhow::R
     Ok(page(visible(catalog, found)))
 }
 
-pub fn search_by_name(catalog: &Catalog, name: &str) -> anyhow::Result<StationPage> {
+/// the browse query the window builds: a name plus whatever filter chips are
+/// switched on. every field here is one the cache can already index on, so a
+/// filter costs nothing more than a broader search would.
+pub fn search_filtered(
+    catalog: &Catalog,
+    name: &str,
+    genre: Option<String>,
+    country: Option<String>,
+    codec: Option<String>,
+    bitrate_min: Option<u32>,
+) -> anyhow::Result<StationPage> {
+    if country.as_deref().is_some_and(is_hidden_country) {
+        return Ok(StationPage {
+            stations: Vec::new(),
+            capped: false,
+        });
+    }
     bounded(
         catalog,
         &radio_core::catalog::SearchQuery {
-            name: Some(name.to_string()),
+            name: match name.trim().is_empty() {
+                true => None,
+                false => Some(name.to_string()),
+            },
+            countrycodes: country.map(|c| vec![c.to_uppercase()]).unwrap_or_default(),
+            tags: genre.map(|g| vec![g]).unwrap_or_default(),
+            codecs: codec.map(|c| vec![c]).unwrap_or_default(),
+            bitrate_min,
             ..Default::default()
         },
     )
@@ -458,13 +499,13 @@ mod tests {
         ])
         .unwrap();
 
-        let hits = search_by_name(&cat, "jazz").unwrap();
+        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "a");
         assert!(!hits.capped);
         // a term that matches nothing must come back empty rather than falling
         // through to the whole catalogue.
-        assert!(search_by_name(&cat, "zzzznothing")
+        assert!(search_filtered(&cat, "zzzznothing", None, None, None, None)
             .unwrap()
             .stations
             .is_empty());
@@ -481,7 +522,7 @@ mod tests {
             .collect();
         cat.ingest(&many).unwrap();
 
-        let hits = search_by_name(&cat, "jazz").unwrap();
+        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
         assert_eq!(hits.stations.len(), RESULT_LIMIT);
         assert!(hits.capped);
     }
@@ -495,7 +536,7 @@ mod tests {
             .unwrap();
         cat.toggle_blacklist("a");
 
-        let hits = search_by_name(&cat, "jazz").unwrap();
+        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "b");
     }
@@ -508,7 +549,7 @@ mod tests {
             .unwrap();
         cat.set_excluded_countries(vec!["PL".into()]);
 
-        let hits = search_by_name(&cat, "jazz").unwrap();
+        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "b");
     }
@@ -605,7 +646,7 @@ mod tests {
         eprintln!("catalogue rows: {}", cat.catalog_count().unwrap());
         for term in ["jazz", "radio", "fm", "the"] {
             let t = Instant::now();
-            let page = search_by_name(&cat, term).unwrap();
+            let page = search_filtered(&cat, term, None, None, None, None).unwrap();
             eprintln!(
                 "search {term:>6}: {:>4} rows capped={} in {:?}",
                 page.stations.len(),

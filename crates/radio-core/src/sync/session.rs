@@ -26,6 +26,7 @@ pub fn outgoing(local: LocalState) -> SyncData {
         shuffle_filter: payload.shuffle_filter,
         scope: payload.scope,
         theme: payload.theme,
+        settings: payload.settings,
         history: payload.history,
     }
 }
@@ -89,6 +90,7 @@ pub struct ProfilePayload {
     pub shuffle_filter: Option<Lww>,
     pub scope: Option<Lww>,
     pub theme: Option<Lww>,
+    pub settings: Option<Lww>,
     pub history: Vec<HistoryRecord>,
 }
 
@@ -97,6 +99,13 @@ pub fn profile_payload(profile: &Profile, plays: &[Play]) -> ProfilePayload {
         shuffle_filter: profile_lww_filter(profile),
         scope: profile_lww_string(&profile.scope, profile.scope_at),
         theme: profile_lww_string(&profile.theme, profile.theme_at),
+        settings: match profile.settings_at {
+            0 => None,
+            at => Some(Lww {
+                value: profile.settings.clone(),
+                at,
+            }),
+        },
         history: local_history_records(plays),
     }
 }
@@ -108,11 +117,13 @@ pub fn apply_remote_profile(
     shuffle_filter: &Option<Lww>,
     scope: &Option<Lww>,
     theme: &Option<Lww>,
+    settings: &Option<Lww>,
 ) -> ProfileChange {
     profile.apply_newer(
         remote_lww_filter(shuffle_filter),
         remote_lww_string(scope),
         remote_lww_string(theme),
+        settings.as_ref().map(|l| (l.value.clone(), l.at)),
     )
 }
 
@@ -259,6 +270,7 @@ mod tests {
                 value: serde_json::json!("nord"),
                 at: 200,
             }),
+            &None,
         );
         assert!(!changed.scope);
         assert!(changed.theme);
@@ -277,6 +289,7 @@ mod tests {
             }),
             &None,
             &None,
+            &None,
         );
         assert!(changed.countries);
         assert_eq!(p.countries, vec!["UA".to_string(), "PL".to_string()]);
@@ -292,6 +305,7 @@ mod tests {
                 value: serde_json::json!("not-an-object"),
                 at: 99,
             }),
+            &None,
             &None,
             &None,
         );

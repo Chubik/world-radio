@@ -2,7 +2,7 @@
 <html><head><meta charset="UTF-8" /><link rel="stylesheet" href="../main.css" /></head>
 <body><pre id="out"></pre><div id="blocked_host"></div><div id="countries_host"></div>
 <script type="module">
-// the two filter views drive real DOM, so they are checked against a stubbed
+// both settings lists drive real DOM, so they are checked against a stubbed
 // tauri bridge rather than by launching the app.
 const calls = [];
 let blockedRows = [
@@ -36,8 +36,8 @@ window.__TAURI__ = {
   event: { listen: async () => {} },
 };
 
-const { mountBlocked } = await import("./blocked.js");
 const { mountCountries } = await import("./countries.js");
+const { mountBlocked } = await import("./blocked.js");
 
 const out = [];
 let failed = 0;
@@ -48,8 +48,9 @@ function eq(name, got, want) {
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-const bhost = document.getElementById("blocked_host");
+// blocked stations live in settings now, beside the country exclusions.
 let changed = 0;
+const bhost = document.getElementById("blocked_host");
 mountBlocked(bhost, () => changed++);
 await settle();
 
@@ -59,12 +60,13 @@ eq("an unresolved station still names itself",
 eq("the blocked count is in the header", bhost.querySelector(".paneh .cnt").textContent, "2");
 eq("each row can be unblocked", bhost.querySelectorAll(".act.unblock").length, 2);
 
-// pressing unblock must remove that row and tell the sidebar its count moved.
+// unblocking must drop the row and tell the library, whose results now include
+// a station that was being filtered out of them.
 bhost.querySelectorAll(".act.unblock")[0].click();
 await settle();
 eq("unblocking drops the row", bhost.querySelectorAll(".srow").length, 1);
 eq("unblocking sent the uuid", calls.at(-1)[1], { uuid: "a" });
-eq("the sidebar was told", changed, 1);
+eq("the library was told", changed, 1);
 
 // the last unblock leaves an empty state that reads as a state, not a failure.
 bhost.querySelectorAll(".act.unblock")[0].click();
@@ -78,8 +80,10 @@ mountCountries(chost, () => changed++);
 await settle();
 
 eq("every country gets a row", chost.querySelectorAll(".srow").length, 5);
-eq("the header counts the excluded ones", chost.querySelector(".paneh .cnt").textContent, "3 of 5");
-eq("the excluded ones are switched on", chost.querySelectorAll(".toggle.on").length, 3);
+// the switch reads "this country plays", so the header counts what is on air
+// and the lit switches are the two that are NOT excluded.
+eq("the header counts what plays", chost.querySelector(".paneh .cnt").textContent, "2 of 5");
+eq("the playing ones are switched on", chost.querySelectorAll(".toggle.on").length, 2);
 eq("a code becomes a readable name", chost.querySelectorAll(".srow .nm")[0].textContent, "Switzerland");
 
 // RU/BY are hard-filtered before the window ever sees them; nothing the view
@@ -96,11 +100,13 @@ await settle();
 eq("the filter narrows the list", chost.querySelectorAll(".srow").length, 1);
 eq("the filter kept the match", chost.querySelector(".srow .nm").textContent, "Ukraine");
 
-// excluding the one visible row must not switch the three hidden ones back on.
+// switching the one visible row OFF must not switch the three hidden ones back
+// on — and what travels to the account is still the exclusion list, whatever
+// way round the switch is drawn.
 chost.querySelector(".srow").click();
 await settle();
 const sent = calls.at(-1);
-eq("the save sent the whole set, not the view", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
+eq("the save sends exclusions, not what is on air", sent[1].codes.sort(), ["CH", "CN", "IN", "UA"]);
 eq("the hidden exclusions survived", countryRows.filter((r) => r.excluded).length, 4);
 
 // two quick toggles overlap; the last click must be the last write, whichever
@@ -126,11 +132,13 @@ window.__TAURI__.core.invoke = real;
 eq("both quick toggles survive",
    countryRows.filter((r) => r.excluded).map((r) => r.code).sort(),
    ["CN", "IN", "PL", "UA"]);
-// what the window draws must agree with what was stored.
+// what the window draws must agree with what was stored — inverted, since a lit
+// switch means "on air" and the stored list is the excluded one. CN/IN/PL/UA are
+// excluded, so Switzerland is the only country left playing.
 const onNow = [...chost.querySelectorAll(".srow")]
   .filter((r) => r.querySelector(".toggle.on"))
   .map((r) => r.querySelector(".nm").textContent).sort();
-eq("the drawn switches match what was stored", onNow, ["China", "India", "Poland", "Ukraine"]);
+eq("the drawn switches match what was stored", onNow, ["Switzerland"]);
 
 // an unmatched filter is an empty state, not a broken list.
 input.value = "zzzz";

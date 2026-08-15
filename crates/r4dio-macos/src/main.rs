@@ -40,8 +40,13 @@ fn set_regular(app: &tauri::AppHandle) {
 #[cfg(not(target_os = "macos"))]
 fn set_regular(_app: &tauri::AppHandle) {}
 
-// ⌥⇧R shuffles from inside any app, including another app's fullscreen space,
+// ⌥R shuffles from inside any app, including another app's fullscreen space,
 // where the panel cannot be drawn at all.
+//
+// one modifier rather than two: this is the gesture the whole app is built
+// around, and it has to be reachable with one hand without looking. it cannot
+// be a bare `r` — a global hotkey with no modifier would swallow the letter in
+// every app the user types in. the cost is that ⌥R no longer inserts ®.
 //
 // no accessibility permission is involved: a plain key like R resolves to a
 // carbon `RegisterEventHotKey` registration, which macos grants without a
@@ -58,7 +63,7 @@ fn register_shuffle_hotkey(app: &tauri::AppHandle) {
         Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
     };
 
-    let shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyR);
+    let shortcut = Shortcut::new(Some(Modifiers::ALT), Code::KeyR);
     let plugin = tauri_plugin_global_shortcut::Builder::new()
         .with_handler(move |app, pressed, event| {
             // the handler fires on press *and* release; acting on both would
@@ -190,6 +195,13 @@ fn show_main(app: &tauri::AppHandle, section: &str) {
     // the window is reused rather than recreated, so the section it should open
     // on has to be pushed in; a fresh load would otherwise land on favourites.
     let _ = win.emit("show-section", section);
+}
+
+/// the panel's way into the full window. the tray menu could already do this,
+/// but only behind a right-click — this makes the path click, then click.
+#[tauri::command]
+fn open_window(app: tauri::AppHandle) {
+    show_main(&app, "now");
 }
 
 fn account_masked() -> String {
@@ -474,6 +486,12 @@ fn run(backend: backend::Backend) {
             commands::stations_in,
             commands::add_favourite,
             commands::favourite_ids,
+            commands::history,
+            commands::toggle_mute,
+            commands::retry,
+            commands::eq_settings,
+            commands::set_eq,
+            open_window,
             account::create_account,
             account::account_state,
             account::sign_in,

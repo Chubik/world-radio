@@ -6,6 +6,27 @@ pub struct StationPick {
     pub country: String,
     pub codec: String,
     pub bitrate: u32,
+    /// radio-browser's comma-run of tags. the window shows the first one as the
+    /// station's genre — the rest are usually duplicates and spelling variants.
+    pub tags: String,
+}
+
+/// radio-browser stores tags as one comma-run, often a dozen near-duplicates
+/// ("jazz,Jazz,smooth jazz"). the first is the one the station chose to lead
+/// with, and one word is all a row has space for.
+pub fn first_tag(tags: &str) -> String {
+    tags.split(',')
+        .map(str::trim)
+        .find(|t| is_genre(t))
+        .unwrap_or_default()
+        .to_lowercase()
+}
+
+/// stations tag themselves with all sorts of things — "107.9 fm", "2024", a
+/// callsign. a genre column showing a frequency is worse than an empty one, so
+/// anything that leads with a digit is skipped in favour of the next tag.
+fn is_genre(tag: &str) -> bool {
+    !tag.is_empty() && !tag.starts_with(|c: char| c.is_ascii_digit())
 }
 
 /// the panel's top-right line. parts are dropped rather than shown empty, so a
@@ -54,13 +75,6 @@ pub fn state_labels(phase: Phase) -> (&'static str, &'static str) {
     }
 }
 
-pub fn spectrum_bars(n: usize) -> Vec<f32> {
-    const SEED: [f32; 14] = [
-        5.0, 7.0, 4.0, 8.0, 6.0, 3.0, 7.0, 5.0, 8.0, 4.0, 6.0, 7.0, 3.0, 5.0,
-    ];
-    (0..n).map(|i| SEED[i % SEED.len()] / 8.0).collect()
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     All,
@@ -71,6 +85,13 @@ pub enum Scope {
 pub struct MiniState {
     pub phase: Phase,
     pub now: Option<StationPick>,
+    /// what the stream says is playing right now, from its icy metadata. many
+    /// stations send nothing, so this is absent far more often than it is set.
+    pub track: Option<String>,
+    /// how many times the engine has retried this station without giving up.
+    /// the design shows retrying apart from buffering, because one is the
+    /// stream working and the other is it failing.
+    pub retries: u32,
     pub volume: f32,
     pub scope: Scope,
     all: Vec<StationPick>,
@@ -83,6 +104,8 @@ impl MiniState {
     pub fn new() -> Self {
         Self {
             phase: Phase::Idle,
+            track: None,
+            retries: 0,
             now: None,
             volume: 0.8,
             scope: Scope::All,
@@ -188,6 +211,20 @@ impl MiniState {
 
     pub fn apply_status(&mut self, status: radio_audio::Status) {
         use radio_audio::Status;
+        // the title rides the status and is dropped by anything that is not a
+        // play: carrying the last station's track under the next one is worse
+        // than showing none.
+        match &status {
+            Status::Playing { title, .. } => {
+                self.track = title.clone().filter(|t| !t.trim().is_empty());
+                self.retries = 0;
+            }
+            Status::Retrying(n) => self.retries = *n,
+            _ => {
+                self.track = None;
+                self.retries = 0;
+            }
+        }
         self.phase = match status {
             Status::Playing { .. } => Phase::Playing,
             Status::Buffering | Status::Retrying(_) => Phase::Buffering,
@@ -208,6 +245,27 @@ impl Default for MiniState {
 mod tests {
     use super::*;
 
+    #[test]
+    fn first_tag_takes_the_leading_tag() {
+        assert_eq!(first_tag("jazz,smooth jazz,lounge"), "jazz");
+        assert_eq!(first_tag("Lounge"), "lounge");
+    }
+
+    #[test]
+    fn first_tag_skips_a_frequency_for_a_real_genre() {
+        // "107.9 fm,dance" is a real row: the station led with its dial position.
+        assert_eq!(first_tag("107.9 fm,dance"), "dance");
+        assert_eq!(first_tag("2024,pop"), "pop");
+    }
+
+    #[test]
+    fn first_tag_is_empty_rather_than_wrong() {
+        assert_eq!(first_tag(""), "");
+        assert_eq!(first_tag(" , , "), "");
+        // nothing but a frequency leaves the column blank, which is honest.
+        assert_eq!(first_tag("107.9 fm"), "");
+    }
+
     fn st(uuid: &str, url: &str) -> StationPick {
         StationPick {
             uuid: uuid.into(),
@@ -216,6 +274,7 @@ mod tests {
             country: String::new(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         }
     }
 
@@ -227,6 +286,7 @@ mod tests {
             country: country.into(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         }
     }
 
@@ -449,14 +509,6 @@ mod tests {
         assert_eq!(state_labels(Phase::Buffering), ("···", "SHUFFLE"));
         assert_eq!(state_labels(Phase::Playing), ("LIVE", "SHUFFLE"));
         assert_eq!(state_labels(Phase::Error), ("OFFLINE", "RETRY"));
-    }
-
-    #[test]
-    fn spectrum_bars_returns_n_values_in_range() {
-        let b = spectrum_bars(16);
-        assert_eq!(b.len(), 16);
-        assert!(b.iter().all(|&v| (0.0..=1.0).contains(&v)));
-        assert_eq!(spectrum_bars(0).len(), 0);
     }
 
     #[test]
