@@ -598,16 +598,41 @@ impl Backend {
             .collect()
     }
 
+    /// the meter's look, taken from the account rather than this machine — the
+    /// user picked it once and every device they own should draw it that way.
+    /// the local file is the fallback for a device that has never synced.
     pub fn eq_settings(&self) -> (String, f32) {
-        (self.settings.eq_style.clone(), self.settings.eq_gain)
+        let profile = radio_core::sync::Profile::load(&self.profile_path);
+        let style = profile
+            .setting("eq_style")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.settings.eq_style.clone());
+        let gain = profile
+            .setting("eq_gain")
+            .and_then(serde_json::Value::as_f64)
+            .map(|g| g as f32)
+            .unwrap_or(self.settings.eq_gain);
+        (style, gain)
     }
 
     pub fn set_eq(&mut self, style: String, gain: f32) {
-        self.settings.eq_style = style;
         // the analyser divides by this, so zero would be a division by nothing
         // and a negative one would invert the meter.
-        self.settings.eq_gain = gain.clamp(2.0, 40.0);
+        let gain = gain.clamp(2.0, 40.0);
+        self.settings.eq_style = style.clone();
+        self.settings.eq_gain = gain;
+        // written locally as well as to the profile: the meter has to draw
+        // correctly on a machine that has never signed in.
         save_settings(&self.settings_path, &self.settings);
+
+        let mut profile = radio_core::sync::Profile::load(&self.profile_path);
+        let now = now_secs();
+        profile.set_setting("eq_style", serde_json::json!(style), now);
+        profile.set_setting("eq_gain", serde_json::json!(gain), now);
+        if let Err(e) = profile.save(&self.profile_path) {
+            eprintln!("save eq settings failed: {e}");
+        }
     }
 
     pub fn history_rows(&mut self) -> Vec<crate::commands::HistoryRow> {
@@ -858,6 +883,7 @@ impl Backend {
             &merged.shuffle_filter,
             &merged.scope,
             &merged.theme,
+            &merged.settings,
         );
         if changed.any() {
             profile.save(&self.profile_path)?;

@@ -36,6 +36,10 @@ pub struct SyncData {
     pub scope: Option<Lww>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<Lww>,
+    /// display preferences as one bag. skipped when unset, so a server that has
+    /// never heard of it sees the payload it always saw.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Lww>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<HistoryRecord>,
 }

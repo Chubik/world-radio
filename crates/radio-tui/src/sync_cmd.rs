@@ -224,6 +224,7 @@ fn push_and_apply(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::R
         &merged.shuffle_filter,
         &merged.scope,
         &merged.theme,
+        &merged.settings,
     );
     if changed.any() {
         profile.save(&paths.profile)?;

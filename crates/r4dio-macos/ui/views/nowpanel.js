@@ -202,7 +202,13 @@ export function mountNowPanel({ onChanged }) {
       return;
     }
     const was = state?.station;
+    const wasStyle = state?.eq_style;
     state = next;
+    // the style rides the poll, so a change made on another device lands here
+    // rather than waiting for the window to be reopened.
+    if (next.eq_style && next.eq_style !== wasStyle) {
+      setStyle(next.eq_style);
+    }
     paint();
     if (was !== next.station && onChanged) onChanged();
   }

@@ -343,6 +343,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
         &merged.shuffle_filter,
         &merged.scope,
         &merged.theme,
+        &merged.settings,
     );
     if changed.any() {
         if let Err(e) = profile.save(&paths.profile) {
