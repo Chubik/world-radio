@@ -145,9 +145,9 @@ export function signalBars(bitrate) {
 const HINTS = {
   library: [
     ["↑ ↓", "select"], ["↵", "play"], ["SPACE", "play / stop"], ["F", "favourite"],
-    ["r", "shuffle"], ["1–3", "segment"], ["⌘F", "search"],
+    ["r", "shuffle"], ["R", "retry"], ["M", "mute"], ["1–3", "segment"], ["⌘F", "search"],
   ],
-  settings: [["SPACE", "play / stop"], ["r", "shuffle"], ["⌘1–2", "switch tab"]],
+  settings: [["SPACE", "play / stop"], ["r", "shuffle"], ["M", "mute"], ["⌘1–2", "switch tab"]],
 };
 
 export function hintsFor(tab) {

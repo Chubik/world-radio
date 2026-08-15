@@ -25,6 +25,11 @@ pub struct Backend {
     profile_path: PathBuf,
     settings_path: PathBuf,
     settings: Settings,
+    /// when the station now playing started, for the "UP 14m" line. it is a
+    /// wall-clock stamp rather than a counter so it survives a poll gap.
+    started_at: Option<i64>,
+    /// the level to come back to when unmuting; None means not muted.
+    premute: Option<f32>,
     mirror_seq: u64,
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
@@ -244,6 +249,8 @@ impl Backend {
             engine,
             spectrum: radio_core::spectrum::Spectrum::new(),
             settings,
+            started_at: None,
+            premute: None,
             catalog,
             fav_path,
             hist_path,
@@ -304,6 +311,7 @@ impl Backend {
             country: String::new(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         };
         // a station blocked on this account must not arrive by the back door
         // either. the country filter is deliberately not applied: a deliberate
@@ -346,6 +354,7 @@ impl Backend {
         if let Some(engine) = &self.engine {
             engine.play(&pick.url);
         }
+        self.started_at = Some(now_secs());
         self.announce(&pick);
         // whatever plays now is what `now` holds, so the mirror mark belongs to
         // this play and no longer to the one it replaced. `resume` re-plays the
@@ -400,6 +409,47 @@ impl Backend {
         if let Some(engine) = &self.engine {
             engine.stop();
         }
+    }
+
+    /// silence without losing the level the user set. a second call restores it,
+    /// so mute is a toggle rather than a slide to zero and back by hand.
+    pub fn toggle_mute(&mut self) {
+        match self.premute.take() {
+            Some(level) => self.set_volume(level),
+            None => {
+                let was = self.state.volume;
+                self.set_volume(0.0);
+                // taken after the set, which writes the new level to disk: the
+                // level to come back to is the one the user chose, not zero.
+                self.premute = Some(was);
+            }
+        }
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.premute.is_some()
+    }
+
+    /// re-opens the stream that is already selected. a station that dropped mid
+    /// play leaves `now` set, and this is the one action that fixes it without
+    /// making the user find the row again.
+    pub fn retry(&mut self) {
+        let Some(pick) = self.state.now.clone() else {
+            return;
+        };
+        if let Some(engine) = &self.engine {
+            engine.play(&pick.url);
+        }
+        self.started_at = Some(now_secs());
+    }
+
+    /// how long the station now playing has been up, in seconds.
+    pub fn uptime(&self) -> Option<i64> {
+        let started = self.started_at?;
+        if self.state.phase == Phase::Idle {
+            return None;
+        }
+        Some((now_secs() - started).max(0))
     }
 
     pub fn set_volume(&mut self, v: f32) {
@@ -494,11 +544,13 @@ impl Backend {
             }
         };
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
         favorites
             .into_iter()
             .map(|s| crate::commands::StationRow {
-                is_playing: now.as_deref() == Some(s.uuid.as_str())
-                    && self.state.phase != Phase::Idle,
+                is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
+                genre: crate::state::first_tag(&s.tags),
+                dead: self.catalog.is_dead(&s.uuid),
                 uuid: s.uuid,
                 name: s.name,
                 country: s.country,
@@ -529,12 +581,14 @@ impl Backend {
             }
         };
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
         played
             .into_iter()
             .map(|(s, at)| crate::commands::HistoryRow {
-                is_playing: now.as_deref() == Some(s.uuid.as_str())
-                    && self.state.phase != Phase::Idle,
+                is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
                 is_favorite: self.catalog.is_favorite(&s.uuid),
+                genre: crate::state::first_tag(&s.tags),
+                dead: self.catalog.is_dead(&s.uuid),
                 played_at: at,
                 uuid: s.uuid,
                 name: s.name,
@@ -582,6 +636,10 @@ impl Backend {
             .into_iter()
             .map(|s| crate::commands::StationRow {
                 is_playing: false,
+                genre: crate::state::first_tag(&s.tags),
+                // a blocked station is hidden because the user said so, not
+                // because it failed; marking it dead too would blame the stream.
+                dead: false,
                 uuid: s.uuid,
                 name: s.name,
                 country: s.country,
@@ -633,13 +691,15 @@ impl Backend {
 
     fn to_page(&self, page: catalog_src::StationPage) -> crate::commands::StationPage {
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
         crate::commands::StationPage {
             stations: page
                 .stations
                 .into_iter()
                 .map(|s| crate::commands::StationRow {
-                    is_playing: now.as_deref() == Some(s.uuid.as_str())
-                        && self.state.phase != Phase::Idle,
+                    is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
+                    genre: crate::state::first_tag(&s.tags),
+                    dead: self.catalog.is_dead(&s.uuid),
                     uuid: s.uuid,
                     name: s.name,
                     country: s.country,
@@ -658,8 +718,16 @@ impl Backend {
         }
     }
 
-    pub fn search(&self, name: &str) -> crate::commands::StationPage {
-        match catalog_src::search_by_name(&self.catalog, name) {
+    pub fn search_filtered(
+        &self,
+        name: &str,
+        genre: Option<String>,
+        country: Option<String>,
+        codec: Option<String>,
+        bitrate_min: Option<u32>,
+    ) -> crate::commands::StationPage {
+        match catalog_src::search_filtered(&self.catalog, name, genre, country, codec, bitrate_min)
+        {
             Ok(page) => self.to_page(page),
             Err(e) => {
                 eprintln!("search failed: {e}");
@@ -860,6 +928,8 @@ mod tests {
             engine: None,
             spectrum: radio_core::spectrum::Spectrum::new(),
             settings: Settings::default(),
+            started_at: None,
+            premute: None,
             catalog,
             fav_path: dir.join("favorites.json"),
             hist_path: dir.join("history.json"),
@@ -937,6 +1007,7 @@ mod tests {
             country: country.into(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         }
     }
 

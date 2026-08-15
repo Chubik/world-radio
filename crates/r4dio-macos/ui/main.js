@@ -134,9 +134,21 @@ document.addEventListener("keydown", (e) => {
     now.toggle();
     return;
   }
-  if (e.key === "r" || e.key === "R") {
+  if (e.key === "r") {
     e.preventDefault();
     now.shuffle();
+    return;
+  }
+  // capital R is retry, lowercase r is shuffle — the design separates them, and
+  // they are opposites: one keeps the station, the other replaces it.
+  if (e.key === "R") {
+    e.preventDefault();
+    now.retry();
+    return;
+  }
+  if (e.key === "m" || e.key === "M") {
+    e.preventDefault();
+    now.mute();
     return;
   }
   if (tab !== "library") {

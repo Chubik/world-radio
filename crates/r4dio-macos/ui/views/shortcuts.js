@@ -5,7 +5,10 @@
 const KEYS = [
   ["⌥⇧R", "shuffle — works system-wide, from any app"],
   ["r", "shuffle a station"],
+  ["R", "retry — reopen the stream that is playing"],
   ["SPACE", "play / stop"],
+  ["M", "mute / unmute"],
+  ["I", "stream details"],
   ["↑ ↓", "move the cursor"],
   ["↵", "play the selected station"],
   ["F", "favourite the selected station"],
