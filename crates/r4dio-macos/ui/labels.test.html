@@ -2,9 +2,9 @@
 <html><head><meta charset="UTF-8" /></head>
 <body><pre id="out"></pre><script type="module">
 import { stateLabels, showsStar, normalizeKey, isValidKey, maskKey, accountStatus,
-         activeSection, flagFor, rowSubtitle, filterSummary, favouritesHeading,
-         blockedName, blockedHeading, countryHeading, countryName, matchesCountry,
-         browseSubtitle, resultHeading, isSearchable, stationCount } from "./labels.js";
+         activeTab, targetFor, signalBars, hintsFor,
+         flagFor, countryHeading, countryName, matchesCountry,
+         playedWhen, resultHeading, isSearchable, stationCount } from "./labels.js";
 const out = [];
 let failed = 0;
 function eq(name, got, want) {
@@ -80,18 +80,59 @@ eq("status carries only the masked id",
    accountStatus({ signed_in: true, masked: "r4-7K2P-····-4DF1", favourites: 7 }).masked,
    "r4-7K2P-····-4DF1");
 
-// the sidebar drives which pane is visible, so this decides the whole window's
-// section state; every nav id must resolve and nothing else may.
-eq("favourites is the landing section", activeSection(undefined), "favourites");
-eq("a known id selects itself", activeSection("blocked"), "blocked");
-eq("browse is known", activeSection("browse"), "browse");
-eq("countries is known", activeSection("countries"), "countries");
-eq("sync is known", activeSection("sync"), "sync");
-eq("favourites is known", activeSection("favourites"), "favourites");
-// an unknown id must land somewhere real rather than blanking the content pane.
-eq("unknown id falls back", activeSection("nonsense"), "favourites");
-eq("empty id falls back", activeSection(""), "favourites");
-eq("null id falls back", activeSection(null), "favourites");
+// the tabs drive which pane is visible, so this decides the whole window's
+// state; every id must resolve and nothing else may.
+eq("library is the landing tab", activeTab(undefined), "library");
+eq("browse folds into the library", activeTab("browse"), "library");
+eq("library is a tab", activeTab("library"), "library");
+eq("settings is a tab", activeTab("settings"), "settings");
+// an unknown id must land somewhere real rather than blanking the pane.
+eq("unknown id falls back", activeTab("nonsense"), "library");
+eq("empty id falls back", activeTab(""), "library");
+eq("null id falls back", activeTab(null), "library");
+
+// the tray still opens the window by the old sidebar section names. each one is
+// a sub-view now, so it has to open the tab holding it — and select that
+// sub-view, or "Open r4dio" lands on the wrong half of Library.
+eq("favourites opens its segment", targetFor("favourites"), { tab: "library", sub: "favourites" });
+eq("blocked opens its settings section", targetFor("blocked"), { tab: "settings", sub: "blocked" });
+eq("sync opens the account", targetFor("sync"), { tab: "settings", sub: "account" });
+eq("countries opens settings", targetFor("countries"), { tab: "settings", sub: "countries" });
+eq("browse is the all segment", targetFor("browse"), { tab: "library", sub: "all" });
+eq("an unknown id still lands", targetFor("nonsense"), { tab: "library", sub: null });
+
+// the signal column is bitrate, not a measurement — the scale must be monotonic
+// and a station with no bitrate must not claim one bar.
+eq("no bitrate shows nothing", signalBars(0), 0);
+eq("missing bitrate shows nothing", signalBars(undefined), 0);
+eq("320k is full", signalBars(320), 5);
+eq("256k is full", signalBars(256), 5);
+eq("192k is four", signalBars(192), 4);
+eq("128k is three", signalBars(128), 3);
+eq("64k is two", signalBars(64), 2);
+eq("32k is one", signalBars(32), 1);
+
+// a hint for a key the tab does not answer teaches the user to stop reading.
+eq("the library offers search", hintsFor("library").some(([k]) => k === "⌘F"), true);
+eq("settings does not", hintsFor("settings").some(([k]) => k === "⌘F"), false);
+eq("an unknown tab still has hints", hintsFor("nonsense").length > 0, true);
+// the footer promises SPACE on every tab, so every tab must answer it.
+eq("space is promised in the library", hintsFor("library").some(([k]) => k === "SPACE"), true);
+eq("space is promised in settings", hintsFor("settings").some(([k]) => k === "SPACE"), true);
+
+// history stamps are unix SECONDS (radio-core now_secs), not millis — reading
+// them as millis would date every row to 1970 and print "2857w ago".
+const T = 1_760_000_000;
+eq("a fresh play reads as now", playedWhen(T - 5, T), "just now");
+eq("minutes read as minutes", playedWhen(T - 18 * 60, T), "18 min ago");
+eq("hours read as hours", playedWhen(T - 5 * 3600, T), "5h ago");
+eq("a day back is yesterday", playedWhen(T - 26 * 3600, T), "yesterday");
+eq("days read as days", playedWhen(T - 3 * 86400, T), "3d ago");
+eq("a week reads as a week", playedWhen(T - 8 * 86400, T), "last week");
+eq("weeks read as weeks", playedWhen(T - 21 * 86400, T), "3w ago");
+// a missing or future stamp must print nothing rather than a negative age.
+eq("a missing stamp prints nothing", playedWhen(0, T), "");
+eq("a future stamp prints nothing", playedWhen(T + 500, T), "");
 
 // rows lead with a flag; radio-browser country codes are two-letter and cased
 // inconsistently, and plenty of stations carry none at all.
@@ -106,39 +147,18 @@ eq("one letter is not a flag", flagFor("U"), "");
 eq("digits are not a flag", flagFor("12"), "");
 
 // the row's second line is either the live marker or the format, never both.
-eq("the live row says so", rowSubtitle({ codec: "AAC", bitrate: 48 }, true), "● now playing");
-eq("a quiet row shows format", rowSubtitle({ codec: "AAC", bitrate: 48 }, false), "AAC 48k");
 // radio-browser reports 0 bitrate for plenty of stations; "AAC 0k" is noise.
-eq("zero bitrate is dropped", rowSubtitle({ codec: "AAC", bitrate: 0 }, false), "AAC");
-eq("no codec leaves nothing", rowSubtitle({ codec: "", bitrate: 0 }, false), "");
-eq("bitrate without codec still reads", rowSubtitle({ codec: "", bitrate: 128 }, false), "128k");
-eq("a missing station does not throw", rowSubtitle(undefined, false), "");
 
 // the sidebar footer counts two different filters and must stay honest at zero.
-eq("both counts render", filterSummary(3, 14), "◔ 3 excluded · ⛌ 14 blocked");
-eq("zero blocked is still shown", filterSummary(3, 0), "◔ 3 excluded · ⛌ 0 blocked");
-eq("nothing filtered reads as zero", filterSummary(0, 0), "◔ 0 excluded · ⛌ 0 blocked");
-eq("missing counts read as zero", filterSummary(undefined, undefined), "◔ 0 excluded · ⛌ 0 blocked");
 
 // the pane header carries the count; an empty list must not read as a failure.
-eq("a count is shown", favouritesHeading(7), "7");
-eq("one favourite is not pluralised away", favouritesHeading(1), "1");
-eq("none reads as none, not an error", favouritesHeading(0), "none yet");
-eq("missing count reads as none", favouritesHeading(undefined), "none yet");
 
 // a blocked uuid the catalogue dropped still needs a row to be unblocked from.
-eq("a named station keeps its name", blockedName({ name: "Talk Radio" }), "Talk Radio");
-eq("an unresolved station still reads", blockedName({ name: "" }), "Unknown station");
-eq("a whitespace name is not a name", blockedName({ name: "   " }), "Unknown station");
-eq("a missing station does not throw", blockedName(undefined), "Unknown station");
 
-eq("blocked count is shown", blockedHeading(14), "14");
-eq("no blocks reads as none", blockedHeading(0), "none");
-eq("missing block count reads as none", blockedHeading(undefined), "none");
 
 // "3 of 194": how many of the countries on offer are switched off.
-eq("excluded out of total", countryHeading(3, 194), "3 of 194");
-eq("none excluded is still honest", countryHeading(0, 194), "0 of 194");
+eq("on air out of total", countryHeading(191, 194), "191 of 194");
+eq("everything off is still honest", countryHeading(0, 194), "0 of 194");
 eq("missing counts read as zero", countryHeading(undefined, undefined), "0 of 0");
 
 // names come from the browser's own table rather than a shipped list of 194.
@@ -156,17 +176,6 @@ eq("the name matches", matchesCountry({ code: "CH" }, "switz"), true);
 eq("the code matches", matchesCountry({ code: "CH" }, "ch"), true);
 eq("case does not matter", matchesCountry({ code: "UA" }, "UKRAI"), true);
 eq("a miss is a miss", matchesCountry({ code: "CH" }, "japan"), false);
-
-// a browse row says the format, and says when the station is already starred —
-// otherwise ☆ looks like it would do something it has already done.
-eq("a browse row shows the format",
-   browseSubtitle({ codec: "MP3", bitrate: 128 }, false), "MP3 128k");
-eq("a starred browse row says so",
-   browseSubtitle({ codec: "AAC", bitrate: 48 }, true), "AAC 48k · already in ★");
-eq("a starred row with no format still says so",
-   browseSubtitle({ codec: "", bitrate: 0 }, true), "already in ★");
-eq("a formatless row is blank rather than a stray separator",
-   browseSubtitle({ codec: "", bitrate: 0 }, false), "");
 
 // the result list is capped, and a capped list has to admit it — a user who
 // searches "radio" must not believe they are looking at every match.

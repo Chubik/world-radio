@@ -1,69 +1,172 @@
-import { activeSection, filterSummary } from "./labels.js";
+import { targetFor, hintsFor, stateLabels } from "./labels.js";
 import { mountAccount } from "./views/account.js";
-import { mountFavourites } from "./views/favourites.js";
-import { mountBlocked } from "./views/blocked.js";
 import { mountCountries } from "./views/countries.js";
-import { mountBrowse } from "./views/browse.js";
+import { mountBlocked } from "./views/blocked.js";
+import { mountShortcuts } from "./views/shortcuts.js";
+import { mountAppearance } from "./views/appearance.js";
+import { mountLibrary } from "./views/library.js";
+import { mountNowPanel } from "./views/nowpanel.js";
 
 const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
 
-// a sign-in or a sync can bring a new country filter down, and the sidebar row
-// that names it is outside this pane — so it is told, exactly as the two filter
-// sections below tell it.
-const account = mountAccount(document.getElementById("account_host"), loadFilterSummary);
-const favourites = mountFavourites(document.getElementById("pane_favourites"));
-// both filter sections change the counts the sidebar shows, so they say when
-// they did rather than leaving it stale until the window is reopened.
-const blocked = mountBlocked(document.getElementById("pane_blocked"), loadFilterSummary);
-const countries = mountCountries(document.getElementById("pane_countries"), loadFilterSummary);
-const browse = mountBrowse(document.getElementById("pane_browse"));
 
-// the window reads on demand rather than on a timer: favourites only change when
-// the user changes them, and sign_in holds the backend mutex across a blocking
-// http sync, so a poll would stall the whole window for those seconds.
+const countries = mountCountries(document.getElementById("pane_countries"));
+// unblocking puts a station back into shuffle and search, so the list showing
+// those results has to be re-read rather than left as it was drawn.
+const blocked = mountBlocked(document.getElementById("pane_blocked"), () => library.refreshMarks());
+const account = mountAccount(document.getElementById("account_host"), () => {
+  countries.refresh();
+  blocked.refresh();
+});
+mountShortcuts(document.getElementById("pane_shortcuts"));
+// the meter lives in the now-panel but is configured here, so the choice is
+// pushed straight at it rather than waiting for the next window open.
+const appearance = mountAppearance(document.getElementById("pane_appearance"), {
+  onStyle: (style) => now.setStyle(style),
+});
+
+// the two halves of the library are separate because they answer separate
+// questions — "what is this" and "what next" — and only the list reloads when
+// the user types. they meet here: playing a row repaints the panel at once
+// rather than waiting for the next poll.
+const now = mountNowPanel({ onChanged: () => library.markPlaying() });
+const library = mountLibrary(document.getElementById("listbody"), {
+  head: document.getElementById("listhead"),
+  count: document.getElementById("count"),
+  segrow: document.getElementById("segrow"),
+  statebar: document.getElementById("statebar"),
+  search: document.getElementById("search"),
+  onPlayed: () => now.refresh(),
+  // the scope line in the panel is drawn from now_state, so it has to re-read
+  // when the segment moves it rather than waiting for the next poll.
+  onScope: () => now.refresh(),
+});
+
 const REFRESH = {
-  favourites: () => favourites.refresh(),
-  // browse re-reads only the star marks: a full reload would close every country
-  // the user opened and clear the search they typed.
-  browse: () => browse.syncStars(),
-  blocked: () => blocked.refresh(),
+  appearance: () => appearance.refresh(),
   countries: () => countries.refresh(),
-  sync: () => account.refresh(),
+  blocked: () => blocked.refresh(),
+  account: () => account.refresh(),
 };
+const SUB = { settings: "countries" };
 
-let current = null;
+let tab = null;
 
-function show(id) {
-  const section = activeSection(id);
-  document.querySelectorAll(".navitem").forEach((item) =>
-    item.classList.toggle("active", item.dataset.section === section)
+function paint() {
+  document.querySelectorAll(".tab").forEach((node) =>
+    node.classList.toggle("active", node.dataset.tab === tab)
   );
   document.querySelectorAll(".pane").forEach((pane) =>
-    pane.classList.toggle("active", pane.dataset.pane === section)
+    pane.classList.toggle("active", pane.dataset.pane === tab)
   );
-  current = section;
-  const refresh = REFRESH[section];
-  if (refresh) refresh();
-}
+  const pane = document.querySelector('.pane[data-pane="settings"]');
+  pane.querySelectorAll(".subtabs span").forEach((node) =>
+    node.classList.toggle("on", node.dataset.sub === SUB.settings)
+  );
+  pane.querySelectorAll(".sub").forEach((node) =>
+    node.classList.toggle("active", node.dataset.sub === SUB.settings)
+  );
 
-async function loadFilterSummary() {
-  try {
-    const counts = await invoke("filter_counts");
-    document.getElementById("filter_summary").textContent =
-      filterSummary(counts.excluded, counts.blocked);
-    // the backend words this one. empty means no filter to announce, which has
-    // to hide the row — an empty "FILTER:" reads like a setting that failed.
-    const active = document.getElementById("filter_active");
-    active.textContent = counts.filter || "";
-    active.classList.toggle("hidden", !counts.filter);
-  } catch (e) {
-    console.error("filter_counts failed", e);
+  const foot = document.getElementById("footerbar");
+  foot.replaceChildren();
+  for (const [key, desc] of hintsFor(tab)) {
+    const line = document.createElement("span");
+    const k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    line.append(k, ` ${desc}`);
+    foot.appendChild(line);
   }
 }
 
-document.querySelectorAll(".navitem").forEach((item) =>
-  item.addEventListener("click", () => show(item.dataset.section))
+/** everything that opens a view goes through here, so a tray section and a
+ *  click cannot end up painting different things. */
+function show(id) {
+  const target = targetFor(id);
+  tab = target.tab;
+  if (tab === "settings" && target.sub) {
+    SUB.settings = target.sub;
+  }
+  if (tab === "library" && target.sub) {
+    library.showSegment(target.sub);
+  }
+  paint();
+  const refresh = REFRESH[SUB.settings];
+  if (tab === "settings" && refresh) refresh();
+}
+
+function showSub(sub) {
+  SUB.settings = sub;
+  paint();
+  const refresh = REFRESH[sub];
+  if (refresh) refresh();
+}
+
+// ── keyboard ─────────────────────────────────────────────────────────────
+
+const TAB_KEYS = { 1: "library", 2: "settings" };
+
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey && TAB_KEYS[e.key]) {
+    e.preventDefault();
+    show(TAB_KEYS[e.key]);
+    return;
+  }
+  if (e.metaKey && e.key.toLowerCase() === "f") {
+    e.preventDefault();
+    show("library");
+    library.focusSearch();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey) {
+    return;
+  }
+  // a key typed into the search field is a character, not a command — except
+  // escape, which is how the user gets back out of it.
+  if (e.target instanceof HTMLInputElement) {
+    if (e.key === "Escape") {
+      e.target.blur();
+    }
+    return;
+  }
+  // space and shuffle work from either tab: they are about what is playing,
+  // which the window always shows.
+  if (e.key === " ") {
+    e.preventDefault();
+    now.toggle();
+    return;
+  }
+  if (e.key === "r") {
+    e.preventDefault();
+    now.shuffle();
+    return;
+  }
+  // capital R is retry, lowercase r is shuffle — the design separates them, and
+  // they are opposites: one keeps the station, the other replaces it.
+  if (e.key === "R") {
+    e.preventDefault();
+    now.retry();
+    return;
+  }
+  if (e.key === "m" || e.key === "M") {
+    e.preventDefault();
+    now.mute();
+    return;
+  }
+  if (tab !== "library") {
+    return;
+  }
+  if (library.onKey(e.key)) {
+    e.preventDefault();
+  }
+});
+
+document.querySelectorAll(".tab").forEach((node) =>
+  node.addEventListener("click", () => show(node.dataset.tab))
+);
+document.querySelectorAll('.pane[data-pane="settings"] .subtabs span').forEach((node) =>
+  node.addEventListener("click", () => showSub(node.dataset.sub))
 );
 
 // the tray reuses this window rather than recreating it, so the section to open
@@ -73,11 +176,15 @@ listen("show-section", (event) => show(event.payload));
 // reopening a hidden window does not reload it; anything changed from the
 // menubar panel meanwhile would otherwise still be on screen.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) return;
-  loadFilterSummary();
-  const refresh = REFRESH[current];
-  if (refresh) refresh();
+  if (document.hidden) {
+    now.sleep();
+    return;
+  }
+  now.wake();
+  library.refreshMarks();
+  const refresh = REFRESH[SUB.settings];
+  if (tab === "settings" && refresh) refresh();
 });
 
-show("favourites");
-loadFilterSummary();
+show("library");
+now.wake();

@@ -6,6 +6,10 @@ use std::sync::Mutex;
 #[derive(Serialize)]
 pub struct NowState {
     pub station: Option<String>,
+    /// the uuid of what is playing. the window matches rows on this rather than
+    /// on the name: two stations can share a name, and a row matched by name
+    /// puts the cursor and the ▸ marker on the wrong one.
+    pub uuid: Option<String>,
     pub track: String,
     pub phase: String,
     pub volume: f32,
@@ -16,6 +20,24 @@ pub struct NowState {
     /// the state poll rather than a command of its own so it cannot lag a scope
     /// switch — the label is hidden in favourites, which the same poll carries.
     pub filter: String,
+    /// seconds the current station has been up, for the "UP 14m" line.
+    pub uptime: Option<i64>,
+    /// decode buffer occupancy, 0.0-1.0, or None when nothing is playing.
+    pub buffer: Option<f32>,
+    /// the station shuffle will play next, already drawn.
+    pub next: Option<String>,
+    pub muted: bool,
+    /// how many times the engine has retried without giving up — the design
+    /// shows retrying apart from buffering.
+    pub retries: u32,
+    /// the station's first tag, which reads as its genre.
+    pub genre: String,
+    /// the meter's style, carried on the state poll so a change made on another
+    /// device reaches the window without it asking a second question.
+    pub eq_style: String,
+    /// the stream url, for the info line. it is already public in the catalogue,
+    /// so showing it reveals nothing the user could not look up.
+    pub url: String,
 }
 
 fn phase_str(phase: Phase) -> &'static str {
@@ -91,7 +113,8 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
     let now = b.state.now.clone();
     NowState {
         station: now.as_ref().map(|n| n.name.clone()),
-        track: String::new(),
+        uuid: now.as_ref().map(|n| n.uuid.clone()),
+        track: b.state.track.clone().unwrap_or_default(),
         phase: phase_str(b.phase()).to_string(),
         volume: b.state.volume,
         scope: scope_str(b.state.scope).to_string(),
@@ -101,12 +124,53 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
             .map(|n| crate::state::meta_label(&n.country, &n.codec, n.bitrate))
             .unwrap_or_default(),
         filter: crate::tray::filter_label(b.state.filter(), b.state.scope),
+        uptime: b.uptime(),
+        buffer: b.buffer_level(),
+        next: b.queued_next().map(|p| p.name.clone()),
+        muted: b.is_muted(),
+        retries: b.state.retries,
+        eq_style: b.eq_settings().0,
+        genre: now
+            .as_ref()
+            .map(|n| crate::state::first_tag(&n.tags))
+            .unwrap_or_default(),
+        url: now.as_ref().map(|n| n.url.clone()).unwrap_or_default(),
     }
 }
 
 #[tauri::command]
+/// 34 bands, which is what the window's meter draws — asking for fewer and
+/// repeating them across the bars is what makes a meter look like wallpaper.
 pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
-    state.lock().unwrap().read_spectrum(16)
+    state.lock().unwrap().read_spectrum(34)
+}
+
+/// how the meter is drawn and how hard it is driven. per-machine, like volume.
+#[derive(Serialize)]
+pub struct EqSettings {
+    pub style: String,
+    pub gain: f32,
+}
+
+#[tauri::command]
+pub fn toggle_mute(state: tauri::State<Shared>) {
+    state.lock().unwrap().toggle_mute();
+}
+
+#[tauri::command]
+pub fn retry(state: tauri::State<Shared>) {
+    state.lock().unwrap().retry();
+}
+
+#[tauri::command]
+pub fn eq_settings(state: tauri::State<Shared>) -> EqSettings {
+    let (style, gain) = state.lock().unwrap().eq_settings();
+    EqSettings { style, gain }
+}
+
+#[tauri::command]
+pub fn set_eq(state: tauri::State<Shared>, style: String, gain: f32) {
+    state.lock().unwrap().set_eq(style, gain);
 }
 
 #[derive(Serialize)]
@@ -117,11 +181,38 @@ pub struct StationRow {
     pub codec: String,
     pub bitrate: u32,
     pub is_playing: bool,
+    /// the station's first tag, shown beside its name as a genre.
+    pub genre: String,
+    /// the user has played this and it failed enough times to be hidden from
+    /// shuffle. the row still shows, marked, rather than vanishing.
+    pub dead: bool,
 }
 
 #[tauri::command]
 pub fn favourites(state: tauri::State<Shared>) -> Vec<StationRow> {
     state.lock().unwrap().favourite_rows()
+}
+
+/// a played station plus when it was played. the stamp is what the list shows
+/// ("18 min ago"), and it is worded in the window rather than here so the
+/// wording can change without a round trip.
+#[derive(Serialize)]
+pub struct HistoryRow {
+    pub uuid: String,
+    pub name: String,
+    pub genre: String,
+    pub dead: bool,
+    pub country: String,
+    pub codec: String,
+    pub bitrate: u32,
+    pub is_playing: bool,
+    pub is_favorite: bool,
+    pub played_at: i64,
+}
+
+#[tauri::command]
+pub fn history(state: tauri::State<Shared>) -> Vec<HistoryRow> {
+    state.lock().unwrap().history_rows()
 }
 
 #[tauri::command]
@@ -177,8 +268,19 @@ pub struct StationPage {
 }
 
 #[tauri::command]
-pub fn search(state: tauri::State<Shared>, name: String) -> StationPage {
-    state.lock().unwrap().search(&name)
+pub fn search(
+    state: tauri::State<Shared>,
+    name: String,
+    genre: Option<String>,
+    country: Option<String>,
+    codec: Option<String>,
+    // tauri maps the window's camelCase argument onto this snake_case name.
+    bitrate_min: Option<u32>,
+) -> StationPage {
+    state
+        .lock()
+        .unwrap()
+        .search_filtered(&name, genre, country, codec, bitrate_min)
 }
 
 #[tauri::command]
@@ -257,6 +359,7 @@ mod tests {
     fn both_windows_receive_the_filter_under_the_name_they_read() {
         let now = NowState {
             station: None,
+            uuid: None,
             track: String::new(),
             phase: "idle".into(),
             volume: 0.8,
@@ -264,6 +367,14 @@ mod tests {
             is_favorite: false,
             meta: String::new(),
             filter: crate::tray::filter_label(&["UA".to_string()], Scope::All),
+            uptime: None,
+            buffer: None,
+            next: None,
+            muted: false,
+            retries: 0,
+            genre: String::new(),
+            eq_style: "bars".into(),
+            url: String::new(),
         };
         let json = serde_json::to_value(&now).unwrap();
         assert_eq!(json["filter"], "FILTER: UA");

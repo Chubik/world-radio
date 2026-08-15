@@ -8,38 +8,98 @@
     <link rel="stylesheet" href="views/account.css" />
   </head>
   <body class="win_body">
-    <div class="winbody">
-      <nav class="sidebar">
-        <div class="navgroup">
-          <div class="glabel">Library</div>
-          <button class="navitem" data-section="favourites"><span class="ic">★</span>Favorites</button>
-          <button class="navitem" data-section="browse"><span class="ic">⌕</span>Browse</button>
-        </div>
-        <div class="navgroup">
-          <div class="glabel">Filters</div>
-          <button class="navitem" data-section="countries"><span class="ic">◔</span>Countries</button>
-          <button class="navitem" data-section="blocked"><span class="ic">⛌</span>Blocked</button>
-        </div>
-        <div class="navgroup">
-          <div class="glabel">Account</div>
-          <button class="navitem" data-section="sync"><span class="ic">◇</span>Sync</button>
-        </div>
-        <div class="filtrow hidden" id="filter_active"></div>
-        <div class="acct" id="filter_summary"></div>
-      </nav>
-
-      <main class="content">
-        <section class="pane" data-pane="favourites" id="pane_favourites"></section>
-        <section class="pane" data-pane="browse" id="pane_browse"></section>
-        <section class="pane" data-pane="countries" id="pane_countries"></section>
-        <section class="pane" data-pane="blocked" id="pane_blocked"></section>
-        <section class="pane" data-pane="sync">
-          <div class="paneh"><h3>◇ Sync</h3></div>
-          <p class="panesub">Keep your ★ favorites the same on every device.</p>
-          <div id="account_host"></div>
-        </section>
-      </main>
+    <div class="tabbar">
+      <div class="tab" data-tab="library">LIBRARY<span class="kk">⌘1</span></div>
+      <div class="tab" data-tab="settings">SETTINGS<span class="kk">⌘2</span></div>
+      <div class="clock" id="clock"></div>
     </div>
+
+    <section class="pane" data-pane="library">
+      <div class="libgrid">
+        <aside class="nowpanel">
+          <div class="art" id="art"></div>
+
+          <div class="gaugerow" id="np_bufrow">
+            <span class="lbl">BUF</span>
+            <div class="bar"><i id="np_bufbar"></i></div>
+            <span class="val" id="np_buf">—</span>
+          </div>
+
+          <div class="gaugerow" id="np_uprow">
+            <span class="lbl">UP</span>
+            <div class="bar"><i id="np_upbar"></i></div>
+            <span class="val" id="np_up">—</span>
+          </div>
+
+          <div class="stationnm" id="np_name">nothing playing</div>
+          <div class="songnm" id="np_track"></div>
+          <div class="stmeta" id="np_meta"></div>
+          <div class="status" id="np_status"></div>
+
+          <div class="transport">
+            <div class="sm shuffle" id="np_shuffle" title="Shuffle (r)">⇄</div>
+            <div class="big" id="np_play" title="Play / stop (space)">▶</div>
+          </div>
+
+          <div class="npactions">
+            <div id="np_star" title="Favourite (F)">
+              <span class="ic">☆</span>favourite <span class="kk">F</span>
+            </div>
+            <div id="np_retry" title="Reopen the stream (R)">
+              <span class="ic">↺</span>retry <span class="kk">R</span>
+            </div>
+            <div id="np_info" title="Stream details (I)">
+              <span class="ic">ℹ</span>info <span class="kk">I</span>
+            </div>
+          </div>
+
+          <div class="volrow">
+            <span class="ic" id="np_mute" title="Mute (M)">VOL</span>
+            <div class="bar" id="np_volbar"><i></i></div>
+            <span class="val" id="np_vol">—</span>
+          </div>
+
+          <div class="upnext" id="np_scope"></div>
+        </aside>
+
+        <div class="listpanel">
+          <div class="listtop">
+            <div class="search">
+              <span class="cursor">▌</span>
+              <input id="search" type="search" placeholder="search every station by name…" />
+              <span class="resultcount" id="count"></span>
+            </div>
+            <div class="segrow" id="segrow">
+              <span data-seg="all">All</span>
+              <span data-seg="favourites">Favourites</span>
+              <span data-seg="history">History</span>
+            </div>
+            <div class="statebar" id="statebar"></div>
+          </div>
+          <div class="listhead" id="listhead"></div>
+          <div class="listbody" id="listbody"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane" data-pane="settings">
+      <div class="setbody">
+        <div class="subtabs" id="set_tabs">
+          <span data-sub="appearance">APPEARANCE</span>
+          <span data-sub="countries">COUNTRIES</span>
+          <span data-sub="blocked">BLOCKED</span>
+          <span data-sub="shortcuts">SHORTCUTS</span>
+          <span data-sub="account">ACCOUNT</span>
+        </div>
+        <div class="sub" data-sub="appearance" id="pane_appearance"></div>
+        <div class="sub" data-sub="countries" id="pane_countries"></div>
+        <div class="sub" data-sub="blocked" id="pane_blocked"></div>
+        <div class="sub" data-sub="shortcuts" id="pane_shortcuts"></div>
+        <div class="sub" data-sub="account" id="account_host"></div>
+      </div>
+    </section>
+
+    <div class="footerbar" id="footerbar"></div>
     <script type="module" src="main.js"></script>
   </body>
 </html>

@@ -13,6 +13,9 @@ pub const SERVER: &str = "https://r4dio.net";
 pub struct Backend {
     pub state: MiniState,
     engine: Option<AudioEngine>,
+    // the analyser smooths each frame against the last, so it has to live as
+    // long as the meter does rather than be rebuilt per read.
+    spectrum: radio_core::spectrum::Spectrum,
     catalog: Catalog,
     fav_path: PathBuf,
     hist_path: PathBuf,
@@ -21,6 +24,17 @@ pub struct Backend {
     pending_path: PathBuf,
     profile_path: PathBuf,
     settings_path: PathBuf,
+    settings: Settings,
+    /// when the station now playing started, for the "UP 14m" line. it is a
+    /// wall-clock stamp rather than a counter so it survives a poll gap.
+    started_at: Option<i64>,
+    /// the level to come back to when unmuting; None means not muted.
+    premute: Option<f32>,
+    /// the station shuffle will play next, chosen ahead of time so the panel can
+    /// name it. it is drawn from the same pool at the same odds — the only
+    /// difference is when the die is rolled, and a "NEXT" line that then played
+    /// something else would be a lie.
+    queued: Option<StationPick>,
     mirror_seq: u64,
     // set while a play arriving from another device is being started, so the
     // announce below does not push it straight back and start a ping-pong.
@@ -134,33 +148,62 @@ fn startup_profile(
     profile
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Settings {
-    #[serde(default)]
+    #[serde(default = "default_volume")]
     volume: f32,
+    /// how the meter is drawn. it is a name rather than an enum here because the
+    /// window owns the drawing; the backend only remembers the choice.
+    #[serde(default = "default_eq_style")]
+    eq_style: String,
+    /// the analyser's divisor: lower reads quieter music, higher tames a loud
+    /// station. mirrors the tui's `fft_divisor`.
+    #[serde(default = "default_eq_gain")]
+    eq_gain: f32,
 }
 
-/// volume is per-machine — unlike everything in `profile.json`, it must never
-/// travel to another device, so it gets its own file instead.
-fn load_volume(path: &std::path::Path) -> f32 {
+fn default_volume() -> f32 {
+    0.8
+}
+
+fn default_eq_style() -> String {
+    "bars".to_string()
+}
+
+fn default_eq_gain() -> f32 {
+    12.0
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            volume: default_volume(),
+            eq_style: default_eq_style(),
+            eq_gain: default_eq_gain(),
+        }
+    }
+}
+
+/// these are per-machine — unlike everything in `profile.json`, they must never
+/// travel to another device, so they get their own file. a screen the user sits
+/// two feet from and one across the room want different gain.
+fn load_settings(path: &std::path::Path) -> Settings {
     let Ok(raw) = std::fs::read_to_string(path) else {
-        return 0.8;
+        return Settings::default();
     };
-    serde_json::from_str::<Settings>(&raw)
-        .map(|s| s.volume)
-        .unwrap_or(0.8)
+    serde_json::from_str::<Settings>(&raw).unwrap_or_default()
 }
 
-fn save_volume(path: &std::path::Path, volume: f32) {
-    let body = match serde_json::to_string(&Settings { volume }) {
+fn save_settings(path: &std::path::Path, settings: &Settings) {
+    let body = match serde_json::to_string(settings) {
         Ok(body) => body,
         Err(e) => {
-            eprintln!("encode volume failed: {e}");
+            eprintln!("encode settings failed: {e}");
             return;
         }
     };
     if let Err(e) = std::fs::write(path, body) {
-        eprintln!("save volume failed: {e}");
+        eprintln!("save settings failed: {e}");
     }
 }
 
@@ -198,7 +241,8 @@ impl Backend {
         // open on the same scope and shuffle inside the same filter.
         let profile = startup_profile(&profile_path, &data.join("config.toml"));
         seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
-        state.set_volume(load_volume(&settings_path));
+        let settings = load_settings(&settings_path);
+        state.set_volume(settings.volume);
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
@@ -208,6 +252,11 @@ impl Backend {
         Ok(Backend {
             state,
             engine,
+            spectrum: radio_core::spectrum::Spectrum::new(),
+            settings,
+            started_at: None,
+            premute: None,
+            queued: None,
             catalog,
             fav_path,
             hist_path,
@@ -268,6 +317,7 @@ impl Backend {
             country: String::new(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         };
         // a station blocked on this account must not arrive by the back door
         // either. the country filter is deliberately not applied: a deliberate
@@ -310,6 +360,7 @@ impl Backend {
         if let Some(engine) = &self.engine {
             engine.play(&pick.url);
         }
+        self.started_at = Some(now_secs());
         self.announce(&pick);
         // whatever plays now is what `now` holds, so the mirror mark belongs to
         // this play and no longer to the one it replaced. `resume` re-plays the
@@ -326,12 +377,32 @@ impl Backend {
             eprintln!("save history failed: {e}");
         }
         self.state.begin_play(pick);
+        // queued after `now` moves, never before: the draw skips whatever is
+        // playing, and reading the previous station here would let the panel
+        // promise the one that just started.
+        self.queue_next();
     }
 
     pub fn shuffle(&mut self) {
-        if let Some(pick) = self.state.pick_shuffle() {
+        // whatever was queued is what the panel promised, so it is what plays.
+        let pick = self.queued.take().or_else(|| self.state.pick_shuffle());
+        if let Some(pick) = pick {
             self.play_pick(pick);
         }
+    }
+
+    /// picks the station after this one. a scope or filter change invalidates it,
+    /// so it is re-rolled on every play rather than held across one.
+    fn queue_next(&mut self) {
+        self.queued = self.state.pick_shuffle().filter(|p| {
+            // queueing the station already playing would show "NEXT" naming what
+            // is on air, which reads as a bug even when the roll is honest.
+            self.state.now.as_ref().map(|n| &n.uuid) != Some(&p.uuid)
+        });
+    }
+
+    pub fn queued_next(&self) -> Option<&StationPick> {
+        self.queued.as_ref()
     }
 
     pub fn play_last(&mut self) {
@@ -366,17 +437,71 @@ impl Backend {
         }
     }
 
+    /// silence without losing the level the user set. a second call restores it,
+    /// so mute is a toggle rather than a slide to zero and back by hand.
+    pub fn toggle_mute(&mut self) {
+        match self.premute.take() {
+            Some(level) => self.set_volume(level),
+            None => {
+                let was = self.state.volume;
+                self.set_volume(0.0);
+                // taken after the set, which writes the new level to disk: the
+                // level to come back to is the one the user chose, not zero.
+                self.premute = Some(was);
+            }
+        }
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.premute.is_some()
+    }
+
+    /// re-opens the stream that is already selected. a station that dropped mid
+    /// play leaves `now` set, and this is the one action that fixes it without
+    /// making the user find the row again.
+    pub fn retry(&mut self) {
+        let Some(pick) = self.state.now.clone() else {
+            return;
+        };
+        if let Some(engine) = &self.engine {
+            engine.play(&pick.url);
+        }
+        self.started_at = Some(now_secs());
+    }
+
+    /// how full the decode buffer is, 0.0-1.0. this is the number that predicts
+    /// a stutter before the listener hears one.
+    pub fn buffer_level(&self) -> Option<f32> {
+        if self.state.phase == Phase::Idle {
+            return None;
+        }
+        self.engine.as_ref().map(|e| e.buffer_level())
+    }
+
+    /// how long the station now playing has been up, in seconds.
+    pub fn uptime(&self) -> Option<i64> {
+        let started = self.started_at?;
+        if self.state.phase == Phase::Idle {
+            return None;
+        }
+        Some((now_secs() - started).max(0))
+    }
+
     pub fn set_volume(&mut self, v: f32) {
         self.state.set_volume(v);
         if let Some(engine) = &self.engine {
             engine.set_volume(self.state.volume);
         }
-        save_volume(&self.settings_path, self.state.volume);
+        self.settings.volume = self.state.volume;
+        save_settings(&self.settings_path, &self.settings);
     }
 
     // the stamp is taken here, at the moment the user changes the scope, never
     // at sync time — a sync-time stamp would always outrank the other device.
     pub fn set_scope(&mut self, scope: Scope) {
+        // the pool changed, so the station queued from the old one is no longer
+        // a fair draw.
+        self.queued = None;
         self.state.set_scope(scope);
         let wire = match scope {
             Scope::All => radio_core::sync::Scope::All,
@@ -415,9 +540,27 @@ impl Backend {
         }
     }
 
-    pub fn read_spectrum(&self, bars: usize) -> Vec<f32> {
-        let _ = bars;
-        crate::state::spectrum_bars(bars)
+    /// the levels the window draws, taken from the audio actually being played.
+    ///
+    /// the engine keeps a tap of the mixed output, and radio-core's Spectrum
+    /// turns it into bands — the same analyser the terminal client has always
+    /// used, so both meters move the same way for the same sound.
+    pub fn read_spectrum(&mut self, bars: usize) -> Vec<f32> {
+        if bars == 0 {
+            return Vec::new();
+        }
+        // silence has to read as silence: nothing playing means an empty tap,
+        // and inventing a level for it is what made the old meter a decoration.
+        let Some(engine) = &self.engine else {
+            return vec![0.0; bars];
+        };
+        if self.state.phase != Phase::Playing {
+            return vec![0.0; bars];
+        }
+        let mut buf = vec![0.0f32; 2048];
+        let got = engine.read_tap(&mut buf);
+        self.spectrum.set_divisor(self.settings.eq_gain);
+        self.spectrum.analyze(&buf[..got], bars)
     }
 
     pub fn phase(&self) -> Phase {
@@ -439,11 +582,77 @@ impl Backend {
             }
         };
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
         favorites
             .into_iter()
             .map(|s| crate::commands::StationRow {
-                is_playing: now.as_deref() == Some(s.uuid.as_str())
-                    && self.state.phase != Phase::Idle,
+                is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
+                genre: crate::state::first_tag(&s.tags),
+                dead: self.catalog.is_dead(&s.uuid),
+                uuid: s.uuid,
+                name: s.name,
+                country: s.country,
+                codec: s.codec,
+                bitrate: s.bitrate,
+            })
+            .collect()
+    }
+
+    /// the meter's look, taken from the account rather than this machine — the
+    /// user picked it once and every device they own should draw it that way.
+    /// the local file is the fallback for a device that has never synced.
+    pub fn eq_settings(&self) -> (String, f32) {
+        let profile = radio_core::sync::Profile::load(&self.profile_path);
+        let style = profile
+            .setting("eq_style")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| self.settings.eq_style.clone());
+        let gain = profile
+            .setting("eq_gain")
+            .and_then(serde_json::Value::as_f64)
+            .map(|g| g as f32)
+            .unwrap_or(self.settings.eq_gain);
+        (style, gain)
+    }
+
+    pub fn set_eq(&mut self, style: String, gain: f32) {
+        // the analyser divides by this, so zero would be a division by nothing
+        // and a negative one would invert the meter.
+        let gain = gain.clamp(2.0, 40.0);
+        self.settings.eq_style = style.clone();
+        self.settings.eq_gain = gain;
+        // written locally as well as to the profile: the meter has to draw
+        // correctly on a machine that has never signed in.
+        save_settings(&self.settings_path, &self.settings);
+
+        let mut profile = radio_core::sync::Profile::load(&self.profile_path);
+        let now = now_secs();
+        profile.set_setting("eq_style", serde_json::json!(style), now);
+        profile.set_setting("eq_gain", serde_json::json!(gain), now);
+        if let Err(e) = profile.save(&self.profile_path) {
+            eprintln!("save eq settings failed: {e}");
+        }
+    }
+
+    pub fn history_rows(&mut self) -> Vec<crate::commands::HistoryRow> {
+        let played = match catalog_src::played_before(&self.catalog) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("load history failed: {e}");
+                return Vec::new();
+            }
+        };
+        let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
+        played
+            .into_iter()
+            .map(|(s, at)| crate::commands::HistoryRow {
+                is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
+                is_favorite: self.catalog.is_favorite(&s.uuid),
+                genre: crate::state::first_tag(&s.tags),
+                dead: self.catalog.is_dead(&s.uuid),
+                played_at: at,
                 uuid: s.uuid,
                 name: s.name,
                 country: s.country,
@@ -490,6 +699,10 @@ impl Backend {
             .into_iter()
             .map(|s| crate::commands::StationRow {
                 is_playing: false,
+                genre: crate::state::first_tag(&s.tags),
+                // a blocked station is hidden because the user said so, not
+                // because it failed; marking it dead too would blame the stream.
+                dead: false,
                 uuid: s.uuid,
                 name: s.name,
                 country: s.country,
@@ -541,13 +754,15 @@ impl Backend {
 
     fn to_page(&self, page: catalog_src::StationPage) -> crate::commands::StationPage {
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        let playing = self.state.phase != Phase::Idle;
         crate::commands::StationPage {
             stations: page
                 .stations
                 .into_iter()
                 .map(|s| crate::commands::StationRow {
-                    is_playing: now.as_deref() == Some(s.uuid.as_str())
-                        && self.state.phase != Phase::Idle,
+                    is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
+                    genre: crate::state::first_tag(&s.tags),
+                    dead: self.catalog.is_dead(&s.uuid),
                     uuid: s.uuid,
                     name: s.name,
                     country: s.country,
@@ -566,8 +781,16 @@ impl Backend {
         }
     }
 
-    pub fn search(&self, name: &str) -> crate::commands::StationPage {
-        match catalog_src::search_by_name(&self.catalog, name) {
+    pub fn search_filtered(
+        &self,
+        name: &str,
+        genre: Option<String>,
+        country: Option<String>,
+        codec: Option<String>,
+        bitrate_min: Option<u32>,
+    ) -> crate::commands::StationPage {
+        match catalog_src::search_filtered(&self.catalog, name, genre, country, codec, bitrate_min)
+        {
             Ok(page) => self.to_page(page),
             Err(e) => {
                 eprintln!("search failed: {e}");
@@ -660,6 +883,7 @@ impl Backend {
             &merged.shuffle_filter,
             &merged.scope,
             &merged.theme,
+            &merged.settings,
         );
         if changed.any() {
             profile.save(&self.profile_path)?;
@@ -766,6 +990,11 @@ mod tests {
         Backend {
             state: MiniState::new(),
             engine: None,
+            spectrum: radio_core::spectrum::Spectrum::new(),
+            settings: Settings::default(),
+            started_at: None,
+            premute: None,
+            queued: None,
             catalog,
             fav_path: dir.join("favorites.json"),
             hist_path: dir.join("history.json"),
@@ -843,7 +1072,47 @@ mod tests {
             country: country.into(),
             codec: String::new(),
             bitrate: 0,
+            tags: String::new(),
         }
+    }
+
+    // the panel names the station shuffle will play next, so the promise has to
+    // be kept: whatever is queued is what plays, and it is never the station
+    // already on air.
+    #[test]
+    fn the_queued_station_is_the_one_that_plays() {
+        let mut b = test_backend();
+        b.state
+            .load_stations(vec![pick("a", "UA"), pick("b", "PL")], Vec::new());
+        b.queue_next();
+        let promised = b.queued_next().map(|p| p.uuid.clone());
+        assert!(promised.is_some());
+
+        b.shuffle();
+        assert_eq!(b.state.now.as_ref().map(|n| n.uuid.clone()), promised);
+    }
+
+    #[test]
+    fn the_queue_never_names_the_station_already_playing() {
+        let mut b = test_backend();
+        // one station only: the next roll can only come up with that one, and it
+        // is what is already on air.
+        b.state.load_stations(vec![pick("a", "UA")], Vec::new());
+        b.shuffle();
+        assert_eq!(b.state.now.as_ref().unwrap().uuid, "a");
+        assert!(b.queued_next().is_none());
+    }
+
+    #[test]
+    fn changing_scope_drops_a_queue_drawn_from_the_old_pool() {
+        let mut b = test_backend();
+        b.state
+            .load_stations(vec![pick("a", "UA")], vec![pick("f", "PL")]);
+        b.queue_next();
+        assert!(b.queued_next().is_some());
+
+        b.set_scope(Scope::Favorites);
+        assert!(b.queued_next().is_none());
     }
 
     // the filter lives in profile.json, which another device may have written
@@ -1289,7 +1558,7 @@ mod tests {
     // volume is per-machine, so it lives in its own file rather than in
     // profile.json — a loud desktop must not push its level onto a phone.
     #[test]
-    fn a_saved_volume_survives_a_restart() {
+    fn saved_settings_survive_a_restart() {
         let dir = std::env::temp_dir().join(format!(
             "r4dio-volume-{}-{}",
             std::process::id(),
@@ -1298,10 +1567,20 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let settings_path = dir.join("settings.json");
 
-        save_volume(&settings_path, 0.35);
-        let loaded = load_volume(&settings_path);
+        save_settings(
+            &settings_path,
+            &Settings {
+                volume: 0.35,
+                eq_style: "wave".into(),
+                eq_gain: 6.0,
+            },
+        );
+        let loaded = load_settings(&settings_path);
 
-        assert_eq!(loaded, 0.35);
+        assert_eq!(loaded.volume, 0.35);
+        // the meter's settings ride the same file, so they have to survive with it.
+        assert_eq!(loaded.eq_style, "wave");
+        assert_eq!(loaded.eq_gain, 6.0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

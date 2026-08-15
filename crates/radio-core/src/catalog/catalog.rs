@@ -141,6 +141,13 @@ impl Catalog {
         self.health.is_hidden(uuid) || self.blacklist.contains(uuid)
     }
 
+    /// hidden because it kept failing, as opposed to hidden because the user
+    /// blocked it. a surface that marks a row "dead" must not call something
+    /// the user banned on purpose broken.
+    pub fn is_dead(&self, uuid: &str) -> bool {
+        self.health.is_hidden(uuid)
+    }
+
     pub fn toggle_blacklist(&mut self, uuid: &str) -> bool {
         let now_in = self.blacklist.toggle(uuid);
         self.pending.note(Set::Blocked, uuid, !now_in);
