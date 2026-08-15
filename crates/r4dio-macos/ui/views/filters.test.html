@@ -1,14 +1,10 @@
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8" /><link rel="stylesheet" href="../main.css" /></head>
-<body><pre id="out"></pre><div id="blocked_host"></div><div id="countries_host"></div>
+<body><pre id="out"></pre><div id="countries_host"></div>
 <script type="module">
-// the two filter views drive real DOM, so they are checked against a stubbed
+// the country filter drives real DOM, so it is checked against a stubbed
 // tauri bridge rather than by launching the app.
 const calls = [];
-let blockedRows = [
-  { uuid: "a", name: "Talk Radio Network", country: "US", codec: "MP3", bitrate: 96 },
-  { uuid: "b", name: "", country: "", codec: "", bitrate: 0 },
-];
 let countryRows = [
   { code: "CH", count: 640, excluded: true },
   { code: "CN", count: 1200, excluded: true },
@@ -20,11 +16,6 @@ window.__TAURI__ = {
   core: {
     invoke: async (cmd, args) => {
       calls.push([cmd, args]);
-      if (cmd === "blocked") return blockedRows;
-      if (cmd === "unblock") {
-        blockedRows = blockedRows.filter((r) => r.uuid !== args.uuid);
-        return blockedRows;
-      }
       if (cmd === "countries") return countryRows;
       if (cmd === "set_excluded") {
         countryRows = countryRows.map((r) => ({ ...r, excluded: args.codes.includes(r.code) }));
@@ -36,7 +27,6 @@ window.__TAURI__ = {
   event: { listen: async () => {} },
 };
 
-const { mountBlocked } = await import("./blocked.js");
 const { mountCountries } = await import("./countries.js");
 
 const out = [];
@@ -48,31 +38,10 @@ function eq(name, got, want) {
 }
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-const bhost = document.getElementById("blocked_host");
+// the blocked list no longer has a screen of its own: the redesign folded
+// "what never plays" into settings, and unblocking lives with the country
+// exclusions. what remains worth pinning is that RU/BY never appear at all.
 let changed = 0;
-mountBlocked(bhost, () => changed++);
-await settle();
-
-eq("every blocked station gets a row", bhost.querySelectorAll(".srow").length, 2);
-eq("an unresolved station still names itself",
-   bhost.querySelectorAll(".srow .nm")[1].textContent, "Unknown station");
-eq("the blocked count is in the header", bhost.querySelector(".paneh .cnt").textContent, "2");
-eq("each row can be unblocked", bhost.querySelectorAll(".act.unblock").length, 2);
-
-// pressing unblock must remove that row and tell the sidebar its count moved.
-bhost.querySelectorAll(".act.unblock")[0].click();
-await settle();
-eq("unblocking drops the row", bhost.querySelectorAll(".srow").length, 1);
-eq("unblocking sent the uuid", calls.at(-1)[1], { uuid: "a" });
-eq("the sidebar was told", changed, 1);
-
-// the last unblock leaves an empty state that reads as a state, not a failure.
-bhost.querySelectorAll(".act.unblock")[0].click();
-await settle();
-eq("an empty list shows an empty state", bhost.querySelectorAll(".empty").length, 1);
-eq("the empty state is not an error", bhost.querySelectorAll(".empty_mark.err").length, 0);
-eq("the empty header reads as a state", bhost.querySelector(".paneh .cnt").textContent, "none");
-
 const chost = document.getElementById("countries_host");
 mountCountries(chost, () => changed++);
 await settle();

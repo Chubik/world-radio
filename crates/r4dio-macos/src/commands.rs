@@ -124,6 +124,26 @@ pub fn favourites(state: tauri::State<Shared>) -> Vec<StationRow> {
     state.lock().unwrap().favourite_rows()
 }
 
+/// a played station plus when it was played. the stamp is what the list shows
+/// ("18 min ago"), and it is worded in the window rather than here so the
+/// wording can change without a round trip.
+#[derive(Serialize)]
+pub struct HistoryRow {
+    pub uuid: String,
+    pub name: String,
+    pub country: String,
+    pub codec: String,
+    pub bitrate: u32,
+    pub is_playing: bool,
+    pub is_favorite: bool,
+    pub played_at: i64,
+}
+
+#[tauri::command]
+pub fn history(state: tauri::State<Shared>) -> Vec<HistoryRow> {
+    state.lock().unwrap().history_rows()
+}
+
 #[tauri::command]
 pub fn play_uuid(state: tauri::State<Shared>, uuid: String) {
     state.lock().unwrap().play_uuid(&uuid);

@@ -26,6 +26,22 @@ pub fn last_played(catalog: &Catalog) -> anyhow::Result<Option<StationPick>> {
     Ok(station.as_ref().map(to_pick))
 }
 
+/// the stations played before, newest first, with the moment each was played.
+///
+/// history is stored as ids and stamps; a station whose id no longer resolves in
+/// the catalogue is dropped rather than shown as a blank row — the catalogue is
+/// re-fetched often and an id can leave it.
+pub fn played_before(catalog: &Catalog) -> anyhow::Result<Vec<(StationPick, i64)>> {
+    let mut out = Vec::new();
+    for play in catalog.history_plays() {
+        let Some(station) = catalog.station_by_uuid(&play.id)? else {
+            continue;
+        };
+        out.push((to_pick(&station), play.at));
+    }
+    Ok(out)
+}
+
 pub fn toggle_and_reload(catalog: &mut Catalog, uuid: &str) -> anyhow::Result<Vec<StationPick>> {
     catalog.toggle_favorite(uuid);
     favorite_stations(catalog)

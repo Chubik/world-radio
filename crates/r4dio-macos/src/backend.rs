@@ -453,6 +453,31 @@ impl Backend {
             .collect()
     }
 
+    pub fn history_rows(&mut self) -> Vec<crate::commands::HistoryRow> {
+        let played = match catalog_src::played_before(&self.catalog) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("load history failed: {e}");
+                return Vec::new();
+            }
+        };
+        let now = self.state.now.as_ref().map(|n| n.uuid.clone());
+        played
+            .into_iter()
+            .map(|(s, at)| crate::commands::HistoryRow {
+                is_playing: now.as_deref() == Some(s.uuid.as_str())
+                    && self.state.phase != Phase::Idle,
+                is_favorite: self.catalog.is_favorite(&s.uuid),
+                played_at: at,
+                uuid: s.uuid,
+                name: s.name,
+                country: s.country,
+                codec: s.codec,
+                bitrate: s.bitrate,
+            })
+            .collect()
+    }
+
     pub fn play_uuid(&mut self, uuid: &str) {
         // a favourite is usually absent from the top-1000 cache, so the row is
         // resolved through the catalog rather than looked up in the loaded lists.

@@ -481,6 +481,7 @@ fn run(backend: backend::Backend) {
             commands::stations_in,
             commands::add_favourite,
             commands::favourite_ids,
+            commands::history,
             open_window,
             account::create_account,
             account::account_state,
