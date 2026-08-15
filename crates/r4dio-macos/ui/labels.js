@@ -98,6 +98,7 @@ const SECTION_TAB = {
   blocked: ["settings", "blocked"],
   settings: ["settings", "countries"],
   countries: ["settings", "countries"],
+  appearance: ["settings", "appearance"],
   sync: ["settings", "account"],
   account: ["settings", "account"],
   shortcuts: ["settings", "shortcuts"],
