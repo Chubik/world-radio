@@ -54,11 +54,16 @@ export function mountCountries(host, onChange) {
     meta.appendChild(el("div", "sub", `${country.count.toLocaleString("en")} stations`));
     row.appendChild(meta);
 
-    const toggle = el("div", `toggle${country.excluded ? " on" : ""}`);
+    // the switch reads as "this country plays", which is the way round a switch
+    // is understood: on means on air. what is stored is still the *exclusions*
+    // — the account, the tui and the phone all speak that list — so only the
+    // display is inverted, never the data.
+    const plays = !country.excluded;
+    const toggle = el("div", `toggle${plays ? " on" : ""}`);
     toggle.appendChild(el("i"));
     toggle.setAttribute("role", "switch");
-    toggle.setAttribute("aria-checked", String(country.excluded));
-    toggle.setAttribute("aria-label", `Exclude ${countryName(country.code)}`);
+    toggle.setAttribute("aria-checked", String(plays));
+    toggle.setAttribute("aria-label", `Play stations from ${countryName(country.code)}`);
     row.appendChild(toggle);
 
     row.addEventListener("click", () => {
@@ -123,17 +128,17 @@ export function mountCountries(host, onChange) {
 
   function render() {
     host.textContent = "";
-    const excluded = rows.filter((r) => r.excluded).length;
+    const playing = rows.filter((r) => !r.excluded).length;
 
     const head = el("div", "paneh");
-    head.appendChild(el("h3", null, "◔ Excluded countries"));
-    head.appendChild(el("span", "cnt", countryHeading(excluded, rows.length)));
+    head.appendChild(el("h3", null, "◔ Countries on air"));
+    head.appendChild(el("span", "cnt", countryHeading(playing, rows.length)));
     host.appendChild(head);
     host.appendChild(
       el(
         "p",
         "panesub",
-        "Stations from the countries you switch on here never play — not in shuffle, not in search."
+        "Switch a country off and its stations stop playing — not in shuffle, not in search."
       )
     );
 

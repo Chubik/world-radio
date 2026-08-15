@@ -377,6 +377,10 @@ impl Backend {
             eprintln!("save history failed: {e}");
         }
         self.state.begin_play(pick);
+        // queued after `now` moves, never before: the draw skips whatever is
+        // playing, and reading the previous station here would let the panel
+        // promise the one that just started.
+        self.queue_next();
     }
 
     pub fn shuffle(&mut self) {
@@ -385,7 +389,6 @@ impl Backend {
         if let Some(pick) = pick {
             self.play_pick(pick);
         }
-        self.queue_next();
     }
 
     /// picks the station after this one. a scope or filter change invalidates it,

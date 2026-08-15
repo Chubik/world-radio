@@ -209,9 +209,10 @@ export function blockedName(station) {
   return name === "" ? "Unknown station" : name;
 }
 
-// "3 of 194" — how many of the countries on offer are switched off.
-export function countryHeading(excluded, total) {
-  return `${excluded ?? 0} of ${total ?? 0}`;
+// "191 of 194" — how many of the countries on offer are on air. it counts what
+// plays rather than what is blocked, to match the switch beside each row.
+export function countryHeading(playing, total) {
+  return `${playing ?? 0} of ${total ?? 0}`;
 }
 
 // the intl table is the browser's, so it stays correct without shipping a list
