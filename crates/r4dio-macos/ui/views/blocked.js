@@ -1,17 +1,12 @@
-import { flagFor, rowSubtitle, blockedName, blockedHeading } from "../labels.js";
+import { blockedName } from "../labels.js";
+import { el, headRow, stationRow, cursor } from "./stationlist.js";
 
 const invoke = window.__TAURI__.core.invoke;
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 export function mountBlocked(host, onChange) {
   let rows = [];
   let failed = false;
+  const at = cursor();
 
   async function refresh() {
     try {
@@ -23,83 +18,88 @@ export function mountBlocked(host, onChange) {
       failed = true;
       console.error("blocked failed", e);
     }
+    at.clamp(rows.length);
     render();
   }
 
-  function renderRow(station) {
-    const row = el("div", "srow");
-    row.appendChild(el("span", "flag", flagFor(station.country)));
-
-    const meta = el("div", "meta");
-    meta.appendChild(el("div", "nm", blockedName(station)));
-    meta.appendChild(el("div", "sub", rowSubtitle(station, false)));
-    row.appendChild(meta);
-
-    const act = el("span", "act unblock", "Unblock");
-    act.title = "Let this station play again";
-    act.addEventListener("click", async () => {
-      try {
-        rows = await invoke("unblock", { uuid: station.uuid });
-        render();
-        onChange?.();
-      } catch (err) {
-        console.error("unblock failed", err);
-      }
-    });
-    row.appendChild(act);
-    return row;
-  }
-
-  function renderEmpty(root) {
-    const box = el("div", "empty");
-    box.appendChild(el("div", "empty_mark", "⛌"));
-    box.appendChild(el("div", "empty_head", "Nothing blocked"));
-    box.appendChild(
-      el(
-        "p",
-        "empty_lede",
-        "Block a station you never want to hear again and it lands here, synced to every device."
-      )
-    );
-    root.appendChild(box);
-  }
-
-  function renderFailed(root) {
-    const box = el("div", "empty");
-    box.appendChild(el("div", "empty_mark err", "⚠"));
-    box.appendChild(el("div", "empty_head", "Could not read your blocked stations"));
-    box.appendChild(
-      el("p", "empty_lede", "The station catalogue did not answer. Reopen the window to try again.")
-    );
-    root.appendChild(box);
+  async function unblock(station) {
+    try {
+      rows = await invoke("unblock", { uuid: station.uuid });
+    } catch (e) {
+      console.error("unblock failed", e);
+      return;
+    }
+    at.clamp(rows.length);
+    render();
+    // the count the settings pane shows is derived from this list, so it is told
+    // rather than left stale until the window is reopened.
+    if (onChange) onChange();
   }
 
   function render() {
-    host.textContent = "";
-    const head = el("div", "paneh");
-    head.appendChild(el("h3", null, "⛌ Blocked stations"));
-    head.appendChild(el("span", "cnt", blockedHeading(rows.length)));
-    host.appendChild(head);
-    host.appendChild(
-      el("p", "panesub", "Stations marked never to play. Unblock one to let it back into shuffle and search.")
-    );
-
+    host.replaceChildren();
     if (failed) {
-      renderFailed(host);
+      const box = el("div", "empty");
+      box.appendChild(el("div", "err", "⚠ could not read your blocked stations"));
+      box.appendChild(el("div", null, "the station catalogue did not answer. reopen the window to try again."));
+      host.appendChild(box);
       return;
     }
     if (rows.length === 0) {
-      renderEmpty(host);
+      const box = el("div", "empty");
+      box.appendChild(el("div", null, "⛌ nothing blocked"));
+      box.appendChild(
+        el("div", null, "block a station from the menubar panel and it stops turning up in shuffle, on every device.")
+      );
+      host.appendChild(box);
       return;
     }
 
-    const list = el("div", "rowlist");
-    rows.forEach((s) => list.appendChild(renderRow(s)));
+    host.appendChild(
+      el("div", "sectlbl", `⛌ ${rows.length} BLOCKED`)
+    );
+    host.appendChild(headRow("ACTION"));
+    const list = el("div", "list");
+    rows.forEach((station, i) => {
+      // a blocked station is not playable from here — the row's action is the
+      // only thing it does, so the click that would play elsewhere unblocks.
+      const named = { ...station, name: blockedName(station) };
+      list.appendChild(
+        stationRow(named, {
+          selected: i === at.value,
+          action: { label: "↵ unblock", title: "Let this station play again" },
+          onPlay: () => {
+            at.set(i);
+            render();
+          },
+          onAction: () => unblock(station),
+        })
+      );
+    });
     host.appendChild(list);
+  }
+
+  function onKey(key) {
+    if (rows.length === 0) return false;
+    if (key === "ArrowDown") {
+      at.move(1, rows.length);
+      render();
+      return true;
+    }
+    if (key === "ArrowUp") {
+      at.move(-1, rows.length);
+      render();
+      return true;
+    }
+    if (key === "Enter" || key === "b" || key === "B") {
+      unblock(rows[at.value]);
+      return true;
+    }
+    return false;
   }
 
   render();
   refresh();
 
-  return { refresh };
+  return { refresh, onKey };
 }

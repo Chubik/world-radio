@@ -8,38 +8,56 @@
     <link rel="stylesheet" href="views/account.css" />
   </head>
   <body class="win_body">
-    <div class="winbody">
-      <nav class="sidebar">
-        <div class="navgroup">
-          <div class="glabel">Library</div>
-          <button class="navitem" data-section="favourites"><span class="ic">★</span>Favorites</button>
-          <button class="navitem" data-section="browse"><span class="ic">⌕</span>Browse</button>
-        </div>
-        <div class="navgroup">
-          <div class="glabel">Filters</div>
-          <button class="navitem" data-section="countries"><span class="ic">◔</span>Countries</button>
-          <button class="navitem" data-section="blocked"><span class="ic">⛌</span>Blocked</button>
-        </div>
-        <div class="navgroup">
-          <div class="glabel">Account</div>
-          <button class="navitem" data-section="sync"><span class="ic">◇</span>Sync</button>
-        </div>
-        <div class="filtrow hidden" id="filter_active"></div>
-        <div class="acct" id="filter_summary"></div>
-      </nav>
-
-      <main class="content">
-        <section class="pane" data-pane="favourites" id="pane_favourites"></section>
-        <section class="pane" data-pane="browse" id="pane_browse"></section>
-        <section class="pane" data-pane="countries" id="pane_countries"></section>
-        <section class="pane" data-pane="blocked" id="pane_blocked"></section>
-        <section class="pane" data-pane="sync">
-          <div class="paneh"><h3>◇ Sync</h3></div>
-          <p class="panesub">Keep your ★ favorites the same on every device.</p>
-          <div id="account_host"></div>
-        </section>
-      </main>
+    <div class="tabbar">
+      <div class="tab" data-tab="now">NOW PLAYING<span class="kk">⌘1</span></div>
+      <div class="tab" data-tab="browse">BROWSE<span class="kk">⌘2</span></div>
+      <div class="tab" data-tab="library">LIBRARY<span class="kk">⌘3</span></div>
+      <div class="tab" data-tab="settings">SETTINGS<span class="kk">⌘4</span></div>
+      <div class="clock" id="clock"></div>
     </div>
+
+    <div class="nowline" id="nowline">
+      <span class="lbl">NOW</span>
+      <span class="nm" id="now_name">—</span>
+      <div class="spec" id="now_spec"></div>
+      <div class="meta" id="now_meta"></div>
+    </div>
+
+    <div class="wbody">
+      <section class="pane" data-pane="now" id="pane_now">
+        <div class="nowbig">
+          <div class="nowbig_meta" id="big_meta"></div>
+          <div class="nowbig_name" id="big_name">—</div>
+          <div class="nowbig_sub" id="big_sub"></div>
+        </div>
+        <div class="spec big" id="big_spec"></div>
+        <div class="nowbig_foot" id="big_foot"></div>
+      </section>
+
+      <section class="pane" data-pane="browse" id="pane_browse"></section>
+
+      <section class="pane" data-pane="library">
+        <div class="subtabs" id="lib_tabs">
+          <span data-sub="favourites">FAVOURITES</span>
+          <span data-sub="blocked">BLOCKED</span>
+        </div>
+        <div class="sub" data-sub="favourites" id="pane_favourites"></div>
+        <div class="sub" data-sub="blocked" id="pane_blocked"></div>
+      </section>
+
+      <section class="pane" data-pane="settings">
+        <div class="subtabs" id="set_tabs">
+          <span data-sub="countries">COUNTRIES</span>
+          <span data-sub="account">ACCOUNT</span>
+          <span data-sub="shortcuts">SHORTCUTS</span>
+        </div>
+        <div class="sub" data-sub="countries" id="pane_countries"></div>
+        <div class="sub" data-sub="account" id="account_host"></div>
+        <div class="sub" data-sub="shortcuts" id="pane_shortcuts"></div>
+      </section>
+    </div>
+
+    <div class="footerbar" id="footerbar"></div>
     <script type="module" src="main.js"></script>
   </body>
 </html>

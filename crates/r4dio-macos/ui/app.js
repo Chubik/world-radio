@@ -82,6 +82,7 @@ function wire() {
   [...$("scope").children].forEach((seg) =>
     seg.addEventListener("click", () => invoke("set_scope", { scope: seg.dataset.scope }).then(poll))
   );
+  $("openwin").addEventListener("click", () => invoke("open_window"));
 }
 
 let timer = null;

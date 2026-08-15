@@ -1,17 +1,11 @@
-import { flagFor, rowSubtitle, favouritesHeading } from "../labels.js";
+import { el, headRow, stationRow, cursor } from "./stationlist.js";
 
 const invoke = window.__TAURI__.core.invoke;
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 export function mountFavourites(host) {
   let rows = [];
   let failed = false;
+  const at = cursor();
 
   async function refresh() {
     try {
@@ -23,105 +17,99 @@ export function mountFavourites(host) {
       failed = true;
       console.error("favourites failed", e);
     }
+    at.clamp(rows.length);
     render();
   }
 
-  function renderRow(station) {
-    const row = el("div", `srow${station.is_playing ? " live" : ""}`);
-    row.appendChild(el("span", "flag", flagFor(station.country)));
-
-    const meta = el("div", "meta");
-    meta.appendChild(el("div", "nm", station.name));
-    meta.appendChild(
-      el("div", `sub${station.is_playing ? " on" : ""}`, rowSubtitle(station, station.is_playing))
-    );
-    row.appendChild(meta);
-
-    const act = el("span", "act", "★");
-    act.title = "Remove from favorites";
-    act.addEventListener("click", async (e) => {
-      // the row itself plays; without this the star would play the station it
-      // is in the middle of removing.
-      e.stopPropagation();
-      try {
-        rows = await invoke("remove_favourite", { uuid: station.uuid });
-        render();
-      } catch (err) {
-        console.error("remove_favourite failed", err);
-      }
-    });
-    row.appendChild(act);
-
-    row.addEventListener("click", async () => {
-      try {
-        await invoke("play_uuid", { uuid: station.uuid });
-        await refresh();
-      } catch (err) {
-        console.error("play_uuid failed", err);
-      }
-    });
-    return row;
+  async function play(station) {
+    try {
+      await invoke("play_uuid", { uuid: station.uuid });
+      await refresh();
+    } catch (e) {
+      console.error("play_uuid failed", e);
+    }
   }
 
-  function renderEmpty(root) {
-    const box = el("div", "empty");
-    box.appendChild(el("div", "empty_mark", "★"));
-    box.appendChild(el("div", "empty_head", "No favorites yet"));
-    box.appendChild(
-      el(
-        "p",
-        "empty_lede",
-        "Star a station while it plays — from the menubar panel or from Browse — and it lands here, synced to every device."
-      )
-    );
-    root.appendChild(box);
-  }
-
-  function renderFailed(root) {
-    const box = el("div", "empty");
-    box.appendChild(el("div", "empty_mark err", "⚠"));
-    box.appendChild(el("div", "empty_head", "Could not read your favorites"));
-    box.appendChild(el("p", "empty_lede", "The station catalogue did not answer. Reopen the window to try again."));
-    root.appendChild(box);
+  async function remove(station) {
+    try {
+      rows = await invoke("remove_favourite", { uuid: station.uuid });
+    } catch (e) {
+      console.error("remove_favourite failed", e);
+      return;
+    }
+    at.clamp(rows.length);
+    render();
   }
 
   function render() {
-    host.textContent = "";
-    const head = el("div", "paneh");
-    head.appendChild(el("h3", null, "★ Favorites"));
-    head.appendChild(el("span", "cnt", favouritesHeading(rows.length)));
-    host.appendChild(head);
-    host.appendChild(
-      el("p", "panesub", "Stations synced with your account. Click a row to play it, ★ to remove it.")
-    );
-
+    host.replaceChildren();
     if (failed) {
-      renderFailed(host);
+      const box = el("div", "empty");
+      box.appendChild(el("div", "err", "⚠ could not read your favorites"));
+      box.appendChild(el("div", null, "the station catalogue did not answer. reopen the window to try again."));
+      host.appendChild(box);
       return;
     }
     if (rows.length === 0) {
-      renderEmpty(host);
+      const box = el("div", "empty");
+      box.appendChild(el("div", null, "★ no favorites yet"));
+      box.appendChild(
+        el("div", null, "star a station while it plays — from the menubar panel or from browse — and it lands here, synced to every device.")
+      );
+      host.appendChild(box);
       return;
     }
 
-    const list = el("div", "rowlist");
-    rows.forEach((s) => list.appendChild(renderRow(s)));
+    // the label carries the noun as well as the count: the pane heading that
+    // used to name it is gone, and a bare "4" over a list says nothing.
+    host.appendChild(
+      el("div", "sectlbl", `★ ${rows.length} FAVOURITE${rows.length === 1 ? "" : "S"}`)
+    );
+    host.appendChild(headRow("ACTION"));
+    const list = el("div", "list");
+    rows.forEach((station, i) =>
+      list.appendChild(
+        stationRow(station, {
+          selected: i === at.value,
+          action: { label: "↵ unstar", title: "Remove from favorites" },
+          onPlay: () => {
+            at.set(i);
+            play(station);
+          },
+          onAction: () => remove(station),
+        })
+      )
+    );
     host.appendChild(list);
+  }
 
-    const shuffle = el("button", "footbtn", "⇄ Shuffle favorites");
-    shuffle.addEventListener("click", async () => {
-      try {
-        await invoke("shuffle_favourites");
-        await refresh();
-      } catch (e) {
-        console.error("shuffle_favourites failed", e);
-      }
-    });
-    host.appendChild(shuffle);
+  /** returns whether the key was ours, so a key this list ignores still reaches
+   *  the window (and the menu) instead of being swallowed. */
+  function onKey(key) {
+    if (rows.length === 0) return false;
+    if (key === "ArrowDown") {
+      at.move(1, rows.length);
+      render();
+      return true;
+    }
+    if (key === "ArrowUp") {
+      at.move(-1, rows.length);
+      render();
+      return true;
+    }
+    if (key === "Enter") {
+      play(rows[at.value]);
+      return true;
+    }
+    if (key === "f" || key === "F") {
+      remove(rows[at.value]);
+      return true;
+    }
+    return false;
   }
 
   render();
   refresh();
 
-  return { refresh };
+  return { refresh, onKey };
 }

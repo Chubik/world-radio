@@ -1,19 +1,13 @@
 import {
-  flagFor, countryName, browseSubtitle, resultHeading, isSearchable, stationCount,
+  flagFor, countryName, resultHeading, isSearchable, stationCount,
 } from "../labels.js";
+import { el, headRow, stationRow, cursor } from "./stationlist.js";
 
 const invoke = window.__TAURI__.core.invoke;
 
 // a search over the offline cache costs ~0.29s, so typing "jazz" unthrottled
 // would run four of them and paint three lists nobody asked to see.
 export const DEBOUNCE_MS = 250;
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
 
 export function mountBrowse(host) {
   let countries = [];
@@ -24,9 +18,18 @@ export function mountBrowse(host) {
   let term = "";
   let results = null;
   let timer = null;
-  // country code -> { open, page }. `page` stays cached once loaded, so closing
-  // and reopening a node costs nothing.
-  const nodes = new Map();
+  // the country whose stations fill the list. null means the list shows search
+  // results instead — the two never share it, so the cursor always has one
+  // list to walk.
+  let country = null;
+  let page = null;
+  const at = cursor();
+  let searchInput = null;
+  let listHost = null;
+  let filterHost = null;
+  // the reply to an earlier keystroke can land after a later one; only the newest
+  // query may paint, or a slow search overwrites a fresher list.
+  let queryId = 0;
 
   async function refresh() {
     try {
@@ -42,90 +45,47 @@ export function mountBrowse(host) {
     render();
   }
 
-  async function addFavourite(uuid) {
-    try {
-      favourites = new Set(await invoke("add_favourite", { uuid }));
-    } catch (e) {
-      console.error("add_favourite failed", e);
-      return;
-    }
-    // only the subtitles change, so the lists are repainted in place rather than
-    // rebuilt — rebuilding would collapse every open country node.
-    paintResults();
-    paintOpenNodes();
+  /** the rows the cursor walks: whichever of the two sources is showing. */
+  function rows() {
+    if (results !== null) return results.stations ?? [];
+    if (page !== null) return page.stations ?? [];
+    return [];
   }
 
-  async function play(uuid) {
+  async function play(station) {
     try {
-      await invoke("play_uuid", { uuid });
+      await invoke("play_uuid", { uuid: station.uuid });
     } catch (e) {
       console.error("play_uuid failed", e);
     }
   }
 
-  function renderRow(station) {
-    const row = el("div", `srow${station.is_playing ? " live" : ""}`);
-    row.appendChild(el("span", "flag", flagFor(station.country)));
-
-    const meta = el("div", "meta");
-    meta.appendChild(el("div", "nm", station.name));
-    meta.appendChild(el("div", "sub", browseSubtitle(station, favourites.has(station.uuid))));
-    row.appendChild(meta);
-
-    const act = el("span", "act", "☆");
-    act.title = "Add to favorites";
-    act.addEventListener("click", (e) => {
-      // the row itself plays; without this the star would also start the station
-      // it is in the middle of adding.
-      e.stopPropagation();
-      addFavourite(station.uuid);
-    });
-    row.appendChild(act);
-
-    row.addEventListener("click", () => play(station.uuid));
-    return row;
-  }
-
-  function renderList(page) {
-    const box = el("div");
-    const head = el("div", "listhead");
-    head.appendChild(el("span", "cnt", resultHeading(page.stations.length, page.capped)));
-    box.appendChild(head);
-    const list = el("div", "rowlist");
-    page.stations.forEach((s) => list.appendChild(renderRow(s)));
-    box.appendChild(list);
-    return box;
-  }
-
-  function renderEmpty(root, head, lede) {
-    const box = el("div", "empty");
-    box.appendChild(el("div", "empty_mark", "⌕"));
-    box.appendChild(el("div", "empty_head", head));
-    box.appendChild(el("p", "empty_lede", lede));
-    root.appendChild(box);
+  async function star(station) {
+    try {
+      favourites = new Set(await invoke("add_favourite", { uuid: station.uuid }));
+    } catch (e) {
+      console.error("add_favourite failed", e);
+      return;
+    }
+    paintList();
   }
 
   // ── search ────────────────────────────────────────────────────────────────
-
-  let resultsHost = null;
-  let treeHost = null;
-  // the reply to an earlier keystroke can land after a later one; only the newest
-  // query may paint, or a slow search overwrites a fresher list.
-  let queryId = 0;
 
   async function runSearch() {
     const mine = ++queryId;
     const name = term.trim();
     try {
-      const page = await invoke("search", { name });
+      const found = await invoke("search", { name });
       if (mine !== queryId) return;
-      results = page;
+      results = found;
     } catch (e) {
       console.error("search failed", e);
       if (mine !== queryId) return;
       results = { stations: [], capped: false, failed: true };
     }
-    paintResults();
+    at.clamp(rows().length);
+    paintList();
   }
 
   function onTermChanged() {
@@ -135,180 +95,186 @@ export function mountBrowse(host) {
       // is about to answer with.
       queryId++;
       results = null;
-      paintResults();
+      at.set(0);
+      paintList();
       return;
     }
+    // a search takes over the list from whatever country was open, so the
+    // country stops being highlighted the moment the term counts.
+    country = null;
+    page = null;
     timer = setTimeout(runSearch, DEBOUNCE_MS);
   }
 
-  function paintResults() {
-    if (!resultsHost) return;
-    resultsHost.textContent = "";
-    if (results === null) return;
-    if (results.failed) {
-      const box = el("div", "empty");
-      box.appendChild(el("div", "empty_mark err", "⚠"));
-      box.appendChild(el("div", "empty_head", "Could not search the catalogue"));
-      box.appendChild(el("p", "empty_lede", "The station catalogue did not answer. Try the search again."));
-      resultsHost.appendChild(box);
-      return;
+  // ── the country filter column ─────────────────────────────────────────────
+
+  async function openCountry(code) {
+    country = code;
+    // a country replaces the search results rather than filtering them: two
+    // lists at once is the modal-and-list shape this layout exists to remove.
+    results = null;
+    term = "";
+    queryId++;
+    if (searchInput) searchInput.value = "";
+    page = null;
+    at.set(0);
+    paintFilters();
+    paintList();
+    try {
+      page = await invoke("stations_in", { country: code });
+    } catch (e) {
+      console.error("stations_in failed", e);
+      page = { stations: [], capped: false, failed: true };
     }
-    if (results.stations.length === 0) {
-      renderEmpty(
-        resultsHost,
-        "Nothing found",
-        "No station in the catalogue answers to that. Try a shorter word, or browse by country below."
+    // the user may have typed a search while it loaded.
+    if (country !== code) return;
+    at.clamp(rows().length);
+    paintList();
+  }
+
+  function paintFilters() {
+    if (!filterHost) return;
+    filterHost.replaceChildren();
+    const group = el("div", "fgroup");
+    group.appendChild(el("div", "flabel", "COUNTRY"));
+    countries.forEach((row) => {
+      const opt = el("div", `fopt${row.code === country ? " on" : ""}`);
+      opt.appendChild(el("span", "car", row.code === country ? "▸" : ""));
+      opt.appendChild(el("span", "box", row.code === country ? "[✓]" : "[ ]"));
+      opt.appendChild(el("span", null, `${flagFor(row.code)} ${countryName(row.code)}`));
+      opt.appendChild(el("span", "cnt", ""));
+      opt.title = `${stationCount(row.count)} stations`;
+      opt.addEventListener("click", () => openCountry(row.code));
+      group.appendChild(opt);
+    });
+    filterHost.appendChild(group);
+  }
+
+  // ── the list ──────────────────────────────────────────────────────────────
+
+  function paintList() {
+    if (!listHost) return;
+    listHost.replaceChildren();
+
+    const showing = results ?? page;
+    const count = el("span", "resultcount");
+    if (showing && !showing.failed) {
+      count.textContent = resultHeading(rows().length, showing.capped);
+    }
+    if (searchInput) {
+      searchInput.parentElement.querySelector(".resultcount")?.replaceWith(count);
+    }
+
+    if (showing === null) {
+      listHost.appendChild(
+        el("div", "empty", "type to search every station by name, or pick a country on the left.")
       );
       return;
     }
-    resultsHost.appendChild(renderList(results));
-  }
-
-  function renderSearch(root) {
-    const field = el("div", "searchfield");
-    field.appendChild(el("span", "ic", "⌕"));
-    const input = el("input");
-    input.type = "search";
-    input.placeholder = "Search every station by name…";
-    input.value = term;
-    input.addEventListener("input", () => {
-      term = input.value;
-      onTermChanged();
-    });
-    field.appendChild(input);
-    root.appendChild(field);
-  }
-
-  // ── the country tree ──────────────────────────────────────────────────────
-
-  function nodeFor(code) {
-    let node = nodes.get(code);
-    if (!node) {
-      node = { open: false, page: null };
-      nodes.set(code, node);
-    }
-    return node;
-  }
-
-  async function toggleCountry(code, body, caret, wrapper) {
-    const node = nodeFor(code);
-    node.open = !node.open;
-    wrapper.classList.toggle("open", node.open);
-    caret.textContent = node.open ? "▾" : "▸";
-    body.textContent = "";
-    if (!node.open) {
-      body.remove();
+    if (showing.failed) {
+      const box = el("div", "empty");
+      box.appendChild(el("div", "err", "⚠ could not read the catalogue"));
+      box.appendChild(el("div", null, "the station catalogue did not answer. try again."));
+      listHost.appendChild(box);
       return;
     }
-    wrapper.appendChild(body);
-    // a country is only ever loaded the first time it is opened; 240 countries
-    // loaded upfront would be the whole 58k-row catalogue.
-    if (node.page === null) {
-      body.appendChild(el("div", "loading", "loading…"));
-      try {
-        node.page = await invoke("stations_in", { country: code });
-      } catch (e) {
-        console.error("stations_in failed", e);
-        node.page = { stations: [], capped: false };
-      }
-      // the user may have closed it again while it loaded.
-      if (!node.open) return;
-      body.textContent = "";
-    }
-    paintNode(code, body);
-  }
-
-  function paintNode(code, body) {
-    const node = nodeFor(code);
-    body.textContent = "";
-    if (node.page.stations.length === 0) {
-      renderEmpty(body, "No stations here", "This country has no station the filters let through.");
+    if (rows().length === 0) {
+      listHost.appendChild(
+        el("div", "empty", "nothing here. try a shorter word, or another country.")
+      );
       return;
     }
-    body.appendChild(renderList(node.page));
-  }
 
-  // a star pressed in one place changes the subtitle everywhere that station is
-  // drawn, so every open node is repainted from the page it already has.
-  function paintOpenNodes() {
-    if (!treeHost) return;
-    treeHost.querySelectorAll(".treenode.open").forEach((wrapper) => {
-      const body = wrapper.querySelector(".treebody");
-      if (body) paintNode(wrapper.dataset.code, body);
-    });
-  }
-
-  function renderTree(root) {
-    root.appendChild(el("div", "glabel", "Browse by country"));
-    countries.forEach((country) => {
-      const wrapper = el("div", "treenode");
-      wrapper.dataset.code = country.code;
-
-      const head = el("div", "treehead");
-      const caret = el("span", "car", "▸");
-      head.appendChild(caret);
-      head.appendChild(el("span", "flag", flagFor(country.code)));
-      head.appendChild(el("span", "cname", countryName(country.code)));
-      head.appendChild(el("span", "cnt", stationCount(country.count)));
-
-      const body = el("div", "treebody");
-      head.addEventListener("click", () => toggleCountry(country.code, body, caret, wrapper));
-      wrapper.appendChild(head);
-      root.appendChild(wrapper);
-    });
+    listHost.appendChild(headRow("ACTION"));
+    const list = el("div", "list");
+    rows().forEach((station, i) =>
+      list.appendChild(
+        stationRow(station, {
+          selected: i === at.value,
+          action: {
+            label: favourites.has(station.uuid) ? "★ saved" : "↵ star",
+            title: "Add to favorites",
+          },
+          onPlay: () => {
+            at.set(i);
+            play(station);
+            paintList();
+          },
+          onAction: () => star(station),
+        })
+      )
+    );
+    listHost.appendChild(list);
   }
 
   function render() {
-    host.textContent = "";
-    const head = el("div", "paneh");
-    head.appendChild(el("h3", null, "⌕ Browse"));
-    head.appendChild(el("span", "cnt", countryHeading()));
-    host.appendChild(head);
-    host.appendChild(
-      el("p", "panesub", "Search the whole catalogue by name, or open a country to see what it carries.")
-    );
-
+    host.replaceChildren();
     if (failed) {
       const box = el("div", "empty");
-      box.appendChild(el("div", "empty_mark err", "⚠"));
-      box.appendChild(el("div", "empty_head", "Could not read the catalogue"));
-      box.appendChild(el("p", "empty_lede", "The station catalogue did not answer. Reopen the window to try again."));
+      box.appendChild(el("div", "err", "⚠ could not read the catalogue"));
+      box.appendChild(el("div", null, "the station catalogue did not answer. reopen the window to try again."));
       host.appendChild(box);
       return;
     }
 
-    renderSearch(host);
-    resultsHost = el("div", "results");
-    host.appendChild(resultsHost);
-    paintResults();
+    const grid = el("div", "browsegrid");
+    filterHost = el("div");
+    const right = el("div");
 
-    if (countries.length === 0) {
-      renderEmpty(
-        host,
-        "No stations yet",
-        "The station catalogue has not been downloaded yet. Once it syncs, every country it covers appears here."
-      );
-      return;
-    }
-
-    treeHost = el("div", "tree");
-    host.appendChild(treeHost);
-    renderTree(treeHost);
-    // an open node cannot survive a full repaint, so the cached pages are the
-    // only thing carried across; the tree reopens closed.
-    nodes.forEach((node) => {
-      node.open = false;
+    const search = el("div", "search");
+    search.appendChild(el("span", "cursor", "▌"));
+    searchInput = el("input");
+    searchInput.type = "search";
+    searchInput.placeholder = "search every station by name…";
+    searchInput.value = term;
+    searchInput.addEventListener("input", () => {
+      term = searchInput.value;
+      onTermChanged();
     });
+    search.appendChild(searchInput);
+    search.appendChild(el("span", "resultcount"));
+    right.appendChild(search);
+    right.appendChild(el("hr", "rule"));
+    listHost = el("div");
+    right.appendChild(listHost);
+
+    grid.append(filterHost, right);
+    host.appendChild(grid);
+    paintFilters();
+    paintList();
   }
 
-  function countryHeading() {
-    const total = countries.reduce((sum, c) => sum + c.count, 0);
-    return `${stationCount(total)} stations · ${countries.length} countries`;
+  function focusSearch() {
+    if (searchInput) searchInput.focus();
   }
 
-  // re-entering the section must not throw away a typed search or a country the
-  // user left open, so only the star marks are re-read — a star removed from the
-  // Favorites section has to stop showing "already in ★" here.
+  function onKey(key) {
+    const list = rows();
+    if (list.length === 0) return false;
+    if (key === "ArrowDown") {
+      at.move(1, list.length);
+      paintList();
+      return true;
+    }
+    if (key === "ArrowUp") {
+      at.move(-1, list.length);
+      paintList();
+      return true;
+    }
+    if (key === "Enter") {
+      play(list[at.value]);
+      return true;
+    }
+    if (key === "f" || key === "F") {
+      star(list[at.value]);
+      return true;
+    }
+    return false;
+  }
+
+  // re-entering the tab must not throw away a typed search or the country the
+  // user opened, so only the star marks are re-read — a star removed in Library
+  // has to stop showing "★ saved" here.
   async function syncStars() {
     try {
       favourites = new Set(await invoke("favourite_ids"));
@@ -316,12 +282,11 @@ export function mountBrowse(host) {
       console.error("favourite_ids failed", e);
       return;
     }
-    paintResults();
-    paintOpenNodes();
+    paintList();
   }
 
   render();
   refresh();
 
-  return { refresh, syncStars };
+  return { refresh, syncStars, focusSearch, onKey };
 }

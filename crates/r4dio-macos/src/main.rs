@@ -192,6 +192,13 @@ fn show_main(app: &tauri::AppHandle, section: &str) {
     let _ = win.emit("show-section", section);
 }
 
+/// the panel's way into the full window. the tray menu could already do this,
+/// but only behind a right-click — this makes the path click, then click.
+#[tauri::command]
+fn open_window(app: tauri::AppHandle) {
+    show_main(&app, "now");
+}
+
 fn account_masked() -> String {
     radio_core::sync::load_key()
         .map(|key| account::mask_key(&key))
@@ -474,6 +481,7 @@ fn run(backend: backend::Backend) {
             commands::stations_in,
             commands::add_favourite,
             commands::favourite_ids,
+            open_window,
             account::create_account,
             account::account_state,
             account::sign_in,
