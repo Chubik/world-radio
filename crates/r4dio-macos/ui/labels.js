@@ -93,9 +93,9 @@ const SECTION_TAB = {
   all: ["library", "all"],
   favourites: ["library", "favourites"],
   history: ["library", "history"],
-  // blocked has no screen of its own any more — unblocking lives in settings,
-  // which is where the rest of the "what never plays" rules already are.
-  blocked: ["settings", "countries"],
+  // blocked sits in settings beside the country exclusions: both answer "what
+  // never plays", and neither is opened while choosing something to listen to.
+  blocked: ["settings", "blocked"],
   settings: ["settings", "countries"],
   countries: ["settings", "countries"],
   sync: ["settings", "account"],
@@ -199,6 +199,13 @@ export function flagFor(code) {
     REGIONAL_A + c.codePointAt(0) - A,
     REGIONAL_A + c.codePointAt(1) - A
   );
+}
+
+// a blocked station the catalogue can no longer resolve still needs a row to be
+// unblocked from, so a placeholder stands in rather than leaving it blank.
+export function blockedName(station) {
+  const name = (station?.name ?? "").trim();
+  return name === "" ? "Unknown station" : name;
 }
 
 // "3 of 194" — how many of the countries on offer are switched off.

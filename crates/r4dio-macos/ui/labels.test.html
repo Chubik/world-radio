@@ -95,7 +95,7 @@ eq("null id falls back", activeTab(null), "library");
 // a sub-view now, so it has to open the tab holding it — and select that
 // sub-view, or "Open r4dio" lands on the wrong half of Library.
 eq("favourites opens its segment", targetFor("favourites"), { tab: "library", sub: "favourites" });
-eq("blocked has no screen, lands in settings", targetFor("blocked"), { tab: "settings", sub: "countries" });
+eq("blocked opens its settings section", targetFor("blocked"), { tab: "settings", sub: "blocked" });
 eq("sync opens the account", targetFor("sync"), { tab: "settings", sub: "account" });
 eq("countries opens settings", targetFor("countries"), { tab: "settings", sub: "countries" });
 eq("browse is the all segment", targetFor("browse"), { tab: "library", sub: "all" });

@@ -1,6 +1,7 @@
 import { targetFor, hintsFor, stateLabels } from "./labels.js";
 import { mountAccount } from "./views/account.js";
 import { mountCountries } from "./views/countries.js";
+import { mountBlocked } from "./views/blocked.js";
 import { mountShortcuts } from "./views/shortcuts.js";
 import { mountLibrary } from "./views/library.js";
 import { mountNowPanel } from "./views/nowpanel.js";
@@ -9,7 +10,13 @@ const invoke = window.__TAURI__.core.invoke;
 const listen = window.__TAURI__.event.listen;
 
 const countries = mountCountries(document.getElementById("pane_countries"));
-const account = mountAccount(document.getElementById("account_host"), () => countries.refresh());
+// unblocking puts a station back into shuffle and search, so the list showing
+// those results has to be re-read rather than left as it was drawn.
+const blocked = mountBlocked(document.getElementById("pane_blocked"), () => library.refreshMarks());
+const account = mountAccount(document.getElementById("account_host"), () => {
+  countries.refresh();
+  blocked.refresh();
+});
 mountShortcuts(document.getElementById("pane_shortcuts"));
 
 // the two halves of the library are separate because they answer separate
@@ -26,7 +33,11 @@ const library = mountLibrary(document.getElementById("listbody"), {
   onPlayed: () => now.refresh(),
 });
 
-const REFRESH = { countries: () => countries.refresh(), account: () => account.refresh() };
+const REFRESH = {
+  countries: () => countries.refresh(),
+  blocked: () => blocked.refresh(),
+  account: () => account.refresh(),
+};
 const SUB = { settings: "countries" };
 
 let tab = null;
