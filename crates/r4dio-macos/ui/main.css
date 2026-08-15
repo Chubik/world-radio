@@ -90,14 +90,22 @@
 .gaugerow .val { width: 34px; text-align: right; flex: none; }
 .gaugerow.hidden { display: none; }
 
+/* the line box has to be taller than the glyphs, or `overflow: hidden` clips
+   the descenders and the name reads as broken type. */
 .stationnm {
   color: var(--bright); font-size: 16px; font-weight: 600; margin-top: 16px;
+  line-height: 1.35; padding-bottom: 1px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* the track, when the stream says one. it wraps rather than truncating: a song
-   title cut mid-word is worth less than two lines. */
-.songnm { color: var(--hot); font-size: 12px; margin-top: 5px; line-height: 1.5; }
-.songnm:empty { display: none; }
+/* the track, when the stream says one. it holds two lines' worth of height at
+   all times — a title that grows from one line to two would otherwise push the
+   transport, the actions and the volume down the panel on every song change,
+   and those are things the user aims a mouse at. */
+.songnm {
+  color: var(--hot); font-size: 12px; margin-top: 5px; line-height: 1.5;
+  height: 36px; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .stationnm.idle { color: var(--dim); font-weight: 400; }
 /* the parts are separate spans, so they need the gap to read as a list rather
    than one run ("PLMP3 192kdance"). */
@@ -224,7 +232,13 @@
 .row:hover, .row.sel { background: var(--fg); color: var(--bg); }
 .row .car, .listhead .car { width: 10px; flex: none; color: var(--hot); }
 .row:hover .car, .row.sel .car { color: var(--bg); }
-.row .star { color: var(--dim); width: 14px; text-align: center; flex: none; }
+/* the mono face has no ★/☆ and the fallback picks the emoji form — a coloured
+   blob where a one-colour glyph belongs. asking for the text presentation keeps
+   it flat, so it takes the row's colour like every other cell. */
+.row .star {
+  color: var(--dim); width: 14px; text-align: center; flex: none;
+  font-variant-emoji: text;
+}
 .row .star.on { color: var(--hi); }
 .row:hover .star, .row.sel .star { color: var(--bg); }
 .row .nm, .listhead .nm {

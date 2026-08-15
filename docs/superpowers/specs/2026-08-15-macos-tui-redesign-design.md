@@ -1,94 +1,88 @@
-# macOS window — TUI redesign
+# macOS window — one screen
 
-The main window is rebuilt around the TUI-style mockup: top tabs instead of a
-sidebar, a now-playing strip that never leaves the screen, and station lists that
-read like the terminal browser.
+The main window is rebuilt around the second TUI-style mockup: what is playing
+stays on the left at all times, and one list on the right answers "what next".
 
-## Why
+> **Two mockups existed.** The first drew four tabs (NOW PLAYING / BROWSE /
+> LIBRARY / SETTINGS) and was built, then replaced the same day by the second,
+> which folds all of it into one screen. This spec describes the **second**, the
+> one that shipped. The mockup is styled after the terminal client, but this was
+> app work — `radio-tui` was not touched.
 
-The sidebar groups five sections under three headings, which reads as a settings
-window rather than a radio. The mockup answers that: the categories become a
-horizontal row, what is playing is always visible, and a station row is the thing
-you act on — arrow to it, press return, it plays.
+## Why one screen
 
-## Scope
+The most common action is choosing something new while still hearing — and
+seeing — what is on now. Separate tabs hid that context every time the user went
+looking. The left panel never changes; the right list filters by segment without
+moving anything the eye is resting on. Settings stays a tab of its own because
+theme, shortcuts and account are monthly decisions, not listening ones.
 
-**In:** the window shell (tabs, now-playing strip, keyboard hints footer), TUI
-station rows, keyboard navigation, filters as a column beside the browse list,
-and a way into the full window from the tray panel.
+## Layout
 
-**Out:**
+**LIBRARY** — a 300px panel on the left: live equalizer, BUF and UP gauges,
+station name, track, metadata, status line, transport (shuffle / play-stop),
+three named actions (favourite / retry / info), volume, and the next station
+queued by shuffle. On the right: search, an All / Favourites / History segment,
+a filter chip row, and the station list.
 
-- **HISTORY tab.** The data exists (`Play { id, at }`, synced, on disk) and drives
-  "play last" from the tray, but a visible list only earns its place if the user
-  hits "something good played and I did not star it". Not observed yet. Library
-  ships as FAVOURITES + BLOCKED; adding a third sub-tab later is a `history()`
-  command plus a list, because the data is already there.
-- **Themes / APPEARANCE.** Deferred until the shell is on screen and it is clear
-  what Settings actually needs. Theme is synced, so it is a data decision, not a
-  visual one, and it should not ride along with a layout change.
-- **A real SIGNAL column.** Stations carry `codec` and `bitrate`; there is no
-  per-station signal measurement, and inventing one would be a lie in a column
-  that looks measured. The scale is derived from bitrate and labelled as such.
+**SETTINGS** — APPEARANCE / COUNTRIES / BLOCKED / SHORTCUTS / ACCOUNT.
 
-## Shell
+## What the rows show
 
-Five sections collapse into four tabs:
+`▸` cursor, a star that toggles, name with its genre, flag and code, codec, and
+a signal column. A station that keeps failing reads `✗ dead`; the one buffering
+right now reads `⏳ buffering`. History swaps the signal column for WHEN.
 
-| Tab | Holds |
+## Where the data comes from
+
+Everything drawn is something the backend actually knows:
+
+| Shown | Source |
 |---|---|
-| NOW PLAYING | the current station, large |
-| BROWSE | search + country tree, filters in a column beside it |
-| LIBRARY | FAVOURITES / BLOCKED sub-tabs |
-| SETTINGS | countries + account |
+| track (`♪ …`) | ICY metadata on `Status::Playing { title }` |
+| genre | `Station.tags`, first tag that is not a frequency |
+| `✗ dead` | the health tracker, distinct from a user block |
+| BUF % | `ringbuf` occupancy of the decode rings |
+| UP | wall-clock stamp taken when the station started |
+| NEXT | shuffle's next pick, drawn ahead and then actually played |
+| signal | bitrate, and labelled as such — no signal is measured anywhere |
 
-`SECTIONS` in `labels.js` currently lists the five old ids and `activeSection`
-falls back to `favourites`. Both change together, and the tray sends section ids
-(`show_main(app, "favourites")`, `"sync"`), so those call sites move with it —
-an unmapped id must land on a real tab, not a blank pane.
+**`4 234 listeners` from the mockup is not built**: no such field exists in the
+catalogue, and inventing one would be a number that looks measured.
 
-## Now-playing strip
+## The keyboard
 
-Directly under the tabs, on every tab. Reads `now_state`, which the popover
-already polls. It is a status line, not a second player: no controls beyond what
-the row itself offers, so it cannot drift out of sync with the panel.
+`↑ ↓` move, `↵` plays, SPACE play/stop, `F` favourite, `r` shuffle, `R` retry,
+`M` mute, `I` info, `1–3` segments, `⌘F` search, `⌘1–2` tabs. `⌥⇧R` (global)
+is untouched. Every key in the footer and the shortcuts list is handled — a hint
+for a key that does nothing teaches the user to stop reading the row.
 
-## Station rows
+## The equalizer
 
-`▸` cursor on the selected row, then STATION / CC / CODEC / SIGNAL. Clicking a row
-already plays it (`views/browse.js` → `play_uuid`); the cursor makes that legible
-rather than changing it. The signal scale comes from `bitrate` — five marks at
-256k and up, fewer below. The currently-playing station can also show
-`⏳ buffering…`, because that state is known from `now_state`.
+Five styles (bars / mirror / dots / wave / off) and a sensitivity slider, both in
+Settings → APPEARANCE. The analyser is `radio_core::spectrum` — the same FFT the
+terminal client has always used, moved into core so both meters read one sound
+the same way. It replaced a hardcoded 14-number array that could not move at all.
 
-`✗ dead` is not shown per row: deadness is tracked as health on the Android side,
-and surfacing it here needs a backend path that does not exist yet.
+Style and gain travel with the account in the synced `settings` bag, falling back
+to a local file for a machine that has never signed in.
 
-## Keyboard
+## Traps this created, and how they are held
 
-`↑ ↓` move the cursor, `↵` plays, `F` stars, `B` blocks, `⌘F` focuses search,
-`⌘1–4` switch tabs. The footer shows these, contextual per tab, replacing the
-large buttons. `⌥⇧R` (global shuffle) already exists and is untouched.
-
-## Tray → window
-
-Left-click on the tray icon keeps opening the popover — that answers "what is
-playing" in one click, which is what a tray music app is for. The full window
-gains a row inside the panel, so the path is click → panel → click, instead of
-hiding behind a right-click menu.
+- **The tray sends old section names** (`favourites`, `sync`). `targetFor()` maps
+  each onto a tab and sub-view; six tests pin it. Without that, "Open r4dio"
+  opens a blank pane — the same unreached-path defect class this repo keeps
+  producing.
+- **The country switch is drawn inverted.** On means "plays"; what is stored,
+  synced and sent is still the *excluded* list, because the account, the phone
+  and the terminal all speak that. A test pins that the wire format is unchanged.
+- **The queue must be kept.** Whatever NEXT names is what shuffle plays, and it
+  is queued after `now` moves — queueing before it lets the panel promise the
+  station that just started.
 
 ## Testing
 
-The UI tests are standalone `*.test.html` pages run in a browser, not in CI.
-`labels.test.html` covers `activeSection`, so the section rework updates those
-cases. Pure functions (tab mapping, signal scale from bitrate, keyboard target
-resolution) go in `labels.js` where they can be tested that way; DOM wiring is
-verified by running the window.
-
-## Risks
-
-- **`views/*.js` are not rewritten.** They mount into a host element and do their
-  own rendering; the shell changes around them. Rewriting them would put list
-  behaviour and layout in the same change with nothing to bisect.
-- **The mockup describes the window, not the tray panel.** The panel entry is
-  built so it survives the redesign rather than being folded into it.
+`make check-window` parses every window module, checks every `getElementById`
+against `main.html`, and drives the panel against a fake backend. It exists
+because a duplicate `const` shipped a blank window while every Rust test passed:
+`cargo` never looks at the JavaScript.

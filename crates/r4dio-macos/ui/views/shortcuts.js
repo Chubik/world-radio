@@ -3,7 +3,7 @@
  *  subset that applies to the current tab; this is the whole set, including the
  *  one that works when the window is not even in front. */
 const KEYS = [
-  ["⌥⇧R", "shuffle — works system-wide, from any app"],
+  ["⌥R", "shuffle — works system-wide, from any app"],
   ["r", "shuffle a station"],
   ["R", "retry — reopen the stream that is playing"],
   ["SPACE", "play / stop"],

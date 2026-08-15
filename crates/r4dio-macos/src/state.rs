@@ -274,7 +274,7 @@ mod tests {
             country: String::new(),
             codec: String::new(),
             bitrate: 0,
-                        tags: String::new(),
+            tags: String::new(),
         }
     }
 
@@ -286,7 +286,7 @@ mod tests {
             country: country.into(),
             codec: String::new(),
             bitrate: 0,
-                        tags: String::new(),
+            tags: String::new(),
         }
     }
 
