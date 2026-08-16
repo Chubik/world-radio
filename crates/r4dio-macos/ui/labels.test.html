@@ -111,6 +111,10 @@ eq("192k is four", signalBars(192), 4);
 eq("128k is three", signalBars(128), 3);
 eq("64k is two", signalBars(64), 2);
 eq("32k is one", signalBars(32), 1);
+// the catalogue holds a handful of rows in bits per second: 512000 is 512k, and
+// reading it raw both breaks the meter and prints "512000k" in the codec column.
+eq("bits per second are read as kilobits", signalBars(512000), 5);
+eq("128000 is 128k", signalBars(128000), 3);
 
 // a hint for a key the tab does not answer teaches the user to stop reading.
 eq("the library offers search", hintsFor("library").some(([k]) => k === "⌘F"), true);

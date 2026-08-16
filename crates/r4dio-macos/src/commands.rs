@@ -276,11 +276,16 @@ pub fn search(
     codec: Option<String>,
     // tauri maps the window's camelCase argument onto this snake_case name.
     bitrate_min: Option<u32>,
+    sort: Option<String>,
 ) -> StationPage {
-    state
-        .lock()
-        .unwrap()
-        .search_filtered(&name, genre, country, codec, bitrate_min)
+    state.lock().unwrap().search_filtered(
+        &name,
+        genre,
+        country,
+        codec,
+        bitrate_min,
+        sort.as_deref().unwrap_or("name"),
+    )
 }
 
 #[tauri::command]

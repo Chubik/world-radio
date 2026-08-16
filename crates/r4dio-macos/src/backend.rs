@@ -792,6 +792,7 @@ impl Backend {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn search_filtered(
         &self,
         name: &str,
@@ -799,9 +800,17 @@ impl Backend {
         country: Option<String>,
         codec: Option<String>,
         bitrate_min: Option<u32>,
+        sort: &str,
     ) -> crate::commands::StationPage {
-        match catalog_src::search_filtered(&self.catalog, name, genre, country, codec, bitrate_min)
-        {
+        match catalog_src::search_filtered(
+            &self.catalog,
+            name,
+            genre,
+            country,
+            codec,
+            bitrate_min,
+            radio_core::catalog::Sort::from_wire(sort),
+        ) {
             Ok(page) => self.to_page(page),
             Err(e) => {
                 eprintln!("search failed: {e}");

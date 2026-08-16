@@ -129,6 +129,9 @@ impl BrowseFilters {
             tags: self.tags.clone(),
             codecs: self.codecs.clone(),
             bitrate_min: self.bitrate_min,
+            // the terminal client sorts its own results, so it takes the
+            // query's default order.
+            ..Default::default()
         }
     }
 

@@ -127,7 +127,10 @@ export function activeTab(id) {
  *  this project, so the scale is bitrate — which is what actually differs
  *  between two streams of the same station — and never a guess dressed as one. */
 export function signalBars(bitrate) {
-  const kbps = Number(bitrate) || 0;
+  // a few stations report bits per second, so 512000 means 512k. read raw it
+  // would be off the scale for the meter and misprinted in the codec column.
+  const raw = Number(bitrate) || 0;
+  const kbps = raw >= 10000 ? Math.round(raw / 1000) : raw;
   if (kbps <= 0) {
     return 0;
   }

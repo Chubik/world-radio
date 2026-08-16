@@ -728,6 +728,7 @@ mod tests {
             tags: Vec::new(),
             codecs: Vec::new(),
             bitrate_min: None,
+            ..Default::default()
         }
     }
 
@@ -888,6 +889,7 @@ mod tests {
                 tags: Vec::new(),
                 codecs: Vec::new(),
                 bitrate_min: None,
+                ..Default::default()
             },
             crate::tui::model::BrowseFilters::default(),
         )
