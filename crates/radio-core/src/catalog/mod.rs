@@ -13,7 +13,7 @@ pub use cache::{text_is_excluded, Cache};
 pub use catalog::Catalog;
 pub use facets::Facets;
 pub use favorites::{Favorites, History, Play};
-pub use filter::{allowed_row, allowed_station, SearchQuery};
+pub use filter::{allowed_row, allowed_station, SearchQuery, Sort};
 pub use health::Health;
 pub use station::{codec_is_unstable, Station};
 

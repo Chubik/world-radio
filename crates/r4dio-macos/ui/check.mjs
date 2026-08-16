@@ -122,7 +122,6 @@ expect("the panel shows the track", text("np_track"), "Chuck Wayne");
 expect("the panel shows the genre", text("np_meta"), "jazz");
 expect("the buffer gauge reads the level", text("np_buf"), "72%");
 expect("uptime is worded, not raw seconds", text("np_up"), "14m");
-expect("the volume is a percentage", text("np_vol"), "64");
 expect("the next station is named", text("np_scope"), "FIP");
 expect("the clock says what state we are in", text("clock"), "LIVE");
 
@@ -223,8 +222,6 @@ function installDom() {
   const starIcon = new El("span");
   starIcon.classList.add("ic");
   byId.get("np_star")?.appendChild(starIcon);
-  const volFill = new El("i");
-  byId.get("np_volbar")?.appendChild(volFill);
 
   globalThis.document = {
     getElementById: (id) => byId.get(id) ?? null,

@@ -267,6 +267,11 @@ pub struct StationPage {
     pub capped: bool,
 }
 
+// the window's browse query, one argument per thing the user can set. they are
+// listed rather than grouped in a struct because tauri maps them straight from
+// the invoke call, and a struct would put every one of them behind a nested
+// object in the javascript.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn search(
     state: tauri::State<Shared>,
@@ -276,11 +281,20 @@ pub fn search(
     codec: Option<String>,
     // tauri maps the window's camelCase argument onto this snake_case name.
     bitrate_min: Option<u32>,
+    sort: Option<String>,
+    // how many rows to skip: the window asks for the next page as the user
+    // reaches the bottom rather than drawing 50,000 rows at once.
+    offset: Option<usize>,
 ) -> StationPage {
-    state
-        .lock()
-        .unwrap()
-        .search_filtered(&name, genre, country, codec, bitrate_min)
+    state.lock().unwrap().search_filtered(
+        &name,
+        genre,
+        country,
+        codec,
+        bitrate_min,
+        sort.as_deref().unwrap_or("name"),
+        offset.unwrap_or(0),
+    )
 }
 
 #[tauri::command]

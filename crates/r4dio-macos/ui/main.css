@@ -222,9 +222,11 @@
 }
 .listbody { overflow-y: auto; flex: 1; min-height: 0; }
 
+/* tight rows on purpose: this is a list of tens of thousands, and every row of
+   padding is a station the user has to scroll past to reach. */
 .row {
   display: flex; align-items: center; gap: 10px;
-  padding: 7px 20px; font-size: 12.5px; cursor: pointer;
+  padding: 3px 20px; font-size: 12.5px; cursor: pointer; line-height: 1.5;
   border-bottom: 1px solid rgba(58,40,24,.35);
 }
 /* the cursor row inverts rather than tints: at this row height a tint is hard
