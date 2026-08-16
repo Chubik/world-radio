@@ -185,7 +185,7 @@ eq("a miss is a miss", matchesCountry({ code: "CH" }, "japan"), false);
 // searches "radio" must not believe they are looking at every match.
 eq("a short result list just counts", resultHeading(12, false), "12 results");
 eq("one result reads as one", resultHeading(1, false), "1 result");
-eq("a capped list says it is capped", resultHeading(200, true), "first 200 results");
+eq("a paging list says how far it has got", resultHeading(200, true), "200 so far");
 eq("no results reads as a state", resultHeading(0, false), "nothing found");
 
 // the search is offline over 58k rows; one or two letters match most of the

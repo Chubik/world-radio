@@ -172,6 +172,19 @@ impl Cache {
         excluded: &[String],
         limit: Option<usize>,
     ) -> anyhow::Result<Vec<Station>> {
+        self.search_page(q, excluded, limit, 0)
+    }
+
+    /// the same search, starting `offset` rows in. paging lives here rather than
+    /// in the caller because the cut has to happen after the sort and the dedup
+    /// — skipping rows of an already-trimmed page would skip the wrong ones.
+    pub fn search_page(
+        &self,
+        q: &SearchQuery,
+        excluded: &[String],
+        limit: Option<usize>,
+        offset: usize,
+    ) -> anyhow::Result<Vec<Station>> {
         let mut sql = String::from(
             "SELECT stationuuid, name, url_resolved, countrycode, language, tags, codec, bitrate, votes, geo_lat, geo_long FROM stations",
         );
@@ -249,6 +262,10 @@ impl Cache {
         if let Some(n) = limit {
             sql.push_str(" LIMIT ?");
             params.push(Box::new(n as i64));
+            if offset > 0 {
+                sql.push_str(" OFFSET ?");
+                params.push(Box::new(offset as i64));
+            }
         }
 
         let mut stmt = self.conn.prepare(&sql)?;

@@ -192,7 +192,9 @@ export function mountNowPanel({ onChanged }) {
       console.error("now_state failed", e);
       return;
     }
-    const was = state?.station;
+    // the uuid, not the name: two stations can share a name, and a shuffle
+    // between them would never tell the list anything changed.
+    const was = state?.uuid;
     const wasStyle = state?.eq_style;
     state = next;
     // the style rides the poll, so a change made on another device lands here
@@ -201,7 +203,7 @@ export function mountNowPanel({ onChanged }) {
       setStyle(next.eq_style);
     }
     paint();
-    if (was !== next.station && onChanged) onChanged();
+    if (was !== next.uuid && onChanged) onChanged();
   }
 
   /** the meter's own settings, told to it by the settings pane. `off` stops the

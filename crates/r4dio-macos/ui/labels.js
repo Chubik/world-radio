@@ -273,7 +273,9 @@ export function resultHeading(shown, capped) {
     return "nothing found";
   }
   if (capped) {
-    return `first ${stationCount(n)} results`;
+    // "so far" rather than "first N": the list pages in as it is scrolled, so
+    // the number is where the user has got to, not a cut they cannot pass.
+    return `${stationCount(n)} so far`;
   }
   return `${stationCount(n)} result${n === 1 ? "" : "s"}`;
 }
