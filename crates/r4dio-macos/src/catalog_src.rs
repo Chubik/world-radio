@@ -140,15 +140,6 @@ pub struct StationPage {
     pub capped: bool,
 }
 
-fn page(mut stations: Vec<radio_core::catalog::Station>) -> StationPage {
-    let capped = stations.len() > RESULT_LIMIT;
-    stations.truncate(RESULT_LIMIT);
-    StationPage {
-        stations: stations.iter().map(to_pick).collect(),
-        capped,
-    }
-}
-
 /// blocked stations stay out of browse: a station the user banned must not come
 /// back as a row they can play, and the search only applies the country
 /// exclusions, not the blacklist.
@@ -164,7 +155,14 @@ fn visible(
 
 fn bounded(catalog: &Catalog, q: &radio_core::catalog::SearchQuery) -> anyhow::Result<StationPage> {
     let found = catalog.search_offline_limited(q, OVERFETCH)?;
-    Ok(page(visible(catalog, found)))
+    // "is there more?" is answered by what the catalogue returned, before the
+    // blocked rows are dropped. asking afterwards silently downgrades a capped
+    // page to a complete one whenever a blocked station lands inside it — the
+    // list then claims "200 results" for a catalogue of 50,000.
+    let capped = found.len() > RESULT_LIMIT;
+    let mut stations: Vec<StationPick> = visible(catalog, found).iter().map(to_pick).collect();
+    stations.truncate(RESULT_LIMIT);
+    Ok(StationPage { stations, capped })
 }
 
 /// the browse query the window builds: a name plus whatever filter chips are
@@ -583,6 +581,28 @@ mod tests {
         let rows = stations_in_country(&cat, "US").unwrap();
         assert_eq!(rows.stations.len(), RESULT_LIMIT);
         assert!(rows.capped);
+    }
+
+    // a blocked station inside the page used to make a capped page look complete:
+    // `capped` was computed after the blocked rows were dropped, so 201 found
+    // minus one blocked read as "exactly 200, that is all of them".
+    #[test]
+    fn a_blocked_station_inside_the_page_does_not_hide_that_there_is_more() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        let many: Vec<_> = (0..(RESULT_LIMIT + 1))
+            .map(|i| named(&format!("u{i}"), &format!("Station {i:04}"), "UA"))
+            .collect();
+        cat.ingest(&many).unwrap();
+        cat.toggle_blacklist("u0");
+
+        let page = search_filtered(&cat, "", None, None, None, None).unwrap();
+
+        assert!(page.capped, "the catalogue had more than one page");
+        assert!(
+            !page.stations.iter().any(|s| s.uuid == "u0"),
+            "blocked row shown"
+        );
     }
 
     #[test]

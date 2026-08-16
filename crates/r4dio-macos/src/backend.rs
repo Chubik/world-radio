@@ -755,9 +755,20 @@ impl Backend {
     fn to_page(&self, page: catalog_src::StationPage) -> crate::commands::StationPage {
         let now = self.state.now.as_ref().map(|n| n.uuid.clone());
         let playing = self.state.phase != Phase::Idle;
+        // a page is 200 rows out of ~58,000, so the station on air is almost
+        // never among them by chance. it is put at the top instead: the window
+        // marks it and parks its cursor there, and a list that cannot show what
+        // you are listening to is the wrong list to be looking at.
+        let mut stations = page.stations;
+        if let Some(uuid) = now.as_deref() {
+            if !stations.iter().any(|s| s.uuid == uuid) {
+                if let Some(pick) = self.state.now.clone() {
+                    stations.insert(0, pick);
+                }
+            }
+        }
         crate::commands::StationPage {
-            stations: page
-                .stations
+            stations: stations
                 .into_iter()
                 .map(|s| crate::commands::StationRow {
                     is_playing: playing && now.as_deref() == Some(s.uuid.as_str()),
