@@ -133,8 +133,17 @@ impl Catalog {
         q: &SearchQuery,
         limit: usize,
     ) -> anyhow::Result<Vec<Station>> {
+        self.search_offline_page(q, limit, 0)
+    }
+
+    pub fn search_offline_page(
+        &self,
+        q: &SearchQuery,
+        limit: usize,
+        offset: usize,
+    ) -> anyhow::Result<Vec<Station>> {
         self.cache
-            .search_limited(q, self.excluded_country_ids(), Some(limit))
+            .search_page(q, self.excluded_country_ids(), Some(limit), offset)
     }
 
     pub fn is_hidden(&self, uuid: &str) -> bool {

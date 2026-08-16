@@ -50,6 +50,11 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     ["country", "country"],
   ];
   let sort = "name";
+  // rows already fetched beyond the first page, and whether another page is
+  // worth asking for. paging exists because "All" is 50,000 stations: drawing
+  // them at once is a wall, and stopping at 200 hides the rest for good.
+  let more = false;
+  let loadingMore = false;
 
   async function loadFavouriteIds() {
     try {
@@ -84,6 +89,7 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
         });
         rows = page.stations ?? [];
         capped = !!page.capped;
+        more = !!page.capped;
       }
     } catch (e) {
       console.error(`load ${segment} failed`, e);
@@ -125,7 +131,16 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
   // ── painting ──────────────────────────────────────────────────────────────
 
   function paintChrome() {
-    segrow.querySelectorAll("span").forEach((node) =>
+    host.addEventListener("scroll", () => {
+    const left = host.scrollHeight - host.scrollTop - host.clientHeight;
+    // one screen of slack, so the next page is already in by the time the user
+    // reaches the bottom rather than after they stop and wait.
+    if (left < host.clientHeight) {
+      loadMore();
+    }
+  });
+
+  segrow.querySelectorAll("span").forEach((node) =>
       node.classList.toggle("on", node.dataset.seg === segment)
     );
 
@@ -329,6 +344,39 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     return "the catalogue has not been downloaded yet.";
   }
 
+  /** fetches the next page when the list is scrolled near its end. it appends
+   *  rather than replacing, so the cursor and everything above stay put. */
+  async function loadMore() {
+    if (!more || loadingMore || segment !== "all") {
+      return;
+    }
+    loadingMore = true;
+    try {
+      const page = await invoke("search", {
+        name: term.trim(),
+        genre: filters.genre,
+        country: null,
+        codec: filters.codec,
+        bitrateMin: filters.bitrateMin,
+        sort,
+        offset: rows.length,
+      });
+      const next = page.stations ?? [];
+      // a page that repeats what we already hold means the end: appending it
+      // would grow the list forever with the same rows.
+      const known = new Set(rows.map((r) => r.uuid));
+      const fresh = next.filter((r) => !known.has(r.uuid));
+      rows = rows.concat(fresh);
+      more = !!page.capped && fresh.length > 0;
+      capped = more;
+      paint();
+    } catch (e) {
+      console.error("load more failed", e);
+      more = false;
+    }
+    loadingMore = false;
+  }
+
   function scrollCursorIntoView() {
     const node = host.children[at];
     if (node && node.scrollIntoView) {
@@ -367,8 +415,12 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     paint();
   }
 
-  /** re-reads only what a play changes: which row is live, and the stars. a
-   *  full reload would clear a typed search and lose the cursor. */
+  /** re-reads what a play changes: which row is live, and the stars.
+   *
+   *  when the station that started is not in this list at all — which is what
+   *  shuffle does, drawing from tens of thousands — the list is reloaded so the
+   *  backend can pin it at the top. marking rows that do not contain it would
+   *  leave the cursor sitting on whatever was there before. */
   async function markPlaying() {
     if (rows.length === 0) {
       return;
@@ -448,6 +500,15 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     }
     return false;
   }
+
+  host.addEventListener("scroll", () => {
+    const left = host.scrollHeight - host.scrollTop - host.clientHeight;
+    // one screen of slack, so the next page is already in by the time the user
+    // reaches the bottom rather than after they stop and wait.
+    if (left < host.clientHeight) {
+      loadMore();
+    }
+  });
 
   segrow.querySelectorAll("span").forEach((node) =>
     node.addEventListener("click", () => showSegment(node.dataset.seg))
