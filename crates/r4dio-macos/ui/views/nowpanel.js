@@ -25,14 +25,11 @@ export function mountNowPanel({ onChanged }) {
   const upbar = document.getElementById("np_upbar");
   const retryBtn = document.getElementById("np_retry");
   const info = document.getElementById("np_info");
-  const mute = document.getElementById("np_mute");
   const meta = document.getElementById("np_meta");
   const status = document.getElementById("np_status");
   const play = document.getElementById("np_play");
   const star = document.getElementById("np_star");
   const shuffleBtn = document.getElementById("np_shuffle");
-  const volbar = document.getElementById("np_volbar");
-  const vol = document.getElementById("np_vol");
   const scopeLine = document.getElementById("np_scope");
   const clock = document.getElementById("clock");
 
@@ -161,14 +158,6 @@ export function mountNowPanel({ onChanged }) {
     retryBtn.classList.toggle("off", idle);
     info.classList.toggle("off", idle);
 
-    const level = Math.round((s.volume ?? 0) * 100);
-    volbar.firstElementChild.style.width = `${level}%`;
-    vol.textContent = `${level}`;
-    mute.classList.toggle("muted", !!s.muted);
-    // a word rather than a glyph: the two bars read as a pause button, and the
-    // one thing this control must not be mistaken for is play/stop.
-    mute.textContent = s.muted ? "MUTED" : "VOL";
-
     // the header line: the state, and the wall clock the design puts beside it.
     clock.replaceChildren();
     const cdot = document.createElement("span");
@@ -258,7 +247,6 @@ export function mountNowPanel({ onChanged }) {
     if (!state?.station) return;
     send("retry");
   });
-  mute.addEventListener("click", () => send("toggle_mute"));
   info.addEventListener("click", () => {
     if (!state?.station) return;
     showInfo();
@@ -267,11 +255,6 @@ export function mountNowPanel({ onChanged }) {
   star.addEventListener("click", () => {
     if (!state?.station) return;
     send("toggle_favorite");
-  });
-  volbar.addEventListener("click", (e) => {
-    const box = volbar.getBoundingClientRect();
-    const v = Math.max(0, Math.min(1, (e.clientX - box.left) / box.width));
-    send("set_volume", { v });
   });
 
   /** the stream's own details, in place rather than in a dialog: a modal over a
