@@ -53,6 +53,46 @@ pub struct SearchQuery {
     pub tags: Vec<String>,
     pub codecs: Vec<String>,
     pub bitrate_min: Option<u32>,
+    /// how the whole result is ordered. it belongs in the query rather than in
+    /// the caller: a page is 200 rows out of ~58,000, so sorting after the cut
+    /// would only order the arbitrary slice sqlite happened to return.
+    pub sort: Sort,
+}
+
+/// the orders a station list can be read in. `Name` is the default because it
+/// is the only one that is stable — two runs of the same search return the same
+/// rows in the same places.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Sort {
+    #[default]
+    Name,
+    /// most-voted first: radio-browser's rough proxy for popularity.
+    Popular,
+    /// highest bitrate first, which is the closest thing to "best sounding".
+    Bitrate,
+    Country,
+}
+
+impl Sort {
+    /// the ORDER BY body. every one ends in `name` so equal keys keep a stable
+    /// order rather than shuffling between identical queries.
+    pub fn clause(self) -> &'static str {
+        match self {
+            Sort::Name => "name",
+            Sort::Popular => "votes DESC, name",
+            Sort::Bitrate => "bitrate DESC, name",
+            Sort::Country => "countrycode, name",
+        }
+    }
+
+    pub fn from_wire(s: &str) -> Sort {
+        match s {
+            "popular" => Sort::Popular,
+            "bitrate" => Sort::Bitrate,
+            "country" => Sort::Country,
+            _ => Sort::Name,
+        }
+    }
 }
 
 impl SearchQuery {
