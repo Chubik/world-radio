@@ -168,6 +168,7 @@ fn bounded(catalog: &Catalog, q: &radio_core::catalog::SearchQuery) -> anyhow::R
 /// the browse query the window builds: a name plus whatever filter chips are
 /// switched on. every field here is one the cache can already index on, so a
 /// filter costs nothing more than a broader search would.
+#[allow(clippy::too_many_arguments)]
 pub fn search_filtered(
     catalog: &Catalog,
     name: &str,
@@ -175,6 +176,7 @@ pub fn search_filtered(
     country: Option<String>,
     codec: Option<String>,
     bitrate_min: Option<u32>,
+    sort: radio_core::catalog::Sort,
 ) -> anyhow::Result<StationPage> {
     if country.as_deref().is_some_and(is_hidden_country) {
         return Ok(StationPage {
@@ -193,6 +195,7 @@ pub fn search_filtered(
             tags: genre.map(|g| vec![g]).unwrap_or_default(),
             codecs: codec.map(|c| vec![c]).unwrap_or_default(),
             bitrate_min,
+            sort,
             ..Default::default()
         },
     )
@@ -258,7 +261,7 @@ pub fn country_facets(catalog: &Catalog) -> anyhow::Result<Vec<CountryFacet>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use radio_core::catalog::{Cache, Catalog, Health, Station};
+    use radio_core::catalog::{Cache, Catalog, Health, Sort, Station};
 
     fn station_in(uuid: &str, country: &str) -> Station {
         Station {
@@ -497,16 +500,25 @@ mod tests {
         ])
         .unwrap();
 
-        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
+        let hits =
+            search_filtered(&cat, "jazz", None, None, None, None, Default::default()).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "a");
         assert!(!hits.capped);
         // a term that matches nothing must come back empty rather than falling
         // through to the whole catalogue.
-        assert!(search_filtered(&cat, "zzzznothing", None, None, None, None)
-            .unwrap()
-            .stations
-            .is_empty());
+        assert!(search_filtered(
+            &cat,
+            "zzzznothing",
+            None,
+            None,
+            None,
+            None,
+            Default::default()
+        )
+        .unwrap()
+        .stations
+        .is_empty());
     }
 
     #[test]
@@ -520,7 +532,8 @@ mod tests {
             .collect();
         cat.ingest(&many).unwrap();
 
-        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
+        let hits =
+            search_filtered(&cat, "jazz", None, None, None, None, Default::default()).unwrap();
         assert_eq!(hits.stations.len(), RESULT_LIMIT);
         assert!(hits.capped);
     }
@@ -534,7 +547,8 @@ mod tests {
             .unwrap();
         cat.toggle_blacklist("a");
 
-        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
+        let hits =
+            search_filtered(&cat, "jazz", None, None, None, None, Default::default()).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "b");
     }
@@ -547,7 +561,8 @@ mod tests {
             .unwrap();
         cat.set_excluded_countries(vec!["PL".into()]);
 
-        let hits = search_filtered(&cat, "jazz", None, None, None, None).unwrap();
+        let hits =
+            search_filtered(&cat, "jazz", None, None, None, None, Default::default()).unwrap();
         assert_eq!(hits.stations.len(), 1);
         assert_eq!(hits.stations[0].uuid, "b");
     }
@@ -586,6 +601,31 @@ mod tests {
     // a blocked station inside the page used to make a capped page look complete:
     // `capped` was computed after the blocked rows were dropped, so 201 found
     // minus one blocked read as "exactly 200, that is all of them".
+    // the sort must reach sqlite through every layer this crate adds. the window
+    // sends a string; anything that drops it on the way leaves the list looking
+    // identical whichever order the user picks.
+    #[test]
+    fn the_sort_string_reaches_the_query() {
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        let mut quiet = named("q", "Aaa Quiet", "UA");
+        quiet.bitrate = 64;
+        let mut loud = named("l", "Zzz Loud", "UA");
+        loud.bitrate = 320;
+        cat.ingest(&[quiet, loud]).unwrap();
+
+        let by_name =
+            search_filtered(&cat, "", None, None, None, None, Sort::from_wire("name")).unwrap();
+        assert_eq!(by_name.stations[0].uuid, "q", "name sort is alphabetical");
+
+        let by_bitrate =
+            search_filtered(&cat, "", None, None, None, None, Sort::from_wire("bitrate")).unwrap();
+        assert_eq!(
+            by_bitrate.stations[0].uuid, "l",
+            "bitrate sort must put 320k first even though it sorts last by name"
+        );
+    }
+
     #[test]
     fn a_blocked_station_inside_the_page_does_not_hide_that_there_is_more() {
         let cache = Cache::open_in_memory().unwrap();
@@ -596,7 +636,7 @@ mod tests {
         cat.ingest(&many).unwrap();
         cat.toggle_blacklist("u0");
 
-        let page = search_filtered(&cat, "", None, None, None, None).unwrap();
+        let page = search_filtered(&cat, "", None, None, None, None, Default::default()).unwrap();
 
         assert!(page.capped, "the catalogue had more than one page");
         assert!(
@@ -666,7 +706,8 @@ mod tests {
         eprintln!("catalogue rows: {}", cat.catalog_count().unwrap());
         for term in ["jazz", "radio", "fm", "the"] {
             let t = Instant::now();
-            let page = search_filtered(&cat, term, None, None, None, None).unwrap();
+            let page =
+                search_filtered(&cat, term, None, None, None, None, Default::default()).unwrap();
             eprintln!(
                 "search {term:>6}: {:>4} rows capped={} in {:?}",
                 page.stations.len(),

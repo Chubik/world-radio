@@ -244,7 +244,8 @@ impl Cache {
                   HAVING rowid = min(rowid)",
             );
         }
-        sql.push_str(" ORDER BY name");
+        sql.push_str(" ORDER BY ");
+        sql.push_str(q.sort.clause());
         if let Some(n) = limit {
             sql.push_str(" LIMIT ?");
             params.push(Box::new(n as i64));
@@ -554,6 +555,7 @@ fn row_to_station(r: &rusqlite::Row) -> rusqlite::Result<Station> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::catalog::Sort;
 
     fn bare() -> Station {
         Station {
@@ -571,6 +573,62 @@ mod tests {
             lastcheckok: 1,
             lastchecktime_iso8601: String::new(),
         }
+    }
+
+    // the sort has to reach sqlite: a page is 200 rows out of tens of thousands,
+    // and sorting the page afterwards would only order whichever slice the
+    // database happened to return first.
+    #[test]
+    fn sort_orders_the_whole_catalogue_not_just_the_page() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            Station {
+                stationuuid: "quiet".into(),
+                name: "Zzz Quiet".into(),
+                bitrate: 64,
+                votes: 1,
+                ..bare()
+            },
+            Station {
+                stationuuid: "loud".into(),
+                name: "Aaa Loud".into(),
+                bitrate: 320,
+                votes: 999,
+                ..bare()
+            },
+        ])
+        .unwrap();
+
+        let by_name = c
+            .search_limited(&SearchQuery::default(), &[], Some(10))
+            .unwrap();
+        assert_eq!(by_name[0].stationuuid, "loud", "name sort is alphabetical");
+
+        let by_votes = c
+            .search_limited(
+                &SearchQuery {
+                    sort: Sort::Popular,
+                    ..Default::default()
+                },
+                &[],
+                Some(10),
+            )
+            .unwrap();
+        assert_eq!(by_votes[0].stationuuid, "loud");
+
+        // "Zzz Quiet" sorts last alphabetically; a bitrate sort must still put
+        // the 320k station first, which proves the order came from sql.
+        let by_bitrate = c
+            .search_limited(
+                &SearchQuery {
+                    sort: Sort::Bitrate,
+                    ..Default::default()
+                },
+                &[],
+                Some(10),
+            )
+            .unwrap();
+        assert_eq!(by_bitrate[0].bitrate, 320);
     }
 
     #[test]

@@ -41,6 +41,15 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
   // the chips above the list. null means "Any", which the design draws dimmed
   // rather than hiding — the rule is that nothing narrowing the list is unseen.
   const filters = { genre: null, codec: null, bitrateMin: null };
+  // how the whole catalogue is ordered, not just the page on screen — the sort
+  // travels to sqlite with the query.
+  const SORTS = [
+    ["name", "A-Z"],
+    ["popular", "popular"],
+    ["bitrate", "quality"],
+    ["country", "country"],
+  ];
+  let sort = "name";
 
   async function loadFavouriteIds() {
     try {
@@ -71,6 +80,7 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
           country: null,
           codec: filters.codec,
           bitrateMin: filters.bitrateMin,
+          sort,
         });
         rows = page.stations ?? [];
         capped = !!page.capped;
@@ -152,6 +162,19 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     );
     chip("Codec", filters.codec, () => setFilter("codec", null), () => setFilter("codec", "MP3"));
 
+    // sort is not a filter — it narrows nothing — but it belongs on the same row
+    // because it is the other thing that decides what the list shows first.
+    const label = SORTS.find(([key]) => key === sort)?.[1] ?? "A-Z";
+    const sorter = el("span", `chip${sort === "name" ? " off" : " on"}`, `Sort: ${label}`);
+    sorter.title = "Cycle how the list is ordered";
+    sorter.addEventListener("click", () => {
+      const i = SORTS.findIndex(([key]) => key === sort);
+      sort = SORTS[(i + 1) % SORTS.length][0];
+      at = 0;
+      load();
+    });
+    statebar.appendChild(sorter);
+
     if (hasFilter() || isSearchable(term)) {
       const clear = el("span", "clearall", "Clear all");
       clear.addEventListener("click", () => {
@@ -229,7 +252,11 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     const codec = (row.codec ?? "").trim();
     const rate = Number(row.bitrate) || 0;
     if (!codec && !rate) return "";
-    return rate ? `${codec} ${rate}k`.trim() : codec;
+    // a handful of stations report bits per second rather than kilobits, so the
+    // catalogue holds 512000 where every other row holds 512. printed raw it
+    // reads "512000k", which looks like a broken number rather than a good one.
+    const kbps = rate >= 10000 ? Math.round(rate / 1000) : rate;
+    return kbps ? `${codec} ${kbps}k`.trim() : codec;
   }
 
   function rowNode(row, i) {
