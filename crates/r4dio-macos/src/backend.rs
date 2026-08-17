@@ -24,6 +24,7 @@ pub struct Backend {
     pending_path: PathBuf,
     profile_path: PathBuf,
     settings_path: PathBuf,
+    health_path: PathBuf,
     settings: Settings,
     /// when the station now playing started, for the "UP 14m" line. it is a
     /// wall-clock stamp rather than a counter so it survives a poll gap.
@@ -219,6 +220,7 @@ impl Backend {
         let pending_path = data.join("sync_pending.json");
         let profile_path = data.join("profile.json");
         let settings_path = data.join("settings.json");
+        let health_path = data.join("station_health.json");
         let mut catalog = Catalog::load(
             cache,
             health,
@@ -265,6 +267,7 @@ impl Backend {
             pending_path,
             profile_path,
             settings_path,
+            health_path,
             mirror_seq: 0,
             applying_mirror: false,
             mirrored_now: false,
@@ -533,11 +536,39 @@ impl Backend {
     }
 
     pub fn poll_engine(&mut self) {
+        let mut dead: Option<radio_audio::FailureKind> = None;
         if let Some(engine) = &self.engine {
             while let Some(status) = engine.poll_status() {
+                if let radio_audio::Status::StreamError { kind, .. } = &status {
+                    dead = Some(*kind);
+                }
                 self.state.apply_status(status);
             }
         }
+        if let Some(kind) = dead {
+            self.station_failed(kind);
+        }
+    }
+
+    /// a stream that died takes us to the next station rather than leaving the
+    /// user in silence — the same thing the phone does, and the reason a radio
+    /// is worth having on in the first place.
+    ///
+    /// only a dead *station* counts. when the network is down every station will
+    /// fail, and shuffling through them would burn the catalogue marking live
+    /// stations dead.
+    fn station_failed(&mut self, kind: radio_audio::FailureKind) {
+        if kind != radio_audio::FailureKind::StreamDead {
+            return;
+        }
+        if let Some(pick) = self.state.now.clone() {
+            eprintln!("stream dead: {} — skipping", pick.name);
+            self.catalog.record_failure(&pick.uuid);
+            if let Err(e) = self.catalog.save_health(&self.health_path) {
+                eprintln!("save health failed: {e}");
+            }
+        }
+        self.shuffle();
     }
 
     /// the levels the window draws, taken from the audio actually being played.
@@ -710,6 +741,23 @@ impl Backend {
                 bitrate: s.bitrate,
             })
             .collect()
+    }
+
+    /// bans a station from ever playing again — shuffle, search and the phone
+    /// all honour it, because the blacklist is synced.
+    ///
+    /// blocking whatever is on air also moves on from it: a user who just said
+    /// "never this again" should not be left listening to it.
+    pub fn block(&mut self, uuid: &str) {
+        if !self.catalog.is_blacklisted(uuid) {
+            self.catalog.toggle_blacklist(uuid);
+        }
+        self.persist();
+        self.state
+            .set_blocked(self.catalog.blacklist_ids().to_vec());
+        if self.state.now.as_ref().map(|n| n.uuid.as_str()) == Some(uuid) {
+            self.shuffle();
+        }
     }
 
     pub fn unblock(&mut self, uuid: &str) -> Vec<crate::commands::StationRow> {
@@ -1033,6 +1081,7 @@ mod tests {
             pending_path: dir.join("sync_pending.json"),
             profile_path: dir.join("profile.json"),
             settings_path: dir.join("settings.json"),
+            health_path: dir.join("station_health.json"),
             mirror_seq: 0,
             applying_mirror: false,
             mirrored_now: false,
@@ -1109,6 +1158,64 @@ mod tests {
     // the panel names the station shuffle will play next, so the promise has to
     // be kept: whatever is queued is what plays, and it is never the station
     // already on air.
+    // a dead stream must take the user to the next station rather than leaving
+    // silence, and it must mark the station so shuffle stops offering it.
+    #[test]
+    fn a_dead_stream_marks_the_station_and_moves_on() {
+        let mut b = test_backend();
+        // enough stations that a random re-pick landing on the same one is not
+        // what decides whether this test passes.
+        let many: Vec<_> = (0..40).map(|i| pick(&format!("s{i}"), "UA")).collect();
+        b.state.load_stations(many, Vec::new());
+        b.shuffle();
+        let first = b.state.now.as_ref().unwrap().uuid.clone();
+
+        b.station_failed(radio_audio::FailureKind::StreamDead);
+
+        assert!(b.catalog.is_dead(&first), "the dead station was not marked");
+        // the dead station is hidden from the pool, so the next pick cannot be
+        // it — this is the property, not "the random number differed".
+        assert_ne!(
+            b.state.now.as_ref().map(|n| n.uuid.clone()),
+            Some(first),
+            "playback stayed on the station that just died"
+        );
+    }
+
+    // when the network is down every station fails; shuffling through them would
+    // mark the whole catalogue dead over a dropped wifi connection.
+    #[test]
+    fn a_network_failure_blames_nothing_and_stays_put() {
+        let mut b = test_backend();
+        b.state.load_stations(vec![pick("a", "UA")], Vec::new());
+        b.shuffle();
+        let playing = b.state.now.as_ref().unwrap().uuid.clone();
+
+        b.station_failed(radio_audio::FailureKind::NetworkDown);
+
+        assert!(
+            !b.catalog.is_dead(&playing),
+            "a network drop blamed the station"
+        );
+        assert_eq!(b.state.now.as_ref().map(|n| n.uuid.clone()), Some(playing));
+    }
+
+    // blocking what is on air has to move on from it: a user who just said
+    // "never this again" should not still be listening to it.
+    #[test]
+    fn blocking_the_playing_station_moves_on() {
+        let mut b = test_backend();
+        let many: Vec<_> = (0..40).map(|i| pick(&format!("s{i}"), "UA")).collect();
+        b.state.load_stations(many, Vec::new());
+        b.shuffle();
+        let playing = b.state.now.as_ref().unwrap().uuid.clone();
+
+        b.block(&playing);
+
+        assert!(b.catalog.is_blacklisted(&playing));
+        assert_ne!(b.state.now.as_ref().map(|n| n.uuid.clone()), Some(playing));
+    }
+
     #[test]
     fn the_queued_station_is_the_one_that_plays() {
         let mut b = test_backend();

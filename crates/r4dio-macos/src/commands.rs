@@ -236,6 +236,11 @@ pub fn blocked(state: tauri::State<Shared>) -> Vec<StationRow> {
 }
 
 #[tauri::command]
+pub fn block(state: tauri::State<Shared>, uuid: String) {
+    state.lock().unwrap().block(&uuid);
+}
+
+#[tauri::command]
 pub fn unblock(state: tauri::State<Shared>, uuid: String) -> Vec<StationRow> {
     state.lock().unwrap().unblock(&uuid)
 }

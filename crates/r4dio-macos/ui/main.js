@@ -15,6 +15,7 @@ const listen = window.__TAURI__.event.listen;
 
 
 
+
 const countries = mountCountries(document.getElementById("pane_countries"));
 // unblocking puts a station back into shuffle and search, so the list showing
 // those results has to be re-read rather than left as it was drawn.
@@ -45,6 +46,8 @@ const library = mountLibrary(document.getElementById("listbody"), {
   // the scope line in the panel is drawn from now_state, so it has to re-read
   // when the segment moves it rather than waiting for the next poll.
   onScope: () => now.refresh(),
+  // the settings pane lists what is blocked, so it has to hear about a new one.
+  onBlocked: () => blocked.refresh(),
 });
 
 const REFRESH = {
