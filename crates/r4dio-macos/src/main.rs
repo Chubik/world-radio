@@ -479,6 +479,7 @@ fn run(backend: backend::Backend) {
             commands::shuffle_favourites,
             commands::filter_counts,
             commands::blocked,
+            commands::block,
             commands::unblock,
             commands::countries,
             commands::set_excluded,
