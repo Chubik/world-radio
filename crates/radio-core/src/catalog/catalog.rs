@@ -191,6 +191,13 @@ impl Catalog {
         self.health.hidden_ids()
     }
 
+    /// records that this station failed to play. enough failures hide it from
+    /// shuffle and search — the counterpart to `clear_health`, which a station
+    /// earns back by playing successfully.
+    pub fn record_failure(&mut self, uuid: &str) {
+        self.health.record_failure(uuid);
+    }
+
     pub fn clear_health(&mut self, uuid: &str) {
         self.health.clear(uuid);
     }
