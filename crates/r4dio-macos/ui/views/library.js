@@ -22,7 +22,7 @@ function el(tag, className, text) {
  * history — and nothing else about the layout, so switching one never moves
  * anything the eye is already resting on.
  */
-export function mountLibrary(host, { head, count, segrow, statebar, search, onPlayed, onScope }) {
+export function mountLibrary(host, { head, count, segrow, statebar, search, onPlayed, onScope, onBlocked }) {
   let segment = "all";
   let rows = [];
   let favourites = new Set();
@@ -397,6 +397,22 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     markPlaying();
   }
 
+  /** bans a station outright. the row goes immediately rather than waiting for
+   *  a reload: a blocked station reappearing for a second reads as a failed
+   *  click. */
+  async function block(row) {
+    try {
+      await invoke("block", { uuid: row.uuid });
+    } catch (e) {
+      console.error("block failed", e);
+      return;
+    }
+    rows = rows.filter((r) => r.uuid !== row.uuid);
+    clampCursor();
+    paint();
+    if (onBlocked) onBlocked();
+  }
+
   async function toggleFavourite(row) {
     const cmd = isFavourite(row) ? "remove_favourite" : "add_favourite";
     try {
@@ -433,11 +449,36 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
       return;
     }
     playingPhase = live.phase;
+    // shuffle draws from tens of thousands, so the station that just started is
+    // almost never among the rows on screen. marking rows that do not contain it
+    // would leave the cursor on whatever was there before; the catalogue view
+    // reloads instead, and the backend pins the station at the top.
+    if (live.uuid && !rows.some((row) => row.uuid === live.uuid)) {
+      if (segment !== "all") {
+        return;
+      }
+      // put it at the top rather than reloading: a reload would throw away
+      // every page the user has scrolled in, and shuffle is pressed far more
+      // often than the list is re-read.
+      let station = null;
+      try {
+        const page = await invoke("search", {
+          name: "", genre: null, country: null, codec: null, bitrateMin: null, sort, offset: 0,
+        });
+        station = page.stations?.find((s) => s.uuid === live.uuid) ?? null;
+      } catch (e) {
+        console.error("could not resolve the playing station", e);
+      }
+      if (!station) return;
+      rows = [station, ...rows.map((row) => ({ ...row, is_playing: false }))];
+      at = 0;
+      await loadFavouriteIds();
+      paint();
+      return;
+    }
     rows = rows.map((row) => ({ ...row, is_playing: !!live.uuid && row.uuid === live.uuid }));
-    // the cursor follows the station that is playing: the row the user is
-    // looking at and the one they are hearing should be the same row, so
-    // pressing ↓ moves on from what is on air rather than from wherever the
-    // cursor was left.
+    // the row the user is looking at and the one they are hearing should be the
+    // same row, so ↓ moves on from what is on air.
     cursorToPlaying();
     await loadFavouriteIds();
     paint();
@@ -496,6 +537,10 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
     }
     if (key === "f" || key === "F") {
       toggleFavourite(rows[at]);
+      return true;
+    }
+    if (key === "b" || key === "B") {
+      block(rows[at]);
       return true;
     }
     return false;
