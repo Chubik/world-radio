@@ -333,11 +333,16 @@
   font-family: var(--sans); font-size: 12.5px; line-height: 1.5;
   color: var(--dim); max-width: 520px; margin: 6px 0 18px;
 }
+/* the settings pane is the scroller (see `.pane[data-pane="settings"]`), so this
+   list must not be a second one inside it: a fixed 380px box left the countries
+   ending mid-window on a large screen, sitting right on the footer while the
+   space below it went unused. it grows to its content and the pane scrolls. */
 .rowlist {
   display: flex; flex-direction: column; gap: 2px;
-  max-height: 380px; overflow-y: auto;
   border: 1px solid var(--rule); border-radius: 10px;
   background: var(--panel); padding: 5px;
+  /* the last row must not touch the footer that overlays the pane's end. */
+  margin-bottom: 18px;
 }
 .srow {
   display: flex; align-items: center; gap: 10px;

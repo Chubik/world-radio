@@ -113,6 +113,14 @@ fn is_hidden_country(code: &str) -> bool {
     HIDDEN.iter().any(|h| code.eq_ignore_ascii_case(h))
 }
 
+/// "XX" is radio-browser's stand-in for "country unknown", not a country. it is a
+/// well-formed two-letter code, so it survives every shape check and reaches the
+/// list as a row with a tofu flag and no name that a user can pointlessly switch
+/// off. one station carries it today; the row it makes is still wrong.
+fn is_placeholder_country(code: &str) -> bool {
+    code.eq_ignore_ascii_case("XX")
+}
+
 /// the window never draws an RU/BY row, so a list built from what it drew cannot
 /// mention them. carrying any already-stored entry through keeps a wholesale
 /// replace from logging a deletion the user never asked for and did not see.
@@ -253,7 +261,10 @@ pub fn country_facets(catalog: &Catalog) -> anyhow::Result<Vec<CountryFacet>> {
     Ok(catalog
         .country_counts()?
         .into_iter()
-        .filter(|(code, _)| !code.trim().is_empty() && !is_hidden_country(code))
+        .filter(|(code, _)| {
+            let code = code.trim();
+            !code.is_empty() && !is_hidden_country(code) && !is_placeholder_country(code)
+        })
         .map(|(code, count)| {
             let up = code.to_uppercase();
             CountryFacet {
@@ -401,6 +412,23 @@ mod tests {
         assert!(pl.excluded);
         assert!(!ua.excluded);
         assert_eq!(ua.count, 1);
+    }
+
+    #[test]
+    fn the_unknown_country_placeholder_never_becomes_a_row() {
+        // "XX" is a well-formed code, so nothing about its shape keeps it out:
+        // only naming it does. the live catalogue carries exactly one station
+        // with it, and that one station was enough to draw a nameless row with
+        // a tofu flag that the user could switch off to no effect.
+        let cache = Cache::open_in_memory().unwrap();
+        let mut cat = Catalog::new(cache, Health::new());
+        cat.ingest(&[station_in("a", "UA"), station_in("b", "XX")])
+            .unwrap();
+
+        let rows = country_facets(&cat).unwrap();
+        assert!(rows.iter().all(|r| r.code != "XX"), "XX reached the list");
+        // the real countries beside it must survive the filter untouched.
+        assert!(rows.iter().any(|r| r.code == "UA"));
     }
 
     #[test]
