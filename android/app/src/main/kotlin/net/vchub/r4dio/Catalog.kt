@@ -179,6 +179,17 @@ fun pickForScope(
     included: Set<String> = emptySet(),
 ): Station? = pickForScopeDetailed(scope, catalog, favs, userExcluded, blocked, rng, included).station
 
+/**
+ * what a catalogue request came back with. an empty list used to mean both
+ * "nothing changed" and "the download failed", and the caller could not tell
+ * them apart — which is why this is a type rather than a list.
+ */
+sealed class CatalogueResult {
+    object Unchanged : CatalogueResult()
+    data class Fetched(val stations: List<Station>, val etag: String) : CatalogueResult()
+    object Failed : CatalogueResult()
+}
+
 class Catalog(
     private val client: OkHttpClient = OkHttpClient(),
     private val baseUrl: String = "https://all.api.radio-browser.info",
@@ -302,6 +313,38 @@ class Catalog(
                     .filter { allowedStation(it, blocked = blocked) }
             }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * the incremental sibling of [fetchCatalogue]: sends the etag we already hold
+     * so an unchanged catalogue costs a 304 instead of the full download. an empty
+     * list used to mean both "nothing changed" and "the download failed", and the
+     * caller could not tell them apart — which is why this returns [CatalogueResult]
+     * instead.
+     */
+    fun fetchCatalogueResult(
+        url: String = CATALOG_URL,
+        etag: String = "",
+        blocked: Set<String> = emptySet(),
+    ): CatalogueResult {
+        val builder = Request.Builder()
+            .url(url)
+            .header("User-Agent", "world-radio-android/1.0")
+        if (etag.isNotBlank()) {
+            builder.header("If-None-Match", etag)
+        }
+        return runCatching {
+            client.newCall(builder.build()).execute().use { resp ->
+                if (resp.code == 304) return@use CatalogueResult.Unchanged
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || body.isBlank()) return@use CatalogueResult.Failed
+                val stations = json
+                    .decodeFromString(ListSerializer(FavStation.serializer()), body)
+                    .map { it.toStation() }
+                    .filter { allowedStation(it, blocked = blocked) }
+                CatalogueResult.Fetched(stations, resp.header("ETag").orEmpty())
+            }
+        }.getOrDefault(CatalogueResult.Failed)
     }
 
     private fun fetchOnce(limit: Int, blocked: Set<String>): List<Station> {

@@ -148,4 +148,59 @@ class CatalogueDownloadTest {
     fun the_default_url_is_our_own_server() {
         assertEquals("https://r4dio.net/catalog", CATALOG_URL)
     }
+
+    // a 304 must read as "unchanged", not as an empty catalogue — those two used
+    // to collapse into the same empty list, and the caller could not tell a
+    // revalidation apart from a failed download.
+    @Test
+    fun a_304_reports_unchanged_rather_than_an_empty_catalogue() {
+        server.enqueue(MockResponse().setResponseCode(304))
+        val result = catalog.fetchCatalogueResult(url = url(), etag = "\"abc\"")
+        assertTrue(result is CatalogueResult.Unchanged)
+        val sent = server.takeRequest()
+        assertEquals("\"abc\"", sent.getHeader("If-None-Match"))
+    }
+
+    @Test
+    fun a_200_returns_stations_and_the_new_etag() {
+        server.enqueue(
+            MockResponse()
+                .setHeader("ETag", "\"def\"")
+                .setBody(payload(row("a", "Jazz FM", "UA"))),
+        )
+        val result = catalog.fetchCatalogueResult(url = url(), etag = "")
+        assertTrue(result is CatalogueResult.Fetched)
+        result as CatalogueResult.Fetched
+        assertEquals(listOf("a"), result.stations.map { it.uuid })
+        assertEquals("\"def\"", result.etag)
+    }
+
+    // no etag held yet (first-ever fetch) must not send an empty If-None-Match
+    // header, which some servers would treat as a match against everything.
+    @Test
+    fun no_held_etag_sends_no_if_none_match_header() {
+        server.enqueue(MockResponse().setBody(payload(row("a", "Jazz FM", "UA"))))
+        catalog.fetchCatalogueResult(url = url(), etag = "")
+        val sent = server.takeRequest()
+        assertEquals(null, sent.getHeader("If-None-Match"))
+    }
+
+    // a server error must report Failed, not Unchanged — retrying belongs to the
+    // failure path, and an unchanged verdict would stamp the sync time as if the
+    // catalogue were confirmed current.
+    @Test
+    fun a_server_error_reports_failed() {
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertTrue(catalog.fetchCatalogueResult(url = url(), etag = "") is CatalogueResult.Failed)
+    }
+
+    // the ban still applies on the incremental path, same as on fetchCatalogue.
+    @Test
+    fun the_ban_is_applied_on_the_incremental_path_too() {
+        server.enqueue(
+            MockResponse().setBody(payload(row("r", "ru one", "RU"), row("a", "ok", "UA"))),
+        )
+        val result = catalog.fetchCatalogueResult(url = url(), etag = "") as CatalogueResult.Fetched
+        assertEquals(listOf("a"), result.stations.map { it.uuid })
+    }
 }
