@@ -1,5 +1,6 @@
 package net.vchub.r4dio
 
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.FormBody
@@ -190,6 +191,24 @@ sealed class CatalogueResult {
     object Failed : CatalogueResult()
 }
 
+@Serializable
+private data class WireDelta(
+    val id: String,
+    val added: List<FavStation> = emptyList(),
+    val removed: List<String> = emptyList(),
+)
+
+/**
+ * what the delta endpoint answered. `Unavailable` is not an error — it is the
+ * server saying "you are too far behind for this", and the caller answers by
+ * downloading everything, exactly as it did before deltas existed.
+ */
+sealed class DeltaResult {
+    data class Changed(val added: List<Station>, val removed: Set<String>, val id: String) : DeltaResult()
+    object Unchanged : DeltaResult()
+    object Unavailable : DeltaResult()
+}
+
 class Catalog(
     private val client: OkHttpClient = OkHttpClient(),
     private val baseUrl: String = "https://all.api.radio-browser.info",
@@ -345,6 +364,48 @@ class Catalog(
                 CatalogueResult.Fetched(stations, resp.header("ETag").orEmpty())
             }
         }.getOrDefault(CatalogueResult.Failed)
+    }
+
+    /**
+     * what changed since [since], the etag of the snapshot already held — about
+     * 100-150 kb against the 4.3 mb full catalogue. it is allowed to give up for
+     * any reason at all ([DeltaResult.Unavailable]): a 409 (snapshot too old), a
+     * 404 (a server from before deltas), any other failure, or no [since] to ask
+     * against in the first place. the caller answers every one of those the same
+     * way, by downloading everything.
+     */
+    fun fetchDelta(
+        url: String = "$CATALOG_URL/delta",
+        since: String,
+        blocked: Set<String> = emptySet(),
+    ): DeltaResult {
+        if (since.isBlank()) return DeltaResult.Unavailable
+        val request = Request.Builder()
+            .url("$url?since=${java.net.URLEncoder.encode(since, "UTF-8")}")
+            .header("User-Agent", "world-radio-android/1.0")
+            .build()
+        return runCatching {
+            client.newCall(request).execute().use { resp ->
+                when {
+                    resp.code == 304 -> DeltaResult.Unchanged
+                    // 409: snapshot too old for a delta. 404: a server from before
+                    // deltas existed. both mean the same thing to the caller.
+                    resp.code == 409 || resp.code == 404 -> DeltaResult.Unavailable
+                    !resp.isSuccessful -> DeltaResult.Unavailable
+                    else -> {
+                        val body = resp.body?.string().orEmpty()
+                        if (body.isBlank()) return@use DeltaResult.Unavailable
+                        val wire = json.decodeFromString(WireDelta.serializer(), body)
+                        DeltaResult.Changed(
+                            added = wire.added.map { it.toStation() }
+                                .filter { allowedStation(it, blocked = blocked) },
+                            removed = wire.removed.toSet(),
+                            id = wire.id,
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(DeltaResult.Unavailable)
     }
 
     private fun fetchOnce(limit: Int, blocked: Set<String>): List<Station> {
