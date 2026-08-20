@@ -377,6 +377,67 @@ impl Cache {
         Ok(n)
     }
 
+    /// a delta may never remove more than this share of what we hold. beyond it,
+    /// the answer is a bug upstream rather than a day's news, and the caller falls
+    /// back to a full download. `replace_all` refuses an empty dump for the same
+    /// reason.
+    const MAX_DELTA_REMOVAL_SHARE: f64 = 0.5;
+
+    /// applies what changed rather than rewriting everything. `replace_all` runs
+    /// about 109k statements to land ~1.3k real changes, because it deletes both
+    /// tables and reinserts every row into each. this touches only what moved.
+    ///
+    /// added stations are upserted, so a station we already hold is replaced rather
+    /// than duplicated — which is also how a mutated row would arrive.
+    pub fn apply_delta(&self, added: &[Station], removed: &[String]) -> anyhow::Result<usize> {
+        let held: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM stations", [], |r| r.get(0))?;
+        if held > 0 && !removed.is_empty() {
+            let share = removed.len() as f64 / held as f64;
+            if share > Self::MAX_DELTA_REMOVAL_SHARE {
+                anyhow::bail!(
+                    "refusing a delta removing {} of {held} stations",
+                    removed.len()
+                );
+            }
+        }
+
+        let tx = self.conn.unchecked_transaction()?;
+        for uuid in removed {
+            tx.execute("DELETE FROM stations WHERE stationuuid = ?1", [uuid])?;
+            tx.execute("DELETE FROM stations_fts WHERE stationuuid = ?1", [uuid])?;
+        }
+        let mut n = 0usize;
+        for s in added {
+            if is_banned(s) {
+                continue;
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO stations
+                    (stationuuid,name,url_resolved,countrycode,language,tags,codec,bitrate,votes,geo_lat,geo_long)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                rusqlite::params![
+                    s.stationuuid, s.name, s.url_resolved, s.countrycode, s.language,
+                    s.tags, s.codec, s.bitrate, s.votes, s.geo_lat, s.geo_long
+                ],
+            )?;
+            // the fts table has no unique constraint, so an upsert has to clear the
+            // old row itself or a re-added station is findable twice.
+            tx.execute(
+                "DELETE FROM stations_fts WHERE stationuuid = ?1",
+                [&s.stationuuid],
+            )?;
+            tx.execute(
+                "INSERT INTO stations_fts (stationuuid,name,tags) VALUES (?1,?2,?3)",
+                rusqlite::params![s.stationuuid, s.name, s.tags],
+            )?;
+            n += 1;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     pub fn set_last_sync(&self, unix_secs: i64) -> anyhow::Result<()> {
         self.conn.execute(
             "INSERT INTO meta (key,value) VALUES ('last_sync', ?1)
@@ -811,6 +872,83 @@ mod tests {
         let all = c.list_all(&[]).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].stationuuid, "1");
+    }
+
+    #[test]
+    fn apply_delta_adds_removes_and_leaves_the_rest() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[station("a", "A"), station("b", "B")]).unwrap();
+
+        c.apply_delta(&[station("c", "C")], &["a".to_string()]).unwrap();
+
+        let all = c.list_all(&[]).unwrap();
+        let ids: Vec<&str> = all.iter().map(|s| s.stationuuid.as_str()).collect();
+        assert!(!ids.contains(&"a"), "removed station must be gone");
+        assert!(ids.contains(&"b"), "untouched station must survive");
+        assert!(ids.contains(&"c"), "added station must be present");
+    }
+
+    #[test]
+    fn apply_delta_refuses_to_empty_the_catalogue() {
+        // a delta that removes most of what we hold is a bug upstream, not a day's
+        // news. `replace_all` already refuses an empty dump for the same reason.
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[
+            station("a", "A"),
+            station("b", "B"),
+            station("c", "C"),
+            station("d", "D"),
+        ])
+        .unwrap();
+
+        let err = c.apply_delta(&[], &["a".into(), "b".into(), "c".into()]);
+        assert!(err.is_err(), "removing three of four must be refused");
+        assert_eq!(c.list_all(&[]).unwrap().len(), 4, "nothing may be lost");
+    }
+
+    #[test]
+    fn apply_delta_upserts_a_station_it_already_holds() {
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[station("a", "old")]).unwrap();
+        c.apply_delta(&[station("a", "new")], &[]).unwrap();
+        let all = c.list_all(&[]).unwrap();
+        assert_eq!(all.len(), 1, "an upsert must not duplicate the row");
+        assert_eq!(all[0].name, "new");
+    }
+
+    #[test]
+    fn apply_delta_and_replace_all_reach_the_same_database() {
+        let stations = |names: &[&str]| -> Vec<Station> {
+            names.iter().map(|n| station(n, &n.to_uppercase())).collect()
+        };
+
+        let start = stations(&["a", "b", "c"]);
+        let end = stations(&["b", "c", "d"]);
+
+        let via_replace = Cache::open_in_memory().unwrap();
+        via_replace.replace_all(&end).unwrap();
+
+        let via_delta = Cache::open_in_memory().unwrap();
+        via_delta.replace_all(&start).unwrap();
+        via_delta
+            .apply_delta(&stations(&["d"]), &["a".to_string()])
+            .unwrap();
+
+        let mut left: Vec<String> = via_replace
+            .list_all(&[])
+            .unwrap()
+            .into_iter()
+            .map(|s| s.stationuuid)
+            .collect();
+        let mut right: Vec<String> = via_delta
+            .list_all(&[])
+            .unwrap()
+            .into_iter()
+            .map(|s| s.stationuuid)
+            .collect();
+        left.sort();
+        right.sort();
+        assert_eq!(left, right);
     }
 
     #[test]
