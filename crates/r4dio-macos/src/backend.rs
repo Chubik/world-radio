@@ -29,8 +29,9 @@ pub struct Backend {
     /// when the station now playing started, for the "UP 14m" line. it is a
     /// wall-clock stamp rather than a counter so it survives a poll gap.
     started_at: Option<i64>,
-    /// the level to come back to when unmuting; None means not muted.
-    premute: Option<f32>,
+    /// silence toggled from the keyboard. not persisted on purpose — see
+    /// `toggle_mute`.
+    muted: bool,
     /// the station shuffle will play next, chosen ahead of time so the panel can
     /// name it. it is drawn from the same pool at the same odds — the only
     /// difference is when the die is rolled, and a "NEXT" line that then played
@@ -149,10 +150,17 @@ fn startup_profile(
     profile
 }
 
+/// full output. the app has no volume control of its own: the system mixer
+/// already has one, so the engine is either at full or muted.
+const FULL_OUTPUT: f32 = 1.0;
+
+/// ⚠ `volume` is intentionally absent. it used to live here, and when the
+/// slider was removed from the window the stored value stayed behind — a
+/// `volume: 0.0` written by an old mute then silenced the app on every start
+/// with nothing on screen to explain it and no control left to undo it. serde
+/// ignores unknown fields, so an old file carrying one is simply forgotten.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Settings {
-    #[serde(default = "default_volume")]
-    volume: f32,
     /// how the meter is drawn. it is a name rather than an enum here because the
     /// window owns the drawing; the backend only remembers the choice.
     #[serde(default = "default_eq_style")]
@@ -161,10 +169,6 @@ struct Settings {
     /// station. mirrors the tui's `fft_divisor`.
     #[serde(default = "default_eq_gain")]
     eq_gain: f32,
-}
-
-fn default_volume() -> f32 {
-    0.8
 }
 
 fn default_eq_style() -> String {
@@ -178,7 +182,6 @@ fn default_eq_gain() -> f32 {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            volume: default_volume(),
             eq_style: default_eq_style(),
             eq_gain: default_eq_gain(),
         }
@@ -244,11 +247,13 @@ impl Backend {
         let profile = startup_profile(&profile_path, &data.join("config.toml"));
         seed_from_profile(&mut state, &profile, catalog.blacklist_ids());
         let settings = load_settings(&settings_path);
-        state.set_volume(settings.volume);
+        // full output every start: there is no app-level volume to restore, and
+        // mute deliberately does not survive a restart.
+        state.set_volume(FULL_OUTPUT);
 
         let engine = AudioEngine::spawn().ok();
         if let Some(engine) = &engine {
-            engine.set_volume(state.volume);
+            engine.set_volume(FULL_OUTPUT);
         }
 
         Ok(Backend {
@@ -257,7 +262,7 @@ impl Backend {
             spectrum: radio_core::spectrum::Spectrum::new(),
             settings,
             started_at: None,
-            premute: None,
+            muted: false,
             queued: None,
             catalog,
             fav_path,
@@ -440,23 +445,35 @@ impl Backend {
         }
     }
 
-    /// silence without losing the level the user set. a second call restores it,
-    /// so mute is a toggle rather than a slide to zero and back by hand.
+    /// silence, and back. the app has no volume of its own — the system mixer
+    /// owns that — so this is a plain on/off against full output rather than a
+    /// level to slide back to.
+    ///
+    /// it is deliberately NOT persisted: a muted app that starts up silent, with
+    /// no slider left to find, is indistinguishable from one that is broken.
+    /// that is exactly what happened when the slider was removed and a stored
+    /// `volume: 0.0` stayed behind.
     pub fn toggle_mute(&mut self) {
-        match self.premute.take() {
-            Some(level) => self.set_volume(level),
-            None => {
-                let was = self.state.volume;
-                self.set_volume(0.0);
-                // taken after the set, which writes the new level to disk: the
-                // level to come back to is the one the user chose, not zero.
-                self.premute = Some(was);
-            }
-        }
+        self.muted = !self.muted;
+        self.apply_output_level();
     }
 
     pub fn is_muted(&self) -> bool {
-        self.premute.is_some()
+        self.muted
+    }
+
+    /// the only place output level is decided: muted is silence, anything else
+    /// is full. keeping it in one place is what stops a second caller ever
+    /// leaving the engine at a level nothing on screen accounts for.
+    fn apply_output_level(&mut self) {
+        let level = match self.muted {
+            true => 0.0,
+            false => FULL_OUTPUT,
+        };
+        self.state.set_volume(level);
+        if let Some(engine) = &self.engine {
+            engine.set_volume(level);
+        }
     }
 
     /// re-opens the stream that is already selected. a station that dropped mid
@@ -488,15 +505,6 @@ impl Backend {
             return None;
         }
         Some((now_secs() - started).max(0))
-    }
-
-    pub fn set_volume(&mut self, v: f32) {
-        self.state.set_volume(v);
-        if let Some(engine) = &self.engine {
-            engine.set_volume(self.state.volume);
-        }
-        self.settings.volume = self.state.volume;
-        save_settings(&self.settings_path, &self.settings);
     }
 
     // the stamp is taken here, at the moment the user changes the scope, never
@@ -1071,7 +1079,7 @@ mod tests {
             spectrum: radio_core::spectrum::Spectrum::new(),
             settings: Settings::default(),
             started_at: None,
-            premute: None,
+            muted: false,
             queued: None,
             catalog,
             fav_path: dir.join("favorites.json"),
@@ -1697,7 +1705,7 @@ mod tests {
     #[test]
     fn saved_settings_survive_a_restart() {
         let dir = std::env::temp_dir().join(format!(
-            "r4dio-volume-{}-{}",
+            "r4dio-settings-{}-{}",
             std::process::id(),
             fastrand::u32(..)
         ));
@@ -1707,17 +1715,48 @@ mod tests {
         save_settings(
             &settings_path,
             &Settings {
-                volume: 0.35,
                 eq_style: "wave".into(),
                 eq_gain: 6.0,
             },
         );
         let loaded = load_settings(&settings_path);
 
-        assert_eq!(loaded.volume, 0.35);
         // the meter's settings ride the same file, so they have to survive with it.
         assert_eq!(loaded.eq_style, "wave");
         assert_eq!(loaded.eq_gain, 6.0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_settings_file_from_the_volume_era_cannot_silence_the_app() {
+        // the real defect this guards: removing the slider left `volume: 0.0`
+        // behind in one user's settings, and every start after that was silent
+        // with nothing on screen saying why and no control left to undo it.
+        // serde must ignore the field entirely rather than resurrect it.
+        let dir = std::env::temp_dir().join(format!(
+            "r4dio-oldsettings-{}-{}",
+            std::process::id(),
+            fastrand::u32(..)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings_path = dir.join("settings.json");
+        std::fs::write(
+            &settings_path,
+            r#"{"volume":0.0,"eq_style":"bars","eq_gain":2.0}"#,
+        )
+        .unwrap();
+
+        let loaded = load_settings(&settings_path);
+
+        // it parses at all (a hard failure here would fall back to defaults and
+        // hide the point of the test), and carries no volume of any kind.
+        assert_eq!(loaded.eq_style, "bars");
+        assert_eq!(loaded.eq_gain, 2.0);
+        let rewritten = serde_json::to_string(&loaded).unwrap();
+        assert!(
+            !rewritten.contains("volume"),
+            "a rewritten settings file must not carry volume forward: {rewritten}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

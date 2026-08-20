@@ -77,7 +77,6 @@ const NOW = {
   station: "Radio Swiss Jazz",
   track: "Chuck Wayne — What A Difference A Day Made",
   phase: "playing",
-  volume: 0.64,
   scope: "all",
   is_favorite: true,
   meta: "CH · MP3 192k",
@@ -124,6 +123,16 @@ expect("the buffer gauge reads the level", text("np_buf"), "72%");
 expect("uptime is worded, not raw seconds", text("np_up"), "14m");
 expect("the next station is named", text("np_scope"), "FIP");
 expect("the clock says what state we are in", text("clock"), "LIVE");
+
+// muted is the one state the panel can contradict: the stream is live and the
+// meter has data, so without this the window says "playing" through silence.
+// that is exactly what shipped once, and the user had no way to tell mute from
+// a broken stream.
+NOW.muted = true;
+await panel.refresh();
+expect("a muted panel says so", text("np_status"), "MUTED");
+NOW.muted = false;
+await panel.refresh();
 
 console.log(failures === 0 ? "\nall window checks pass" : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);
