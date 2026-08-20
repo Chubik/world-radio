@@ -481,29 +481,75 @@ class PlaybackService : MediaSessionService() {
                 publishFetching(true)
                 // one request for the whole catalogue, from our own server. it is
                 // 4.3 mb where walking radio-browser for the same stations was 69 mb
-                // over 312 requests, which is why this no longer waits for wi-fi.
-                val fetched = catalog.fetchCatalogue(blocked = blocked)
-                // empty means the download failed. writing it would erase a good
-                // catalogue, so the old one stays and the next attempt retries.
-                if (fetched.isEmpty()) {
-                    Log.w("r4dio", "catalogue fetch returned nothing, keeping the ${held} held")
-                    return@thread
+                // over 312 requests, which is why this no longer waits for wi-fi. the
+                // held etag lets an unchanged catalogue cost a 304 instead.
+                val etag = runBlocking { favStore.currentCatalogEtag() }
+                // try the delta first: about 100-150 kb against 4.3 mb. it is allowed
+                // to give up for any reason at all, and the full download below is
+                // what happens then. a delta can legitimately remove more than it
+                // adds (a measured real day removed 653), so this path must NOT go
+                // through the fetched.size < held guard below — its own protection is
+                // applyDelta's MAX_DELTA_REMOVAL_SHARE refusal, not this one.
+                when (val delta = catalog.fetchDelta(since = etag, blocked = blocked)) {
+                    is DeltaResult.Unchanged -> {
+                        Log.i("r4dio", "catalogue unchanged, nothing downloaded")
+                        runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+                        return@thread
+                    }
+                    is DeltaResult.Changed -> {
+                        val merged = catalogCache.applyDelta(delta.added, delta.removed)
+                        if (merged != null) {
+                            stations = merged
+                            runBlocking {
+                                favStore.setCatalogEtag(delta.id)
+                                favStore.setCatalogSyncedAt(nowSecs())
+                            }
+                            Log.i(
+                                "r4dio",
+                                "catalogue delta applied: +${delta.added.size} " +
+                                    "-${delta.removed.size}, ${merged.size} held",
+                            )
+                            scope.launch { refreshCustomLayout() }
+                            return@thread
+                        }
+                        Log.w("r4dio", "catalogue delta could not be applied, downloading everything")
+                    }
+                    is DeltaResult.Unavailable -> {
+                        Log.i("r4dio", "catalogue delta unavailable, downloading everything")
+                    }
                 }
-                // never trade a bigger catalogue for a smaller one: a partial
-                // response should look like a failure, not like stations vanishing.
-                if (fetched.size < held) {
-                    Log.w("r4dio", "catalogue fetch returned ${fetched.size} against $held held, ignoring")
-                    return@thread
+                when (val result = catalog.fetchCatalogueResult(etag = etag, blocked = blocked)) {
+                    is CatalogueResult.Unchanged -> {
+                        Log.i("r4dio", "catalogue unchanged, nothing downloaded")
+                        runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+                        return@thread
+                    }
+                    is CatalogueResult.Failed -> {
+                        Log.w("r4dio", "catalogue fetch failed, keeping the $held held")
+                        return@thread
+                    }
+                    is CatalogueResult.Fetched -> {
+                        val fetched = result.stations
+                        // never trade a bigger catalogue for a smaller one: a partial
+                        // response should look like a failure, not like stations vanishing.
+                        if (fetched.size < held) {
+                            Log.w("r4dio", "catalogue fetch returned ${fetched.size} against $held held, ignoring")
+                            return@thread
+                        }
+                        if (!catalogCache.write(fetched)) {
+                            Log.w("r4dio", "catalogue fetched but not stored, keeping it in memory only")
+                            stations = fetched
+                            return@thread
+                        }
+                        stations = fetched
+                        runBlocking {
+                            favStore.setCatalogEtag(result.etag)
+                            favStore.setCatalogSyncedAt(nowSecs())
+                        }
+                        Log.i("r4dio", "catalogue fetched: ${fetched.size} stations in one request")
+                        scope.launch { refreshCustomLayout() }
+                    }
                 }
-                if (!catalogCache.write(fetched)) {
-                    Log.w("r4dio", "catalogue fetched but not stored, keeping it in memory only")
-                    stations = fetched
-                    return@thread
-                }
-                stations = fetched
-                runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
-                Log.i("r4dio", "catalogue fetched: ${fetched.size} stations in one request")
-                scope.launch { refreshCustomLayout() }
             } finally {
                 publishFetching(false)
                 topUpInFlight.set(false)
