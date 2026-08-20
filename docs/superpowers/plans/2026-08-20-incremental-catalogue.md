@@ -205,7 +205,9 @@ fn a_changed_field_comes_back_as_an_addition() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd sync && cargo test diff_reports_additions_and_removals a_changed_field_comes_back_as_an_addition`
+Run each separately — `cargo test` takes only one filter argument:
+`cd sync && cargo test diff_reports_additions_and_removals`
+`cd sync && cargo test a_changed_field_comes_back_as_an_addition`
 Expected: FAIL — `cannot find function 'diff'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -244,7 +246,9 @@ pub fn diff(old: &[Station], new: &[Station], id: String) -> Delta {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd sync && cargo test diff_reports_additions_and_removals a_changed_field_comes_back_as_an_addition`
+Run each separately — `cargo test` takes only one filter argument:
+`cd sync && cargo test diff_reports_additions_and_removals`
+`cd sync && cargo test a_changed_field_comes_back_as_an_addition`
 Expected: PASS
 
 - [ ] **Step 5: Wire the route**
