@@ -290,8 +290,10 @@ class CatalogueDownloadTest {
         assertTrue(result is DeltaResult.Unavailable)
     }
 
-    // the since value must reach the server unmodified — it is the whole basis
-    // for "what changed since I last synced".
+    // the since value must reach the server unmodified, quotes included — it is
+    // the whole basis for "what changed since I last synced". decoding the
+    // recorded request pins the exact value rather than merely a substring of
+    // the raw, still-percent-encoded path.
     @Test
     fun since_is_sent_as_a_query_parameter() {
         server.enqueue(
@@ -299,6 +301,7 @@ class CatalogueDownloadTest {
         )
         catalog.fetchDelta(url = deltaUrl(), since = "\"old-tag\"")
         val sent = server.takeRequest()
-        assertTrue(sent.path.orEmpty().contains("since="))
+        val since = sent.requestUrl?.queryParameter("since")
+        assertEquals("\"old-tag\"", since)
     }
 }
