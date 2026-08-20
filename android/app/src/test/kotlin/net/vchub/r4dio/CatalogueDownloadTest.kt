@@ -4,6 +4,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -202,5 +203,102 @@ class CatalogueDownloadTest {
         )
         val result = catalog.fetchCatalogueResult(url = url(), etag = "") as CatalogueResult.Fetched
         assertEquals(listOf("a"), result.stations.map { it.uuid })
+    }
+
+    private fun deltaUrl() = server.url("/catalog/delta").toString()
+
+    // a 409 means the held snapshot is too old for a delta at all — the caller
+    // falls back to a full download instead of retrying the delta. it must be
+    // distinguishable from every other outcome, not merely "not Changed".
+    @Test
+    fun a_409_means_unavailable_specifically() {
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"full":"/catalog"}"""))
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "\"old\"")
+        assertTrue(result is DeltaResult.Unavailable)
+        assertFalse(result is DeltaResult.Changed)
+        assertFalse(result is DeltaResult.Unchanged)
+    }
+
+    // a 304 on the delta endpoint means the snapshot already held is current —
+    // distinct from Unavailable, which means "give up and download everything".
+    @Test
+    fun a_304_means_unchanged() {
+        server.enqueue(MockResponse().setResponseCode(304))
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "\"old\"")
+        assertTrue(result is DeltaResult.Unchanged)
+    }
+
+    @Test
+    fun a_delta_returns_what_was_added_and_removed() {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"id":"\"new\"","added":[${row("2", "B", "DE")}],"removed":["1"]}""",
+            ),
+        )
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "\"old\"")
+        assertTrue(result is DeltaResult.Changed)
+        result as DeltaResult.Changed
+        assertEquals(listOf("2"), result.added.map { it.uuid })
+        assertEquals(setOf("1"), result.removed)
+        assertEquals("\"new\"", result.id)
+    }
+
+    // the ban applies to a delta's added stations exactly as it does on a full
+    // fetch — the server filters too, but this side does not get to assume that.
+    @Test
+    fun the_ban_is_applied_to_a_deltas_added_stations() {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"id":"\"new\"","added":[${row("r", "ru one", "RU")},${row("a", "ok", "UA")}],
+                    "removed":[]}""",
+            ),
+        )
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "\"old\"") as DeltaResult.Changed
+        assertEquals(listOf("a"), result.added.map { it.uuid })
+    }
+
+    @Test
+    fun a_blocked_station_never_arrives_via_a_delta() {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody(
+                """{"id":"\"new\"","added":[${row("a", "ok", "UA")}],"removed":[]}""",
+            ),
+        )
+        val result = catalog.fetchDelta(
+            url = deltaUrl(),
+            since = "\"old\"",
+            blocked = setOf("a"),
+        ) as DeltaResult.Changed
+        assertTrue(result.added.isEmpty())
+    }
+
+    // no held snapshot means there is nothing to ask a delta against — the
+    // caller must fall straight to a full download, without a request going out.
+    @Test
+    fun a_blank_since_is_unavailable_and_sends_no_request() {
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "")
+        assertTrue(result is DeltaResult.Unavailable)
+        assertEquals(0, server.requestCount)
+    }
+
+    // a server error on the delta endpoint is Unavailable, not a crash — same
+    // fallback as a 409, reached by a different failure.
+    @Test
+    fun a_server_error_on_delta_is_unavailable() {
+        server.enqueue(MockResponse().setResponseCode(503))
+        val result = catalog.fetchDelta(url = deltaUrl(), since = "\"old\"")
+        assertTrue(result is DeltaResult.Unavailable)
+    }
+
+    // the since value must reach the server unmodified — it is the whole basis
+    // for "what changed since I last synced".
+    @Test
+    fun since_is_sent_as_a_query_parameter() {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"id":"\"new\"","added":[],"removed":[]}"""),
+        )
+        catalog.fetchDelta(url = deltaUrl(), since = "\"old-tag\"")
+        val sent = server.takeRequest()
+        assertTrue(sent.path.orEmpty().contains("since="))
     }
 }

@@ -484,6 +484,40 @@ class PlaybackService : MediaSessionService() {
                 // over 312 requests, which is why this no longer waits for wi-fi. the
                 // held etag lets an unchanged catalogue cost a 304 instead.
                 val etag = runBlocking { favStore.currentCatalogEtag() }
+                // try the delta first: about 100-150 kb against 4.3 mb. it is allowed
+                // to give up for any reason at all, and the full download below is
+                // what happens then. a delta can legitimately remove more than it
+                // adds (a measured real day removed 653), so this path must NOT go
+                // through the fetched.size < held guard below — its own protection is
+                // applyDelta's MAX_DELTA_REMOVAL_SHARE refusal, not this one.
+                when (val delta = catalog.fetchDelta(since = etag, blocked = blocked)) {
+                    is DeltaResult.Unchanged -> {
+                        Log.i("r4dio", "catalogue unchanged, nothing downloaded")
+                        runBlocking { favStore.setCatalogSyncedAt(nowSecs()) }
+                        return@thread
+                    }
+                    is DeltaResult.Changed -> {
+                        val merged = catalogCache.applyDelta(delta.added, delta.removed)
+                        if (merged != null) {
+                            stations = merged
+                            runBlocking {
+                                favStore.setCatalogEtag(delta.id)
+                                favStore.setCatalogSyncedAt(nowSecs())
+                            }
+                            Log.i(
+                                "r4dio",
+                                "catalogue delta applied: +${delta.added.size} " +
+                                    "-${delta.removed.size}, ${merged.size} held",
+                            )
+                            scope.launch { refreshCustomLayout() }
+                            return@thread
+                        }
+                        Log.w("r4dio", "catalogue delta could not be applied, downloading everything")
+                    }
+                    is DeltaResult.Unavailable -> {
+                        Log.i("r4dio", "catalogue delta unavailable, downloading everything")
+                    }
+                }
                 when (val result = catalog.fetchCatalogueResult(etag = etag, blocked = blocked)) {
                     is CatalogueResult.Unchanged -> {
                         Log.i("r4dio", "catalogue unchanged, nothing downloaded")
