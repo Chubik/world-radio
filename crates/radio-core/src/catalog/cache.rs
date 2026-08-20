@@ -917,6 +917,33 @@ mod tests {
     }
 
     #[test]
+    fn apply_delta_upsert_replaces_the_fts_row_not_duplicates_it() {
+        // the fts table has no unique constraint, so an upsert that only inserts
+        // (without first deleting the old fts row) leaves the old text searchable
+        // alongside the new one. this proves the delete-then-insert actually runs.
+        let c = Cache::open_in_memory().unwrap();
+        c.replace_all(&[station("a", "oldname")]).unwrap();
+        assert_eq!(
+            c.search_name("oldname", &[]).unwrap().len(),
+            1,
+            "must be findable under the old name before the upsert, or this test proves nothing"
+        );
+
+        c.apply_delta(&[station("a", "newname")], &[]).unwrap();
+
+        assert_eq!(
+            c.search_name("newname", &[]).unwrap().len(),
+            1,
+            "must be findable under the new name after the upsert"
+        );
+        assert_eq!(
+            c.search_name("oldname", &[]).unwrap().len(),
+            0,
+            "old fts text must not still match"
+        );
+    }
+
+    #[test]
     fn apply_delta_and_replace_all_reach_the_same_database() {
         let stations = |names: &[&str]| -> Vec<Station> {
             names.iter().map(|n| station(n, &n.to_uppercase())).collect()
