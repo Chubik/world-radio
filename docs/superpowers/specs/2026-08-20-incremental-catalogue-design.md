@@ -106,16 +106,31 @@ This is the layer that answers the note in memory about the catalogue growing
 **`sync` (separate repo, deploys itself)** — retain the last 7 payloads rather
 than only `current`; add the delta endpoint; fix the wrong churn comment.
 
-**`radio-core`** — `apply_delta` next to `replace_all` in `cache.rs`, and
-whatever thin wrapper `catalog.rs` needs to expose it.
+**Android** — `Catalog.kt`: the revalidation and delta sequence below, in
+Kotlin. Note that the memory entry claiming Android "refetches the top-1000" is
+**out of date** — since the move to our own server it fetches the full catalogue
+from `CATALOG_URL`, and `fetchOnce` is only the radio-browser fallback.
 
-**`radio-tui`** — `handle_sync_catalog` in `worker.rs` gains the sequence below.
-This is the shared path for the CLI and the macOS app.
+### The CLI and macOS are out of scope, and why
 
-**Android** — `Catalog.kt`: the same sequence in Kotlin. Note that the memory
-entry claiming Android "refetches the top-1000" is **out of date** — since the
-move to our own server it fetches the full catalogue from `CATALOG_URL`, and
-`fetchOnce` is only the radio-browser fallback.
+They cannot use any of this yet. `handle_sync_catalog` in
+`radio-tui/src/tui/worker.rs` calls `api::resolve()`, which resolves to
+`all.api.radio-browser.info` — **not r4dio.net**. The CLI and the macOS app have
+never fetched the catalogue from our own server; only Android was moved over.
+
+So an ETag, a `304`, and a delta endpoint are all unreachable for them: they are
+talking to somebody else's server, which does not speak our protocol.
+
+Moving them across is worthwhile on its own — it would replace 13 upstream
+requests and 19 seconds with a single 4.3 MB response — but it is a different
+change with a different risk: different field names (`uuid`/`name`/`country`
+against `stationuuid`/`countrycode`), a different payload shape, and a fallback
+to radio-browser that has to keep working when our server is down. It gets its
+own spec, its own plan and its own release.
+
+`radio-core`'s `apply_delta` (layer 3) is still built here, in `cache.rs`. It is
+where the shared cache lives, and having it ready is most of what the CLI switch
+will later need.
 
 ## The refresh sequence
 
@@ -174,5 +189,6 @@ the repo.
 - Field-level merge — nothing mutates, and `added` covers it if that changes.
 - Deltas of arbitrary depth — 7 days against a daily refresh, then a full dump.
 - Removing `replace_all` — it stays as the fallback and first-run path.
+- Moving the CLI and macOS onto our `/catalog` — worth doing, its own spec.
 - Touching how often clients refresh, or the Data Saver question. Separate
   decision, already recorded separately.
