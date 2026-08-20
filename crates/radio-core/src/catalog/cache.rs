@@ -877,9 +877,11 @@ mod tests {
     #[test]
     fn apply_delta_adds_removes_and_leaves_the_rest() {
         let c = Cache::open_in_memory().unwrap();
-        c.replace_all(&[station("a", "A"), station("b", "B")]).unwrap();
+        c.replace_all(&[station("a", "A"), station("b", "B")])
+            .unwrap();
 
-        c.apply_delta(&[station("c", "C")], &["a".to_string()]).unwrap();
+        c.apply_delta(&[station("c", "C")], &["a".to_string()])
+            .unwrap();
 
         let all = c.list_all(&[]).unwrap();
         let ids: Vec<&str> = all.iter().map(|s| s.stationuuid.as_str()).collect();
@@ -946,7 +948,10 @@ mod tests {
     #[test]
     fn apply_delta_and_replace_all_reach_the_same_database() {
         let stations = |names: &[&str]| -> Vec<Station> {
-            names.iter().map(|n| station(n, &n.to_uppercase())).collect()
+            names
+                .iter()
+                .map(|n| station(n, &n.to_uppercase()))
+                .collect()
         };
 
         let start = stations(&["a", "b", "c"]);
