@@ -467,7 +467,6 @@ fn run(backend: backend::Backend) {
             commands::play_last,
             commands::resume,
             commands::stop,
-            commands::set_volume,
             commands::set_scope,
             commands::toggle_favorite,
             commands::now_state,

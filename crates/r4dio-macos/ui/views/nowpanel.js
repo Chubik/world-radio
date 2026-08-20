@@ -122,12 +122,22 @@ export function mountNowPanel({ onChanged }) {
 
     // retrying is its own state: the stream is failing, not filling.
     const tone = { playing: "", buffering: "buffering", error: "error" }[s.phase] ?? "idle";
-    status.className = `status ${tone}`;
+    status.className = `status ${tone}${s.muted ? " muted" : ""}`;
     status.replaceChildren();
     const dot = document.createElement("span");
     dot.className = "dot";
     dot.textContent = "●";
     status.append(dot, s.retries > 0 ? `RETRYING ${s.retries}` : label.text);
+    // muted has to be visible or silence is indistinguishable from a fault: the
+    // stream is live, the meter is moving, and nothing comes out. it sits in the
+    // status line rather than beside the shortcut hint because this is where the
+    // eye already goes to ask "is it playing?".
+    if (s.muted) {
+      const flag = document.createElement("span");
+      flag.className = "mutedflag";
+      flag.textContent = "MUTED";
+      status.append(flag);
+    }
 
     // the buffer is the one number that says a stutter is coming, so it reads
     // green when healthy and red as it drains rather than staying one colour.
@@ -224,7 +234,12 @@ export function mountNowPanel({ onChanged }) {
     }
     // nothing playing means nothing to meter: the bars are already at rest, so
     // asking the backend five times a second for silence is pure cpu.
-    if (state?.phase !== "playing") {
+    //
+    // muted counts as nothing to meter too. the tap is filled where the stream
+    // is decoded, before output level is applied, so a muted stream still reads
+    // as a full signal — the meter would dance through total silence and look
+    // like proof that sound is coming out.
+    if (state?.phase !== "playing" || state?.muted) {
       if (!atRest) paintSpectrum(null);
       return;
     }
