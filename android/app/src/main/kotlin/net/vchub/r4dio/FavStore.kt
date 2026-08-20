@@ -83,6 +83,7 @@ class FavStore(context: Context) {
     private val keyExcludedCountries = stringSetPreferencesKey("excluded_countries")
     private val keyDeviceId = stringPreferencesKey("device_id")
     private val keyCatalogSyncedAt = longPreferencesKey("catalog_synced_at")
+    private val keyCatalogEtag = stringPreferencesKey("catalog_etag")
     private val keyKeepAwake = booleanPreferencesKey("keep_awake")
     private val keyFillOnMobile = booleanPreferencesKey("fill_on_mobile")
     private val keyFilterCountries = stringSetPreferencesKey("filter_countries")
@@ -438,6 +439,12 @@ class FavStore(context: Context) {
 
     suspend fun setCatalogSyncedAt(epochSecs: Long) {
         store.edit { it[keyCatalogSyncedAt] = epochSecs }
+    }
+
+    suspend fun currentCatalogEtag(): String = store.data.first()[keyCatalogEtag].orEmpty()
+
+    suspend fun setCatalogEtag(etag: String) {
+        store.edit { it[keyCatalogEtag] = etag }
     }
 
     /** same change-detection as [setExcluded] — a merge from another device can also
