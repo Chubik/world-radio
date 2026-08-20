@@ -120,6 +120,18 @@
 .status.buffering .dot { color: var(--info); }
 .status.error .dot { color: var(--err); }
 .status.idle .dot { color: var(--dim); }
+/* muted is the one status that means "you will hear nothing" while everything
+   else on the panel says it is playing, so it is filled rather than outlined —
+   at 10.5px an outline reads as just another word in the line. */
+.status .mutedflag {
+  flex: none; margin-left: 2px;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--err); color: var(--bg);
+  font-weight: 700; letter-spacing: .08em;
+}
+/* the live dot is green whatever the phase says; muted has to win it, or the
+   line reads "playing, all good" next to the word MUTED. */
+.status.muted .dot { color: var(--err); }
 
 .transport { display: flex; align-items: center; justify-content: center; gap: 20px; margin-top: 20px; }
 .transport .big {

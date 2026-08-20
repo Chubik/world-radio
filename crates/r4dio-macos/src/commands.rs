@@ -12,7 +12,6 @@ pub struct NowState {
     pub uuid: Option<String>,
     pub track: String,
     pub phase: String,
-    pub volume: f32,
     pub scope: String,
     pub is_favorite: bool,
     pub meta: String,
@@ -85,11 +84,6 @@ pub fn stop(state: tauri::State<Shared>) {
     state.lock().unwrap().stop();
 }
 
-#[tauri::command]
-pub fn set_volume(state: tauri::State<Shared>, v: f32) {
-    state.lock().unwrap().set_volume(v);
-}
-
 /// an unrecognised value leaves the panel where it is rather than snapping it to
 /// All — the window only ever sends the two it draws, so anything else is a bug
 /// or a newer client, and neither is a reason to move the user off favourites.
@@ -116,7 +110,6 @@ pub fn now_state(state: tauri::State<Shared>) -> NowState {
         uuid: now.as_ref().map(|n| n.uuid.clone()),
         track: b.state.track.clone().unwrap_or_default(),
         phase: phase_str(b.phase()).to_string(),
-        volume: b.state.volume,
         scope: scope_str(b.state.scope).to_string(),
         is_favorite: b.now_is_favorite(),
         meta: now
@@ -145,7 +138,8 @@ pub fn spectrum(state: tauri::State<Shared>) -> Vec<f32> {
     state.lock().unwrap().read_spectrum(34)
 }
 
-/// how the meter is drawn and how hard it is driven. per-machine, like volume.
+/// how the meter is drawn and how hard it is driven. per-machine: a screen
+/// two feet away and one across the room want different gain.
 #[derive(Serialize)]
 pub struct EqSettings {
     pub style: String,
@@ -381,7 +375,6 @@ mod tests {
             uuid: None,
             track: String::new(),
             phase: "idle".into(),
-            volume: 0.8,
             scope: "all".into(),
             is_favorite: false,
             meta: String::new(),
