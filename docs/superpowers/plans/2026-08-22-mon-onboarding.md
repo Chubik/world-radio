@@ -2004,6 +2004,22 @@ service started and the mark file logic ran at least once.
 
 - [ ] **Step 5: Open the PR against mon**
 
+**mon's workflow runs through `dev`, not `main`** — verified 2026-08-22: the
+local clone is on `dev` and its recent history reads
+`fix(subtick): scrape the private metrics port and probe a routed path`. Branch
+from `dev` and PR into `dev`, matching the house style for the commit subject
+(`fix(world-radio): ...`).
+
+> **Do not touch `docs/RUNBOOK.md`.** At the time of writing it carries
+> UNCOMMITTED work by someone else (a note on why curl and blackbox disagree).
+> Leave it dirty, commit only `prometheus/prometheus.yml`.
+
+> **Do not verify a blackbox target with `curl` from the host.** That same
+> uncommitted note records measurements showing curl and blackbox-exporter get
+> different answers (preferans.live: curl 403, blackbox 200 — Cloudflare
+> challenges curl's TLS fingerprint). Check Prometheus's own target page
+> instead.
+
 ```bash
 cd /Users/vchub/dev/projects/mon
 git checkout -b repoint-world-radio-metrics
@@ -2040,7 +2056,7 @@ serves one — the web container is nginx serving a static site, so leave it at
 git add prometheus/prometheus.yml
 git commit -m "scrape world-radio on its private metrics ports"
 git push -u origin repoint-world-radio-metrics
-gh pr create --base main --title "scrape world-radio on its private metrics ports" \
+gh pr create --base dev --title "fix(world-radio): scrape the private metrics ports" \
   --body "world-radio moved /metrics off the public mux onto loopback-only listeners: stat 8137 → 8147, sync 8138 → 8148. Both are live and serving the contract metric names.
 
 ## What's New
