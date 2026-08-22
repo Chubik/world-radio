@@ -1924,17 +1924,31 @@ git commit -m "run under the shared project name with a private metrics port"
 This task is last on purpose: repointing Prometheus before the new ports are
 live turns the world-radio targets red.
 
-- [ ] **Step 1: Push both services**
+- [ ] **Step 1: Ship both services — they deploy DIFFERENTLY**
+
+Neither repo has a `dev` branch; work is on `mon-onboarding`, and the user
+merges. Verified on 2026-08-22:
+
+**sync deploys itself from CI.** `sync/.github/workflows/deploy.yml` runs on
+push to `main`: it gates on `cargo fmt --check`, `cargo clippy --all-targets
+-- -D warnings` and `cargo test`, then ssh-deploys to `/opt/world-radio-sync`.
+
+> **The clippy gate is `-D warnings`.** Any `dead_code` warning fails the
+> build. Tasks 2-5 leave `obs` items unused until Task 6 wires them into
+> `main`; nothing may be merged before Task 6 is done, or CI fails.
+
+**stat does NOT deploy itself — it has no workflows at all.** `/opt/world-radio-stat`
+is a plain git clone on the host, pulled and rebuilt by hand. So stat ships as:
 
 ```bash
-cd /Users/vchub/dev/projects/world-radio/sync
-git push origin dev
-cd ../stat
-git push origin dev
+# on the host, as deployer
+cd /opt/world-radio-stat
+git pull
+docker compose up -d --build
 ```
 
-Each repo's own Deploy workflow builds and deploys it. Do not deploy sync from
-ops — `ops/.github/workflows/deploy.yml` records why.
+Open a PR per repo and let the user merge (their instruction, 2026-08-22).
+Do not deploy sync from ops — `ops/.github/workflows/deploy.yml` records why.
 
 - [ ] **Step 2: Wait for both deploys and verify on the host**
 
