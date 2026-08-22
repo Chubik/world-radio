@@ -1180,6 +1180,24 @@ hex = "0.4"
 `rand` and `hex` are new here — sync already had them; `mint_request_id` needs
 both.
 
+- [ ] **Step 1b: Make the stat image build from the lockfile**
+
+`stat/Dockerfile` copies only `Cargo.toml`, not `Cargo.lock` — unlike
+`sync/Dockerfile`, which copies both. That means the production image resolves
+dependency versions afresh at build time and can pick versions different from
+the ones tested here. With three new dependencies landing in this task, that
+turns "the tests passed" into a claim about a different build than the one that
+ships.
+
+Fix it in the same task:
+
+```dockerfile
+COPY Cargo.toml Cargo.lock ./
+```
+
+`Cargo.lock` is committed in the stat repo (`.gitignore` lists only `/target`
+and `.env`), so the file is there to copy.
+
 - [ ] **Step 2: Copy the module**
 
 ```bash
