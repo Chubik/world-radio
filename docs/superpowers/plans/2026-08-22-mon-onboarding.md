@@ -1553,57 +1553,74 @@ Keep the existing `poll_sync` removal from Task 8 — it is already gone.
 
 - [ ] **Step 3: Emit the download events to stdout**
 
-`announce_new_downloads` already computes exactly the freshly-seen events. Read
-it first (`stat/src/main.rs:43-59`), then add the log line alongside the
-telegram send, inside the same `fresh` loop scope:
+**Read `stat/src/main.rs:39-59` and `stat/src/notify.rs:46-72` before editing.**
+The real code differs from what an earlier draft of this plan assumed: the
+helper is `notify::unreported(&events, &mark) -> Vec<&DownloadEvent>` (not
+`fresh_events`), the mark path comes from `notify::mark_path(notify_dir)` (there
+is no `MARK_FILE` constant), and `notify::messages` takes `&[&DownloadEvent]`.
+
+The current function has two early returns that must not swallow the log lines:
+a first run with no mark returns before announcing anything, and an empty
+`fresh` returns too. Download lines must reach Loki on every path where fresh
+events exist, and telegram must stay optional.
+
+Replace the whole function with:
 
 ```rust
-async fn announce_new_downloads(cfg: &notify::Config, log_path: &Path, notify_dir: &Path) {
+/// one poll's worth of announcing. the whole log is re-read every time, so the
+/// mark is what stops it re-announcing everything; a first run with no mark
+/// sends nothing at all, because a fresh deployment must not open with a burst
+/// of old news.
+///
+/// cfg is optional: the download lines below are what replaces the old stat
+/// page's "recent downloads" table, so they must be written whether or not
+/// telegram is configured.
+async fn announce_new_downloads(
+    cfg: Option<&notify::Config>,
+    log_path: &Path,
+    notify_dir: &Path,
+) {
     let events = store::read_events(log_path, &store::Filter::default()).events;
-    let mark_file = notify_dir.join(notify::MARK_FILE);
-    let mark = notify::load_mark(&mark_file);
-    let fresh = notify::fresh_events(&events, &mark);
+    let mark_file = notify::mark_path(notify_dir);
+    let Some(mark) = notify::load_mark(&mark_file) else {
+        notify::save_mark(&mark_file, &notify::advance_mark(&events, ""));
+        tracing::info!(service = %obs::service(), "notify first run, starting from the newest entry");
+        return;
+    };
+    let fresh = notify::unreported(&events, &mark);
+    if fresh.is_empty() {
+        return;
+    }
     // one line per new download: this is what replaces the "recent downloads"
-    // table — loki keeps them for 14 days and grafana can filter them.
-    // never the ip or the user agent.
+    // table. loki keeps them for 14 days and grafana can filter them. never
+    // the ip or the user agent.
     for e in &fresh {
         tracing::info!(
             service = %obs::service(), file = %e.file, version = %e.version,
             country = %e.country, "download"
         );
     }
-    for text in notify::messages(&fresh) {
-        notify::send(cfg, &text).await;
-    }
-    notify::save_mark(&mark_file, &notify::advance_mark(&events, &mark));
-}
-```
-
-Read the real signature of `notify::fresh_events` first — the snippet above
-assumes `messages(&fresh)` takes the same slice the existing code passes it. If
-the current code inlines that call, restructure minimally to bind `fresh` once.
-
-Note this only runs when telegram is configured (`announce_new_downloads` is
-called inside `if let Some(cfg) = &notify_cfg`). Move the call **out** of that
-guard so download lines reach Loki whether or not telegram is on, and make
-`notify::send` the only telegram-gated part:
-
-```rust
-            announce_new_downloads(notify_cfg.as_ref(), &notify_log, &notify_dir).await;
-```
-
-with the signature changed to `cfg: Option<&notify::Config>` and the send loop
-guarded inside:
-
-```rust
     if let Some(cfg) = cfg {
         for text in notify::messages(&fresh) {
             notify::send(cfg, &text).await;
         }
     }
+    notify::save_mark(&mark_file, &notify::advance_mark(&events, &mark));
+}
 ```
 
-The mark must still advance in both cases, which it does — it is after the guard.
+Note the first-run branch still returns early and logs nothing per-event. That
+is correct and deliberate: on a fresh deployment the whole historical log would
+otherwise be replayed into Loki as if it had just happened.
+
+- [ ] **Step 3b: Call it on every poll, not only when telegram is on**
+
+In the poll loop, the call is currently inside `if let Some(cfg) = &notify_cfg`.
+Move it out so it runs unconditionally:
+
+```rust
+            announce_new_downloads(notify_cfg.as_ref(), &notify_log, &notify_dir).await;
+```
 
 - [ ] **Step 4: Rewrite the router and `main`'s tail**
 
