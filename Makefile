@@ -34,10 +34,16 @@ android-run: android-install
 	$(ADB) shell monkey -p net.vchub.r4dio -c android.intent.category.LAUNCHER 1
 
 RADIO_APP_ID ?= 1:106521889249:android:aa2fa06ebc14c4cd532aa0
-RADIO_TESTERS ?= valentin.chub@gmail.com
+# set this in your shell or a local env file — this repository is public, so a
+# personal address does not belong in it:  export RADIO_TESTERS=you@example.com
+RADIO_TESTERS ?=
 
 .PHONY: android-distribute
-android-distribute: android-build
+# the check runs before android-build, not after: failing only once the apk is
+# already built wastes a full gradle run to tell you a variable is unset.
+android-distribute:
+	@test -n "$(RADIO_TESTERS)" || { echo "RADIO_TESTERS is empty — set it, or the build goes to nobody" >&2; exit 1; }
+	$(MAKE) android-build
 	printf "World Radio test build\n\nRecent changes:\n%s\n" "$$(git log -5 --pretty=format:'- %s')" > android/release-notes.txt
 	firebase appdistribution:distribute \
 	  android/app/build/outputs/apk/debug/app-debug.apk \
