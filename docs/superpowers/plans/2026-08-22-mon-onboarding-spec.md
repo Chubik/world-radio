@@ -192,8 +192,10 @@ stay — the site reads the last two.
 
 ## Host facts, read 2026-08-22
 
-Host: `appshost`, `162.55.173.214`, ssh port 622, user `gentle`
-(from `mon/docs/RUNBOOK.md`).
+Host: `appshost` — its address, ssh port and user are in `mon/docs/RUNBOOK.md`
+and in the private infra notes. They are deliberately not repeated here: this
+repository is public, and an address plus a non-default port plus a username is
+most of what a scanner needs.
 
 `docker compose ls` — world-radio is **three** projects today, not one:
 
