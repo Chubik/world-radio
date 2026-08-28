@@ -105,6 +105,14 @@ impl Catalog {
         self.cache.replace_all(stations)
     }
 
+    pub fn apply_catalog_delta(
+        &self,
+        added: &[Station],
+        removed: &[String],
+    ) -> anyhow::Result<usize> {
+        self.cache.apply_delta(added, removed)
+    }
+
     pub fn search_offline(&self, term: &str) -> anyhow::Result<Vec<Station>> {
         let stations = match term.trim().is_empty() {
             true => self.cache.list_all(self.excluded_country_ids())?,

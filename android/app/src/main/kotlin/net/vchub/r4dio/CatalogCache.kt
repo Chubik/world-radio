@@ -9,6 +9,13 @@ private const val CACHE_FILE = "catalog.json"
 
 const val CATALOG_TTL_SECS = 86_400L
 
+/**
+ * a delta may never remove more than this share of what is held: beyond it the
+ * answer is a bug, not a day's news, and the caller downloads everything
+ * instead. the same guard exists in the rust cache.
+ */
+private const val MAX_DELTA_REMOVAL_SHARE = 0.5
+
 // syncedAt of 0 means "never synced", which is always stale — the subtraction
 // handles that without a special case.
 fun catalogIsStale(syncedAt: Long, now: Long, ttlSecs: Long = CATALOG_TTL_SECS): Boolean =
@@ -74,6 +81,28 @@ class CatalogCache(private val dir: File) {
 
     /** returns true only when the new content is on disk under [CACHE_FILE]. */
     fun write(stations: List<Station>): Boolean = synchronized(lock) { writeLocked(stations) }
+
+    /**
+     * applies a delta to the stored catalogue and returns the result, or null if
+     * it could not be applied — in which case the caller falls back to a full
+     * download and nothing on disk has been touched.
+     */
+    fun applyDelta(added: List<Station>, removed: Set<String>): List<Station>? =
+        synchronized(lock) {
+            val held = readLocked()
+            if (held.isEmpty()) return@synchronized null
+            if (removed.size.toDouble() / held.size > MAX_DELTA_REMOVAL_SHARE) {
+                return@synchronized null
+            }
+            val byId = LinkedHashMap<String, Station>(held.size + added.size)
+            held.forEach { byId[it.uuid] = it }
+            removed.forEach { byId.remove(it) }
+            // added last, so a station that is both removed and re-added survives.
+            added.forEach { byId[it.uuid] = it }
+            val merged = byId.values.toList()
+            if (!writeLocked(merged)) return@synchronized null
+            merged
+        }
 
     /**
      * true when the held catalogue predates genres entirely. one-off: as soon as

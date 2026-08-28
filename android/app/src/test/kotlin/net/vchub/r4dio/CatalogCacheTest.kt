@@ -281,6 +281,78 @@ class CatalogCacheTest {
         assertFalse(CatalogCache(tmp.root).needsGenreBackfill(emptyList()))
     }
 
+    // proves the exact surviving set, not just a count: the removed station is
+    // genuinely gone, the untouched one survives, and the added one is present.
+    @Test
+    fun applying_a_delta_adds_removes_and_keeps_the_rest() {
+        val cache = CatalogCache(tmp.root)
+        cache.write(listOf(station("a"), station("b")))
+        assertTrue(cache.read().any { it.uuid == "a" }) // "a" is genuinely there before removal
+
+        val after = cache.applyDelta(added = listOf(station("c")), removed = setOf("a"))
+
+        assertEquals(setOf("b", "c"), after?.map { it.uuid }?.toSet())
+        assertFalse(after!!.any { it.uuid == "a" })
+        assertEquals(setOf("b", "c"), cache.read().map { it.uuid }.toSet())
+    }
+
+    // a station that is both removed and re-added in the same delta must
+    // survive — added is applied after removed, so the incoming copy wins.
+    // held has two stations so the removal share (1/2) stays under the ceiling.
+    @Test
+    fun a_station_removed_and_readded_in_the_same_delta_survives() {
+        val cache = CatalogCache(tmp.root)
+        cache.write(
+            listOf(
+                Station("a", "old name", "http://old", "UA", "MP3", 128),
+                station("other"),
+            ),
+        )
+
+        val after = cache.applyDelta(
+            added = listOf(Station("a", "new name", "http://new", "UA", "MP3", 128)),
+            removed = setOf("a"),
+        )
+
+        assertEquals("new name", after?.single { it.uuid == "a" }?.name)
+    }
+
+    // above the removal-share ceiling the delta is refused: null, and the disk
+    // is untouched — the caller falls back to a full download instead.
+    @Test
+    fun a_delta_that_removes_too_large_a_share_is_refused_and_leaves_the_cache_untouched() {
+        val cache = CatalogCache(tmp.root)
+        val held = listOf(station("a"), station("b"), station("c"), station("d"))
+        cache.write(held)
+
+        // 3 of 4 held = 75%, above the 50% ceiling.
+        val after = cache.applyDelta(added = emptyList(), removed = setOf("a", "b", "c"))
+
+        assertEquals(null, after)
+        assertEquals(held, cache.read())
+    }
+
+    // exactly at the ceiling is still allowed — the guard is "more than half",
+    // not "half or more".
+    @Test
+    fun a_delta_at_exactly_the_removal_ceiling_is_allowed() {
+        val cache = CatalogCache(tmp.root)
+        cache.write(listOf(station("a"), station("b")))
+
+        val after = cache.applyDelta(added = emptyList(), removed = setOf("a"))
+
+        assertEquals(setOf("b"), after?.map { it.uuid }?.toSet())
+    }
+
+    // an empty held catalogue has nothing for a delta to apply against — this
+    // is the cold-start case, and the caller must fall to a full download.
+    @Test
+    fun applying_a_delta_to_an_empty_cache_is_refused() {
+        val cache = CatalogCache(tmp.root)
+        val after = cache.applyDelta(added = listOf(station("a")), removed = emptySet())
+        assertEquals(null, after)
+    }
+
     @Test
     fun leftover_backup_from_an_older_version_is_not_resurrected() {
         // older builds moved the cache aside to catalog.json.bak. such a file is
