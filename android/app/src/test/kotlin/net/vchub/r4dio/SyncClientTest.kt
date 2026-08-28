@@ -85,6 +85,35 @@ class SyncClientTest {
         server.shutdown()
     }
 
+    // literal wire evidence for the removal fix: an unstar must show up as a
+    // gone:true tombstone under "changed", not merely be absent from "favs".
+    @Test
+    fun push_withAPendingRemoval_carriesATombstoneOnTheWire() {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody("""{"favs":[],"blocked":[]}"""))
+        server.start()
+        val pending = PendingChanges().note(ChangeSet.FAVS, "s1", gone = true)
+        val out = SyncProfile().outgoing(emptyList(), emptyList(), emptyList(), emptyList(), changed = pending)
+        clientFor(server).push("r4-k", out)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body, body.contains(""""changed":{"favs":[{"id":"s1","gone":true}]"""))
+        server.shutdown()
+    }
+
+    // an untouched device must still send no "changed" key at all — an empty
+    // PendingChanges is not a value to report, just as an empty history isn't.
+    @Test
+    fun push_withNoPendingChanges_omitsTheChangedKey() {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody("""{"favs":[],"blocked":[]}"""))
+        server.start()
+        val out = SyncProfile().outgoing(listOf("f1"), emptyList(), emptyList(), emptyList(), changed = PendingChanges())
+        clientFor(server).push("r4-k", out)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body, !body.contains(""""changed""""))
+        server.shutdown()
+    }
+
     @Test
     fun push_fromATouchedDevice_carriesTheProfileOnTheWire() {
         val server = MockWebServer()
