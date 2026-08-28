@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -262,6 +263,18 @@ private fun ContextLine(state: UiState) {
     }
 }
 
+/**
+ * a plain Row with a weight(1f) spacer used to clip whatever did not fit —
+ * silently, since nothing here scrolls or wraps. up to five pills compete for
+ * one line, and the overlay pill (last) was the first to go: a user who had
+ * ever set a country filter could lose the ability to even reach it, which
+ * reads exactly like "the permission won't grant" with nothing wrong in the
+ * permission code at all. FlowRow wraps onto a second line instead of
+ * clipping, so every pill stays reachable regardless of how many are present
+ * — the panel already scrolls when short (see the `scrollable` comment on
+ * [Hero]'s caller), so an extra line here is absorbed the same way, not a new
+ * risk to the eyes-free hero below it.
+ */
 @Composable
 private fun PillRow(
     state: UiState,
@@ -272,10 +285,7 @@ private fun PillRow(
     onOverlay: (() -> Unit)?,
 ) {
     val c = R4dioTokens.colors
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
         val count = catalogueLabel(
             state.catalogueSize,
             state.catalogueGrowing,
@@ -292,44 +302,45 @@ private fun PillRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(modifier = Modifier.weight(1f))
-        filterPillLabel(state.filterCountries, state.scope)?.let { label ->
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(top = if (count.isNotEmpty()) 4.dp else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            filterPillLabel(state.filterCountries, state.scope)?.let { label ->
+                Pill(
+                    text = label,
+                    on = filterIsInForce(state.filterCountries, state.scope),
+                    onClick = onClearFilter,
+                )
+            }
+            if (showsHiddenPill(state.hiddenCount, state.scope)) {
+                Pill(
+                    text = stringResource(R.string.home_countries_n, state.hiddenCount),
+                    on = true,
+                )
+            }
             Pill(
-                text = label,
-                on = filterIsInForce(state.filterCountries, state.scope),
-                onClick = onClearFilter,
-                modifier = Modifier.padding(end = 6.dp),
+                text = when {
+                    state.scope != "favs" -> stringResource(R.string.home_scope_all)
+                    state.favCount > 0 -> stringResource(R.string.home_scope_favs_n, state.favCount)
+                    else -> stringResource(R.string.home_scope_favs)
+                },
+                on = state.scope == "favs",
+            )
+            Pill(
+                text = keepAwakeLabel(keepAwake),
+                on = keepAwake,
+                onClick = onKeepAwake,
+                description = stringResource(R.string.home_awake_desc),
+            )
+            Pill(
+                text = stringResource(if (overlayOn) R.string.home_overlay_on else R.string.home_overlay_off),
+                on = overlayOn,
+                onClick = onOverlay,
+                description = stringResource(R.string.home_overlay_desc),
             )
         }
-        if (showsHiddenPill(state.hiddenCount, state.scope)) {
-            Pill(
-                text = stringResource(R.string.home_countries_n, state.hiddenCount),
-                on = true,
-                modifier = Modifier.padding(end = 6.dp),
-            )
-        }
-        Pill(
-            text = when {
-                state.scope != "favs" -> stringResource(R.string.home_scope_all)
-                state.favCount > 0 -> stringResource(R.string.home_scope_favs_n, state.favCount)
-                else -> stringResource(R.string.home_scope_favs)
-            },
-            on = state.scope == "favs",
-        )
-        Pill(
-            text = keepAwakeLabel(keepAwake),
-            on = keepAwake,
-            onClick = onKeepAwake,
-            description = stringResource(R.string.home_awake_desc),
-            modifier = Modifier.padding(start = 6.dp),
-        )
-        Pill(
-            text = stringResource(if (overlayOn) R.string.home_overlay_on else R.string.home_overlay_off),
-            on = overlayOn,
-            onClick = onOverlay,
-            description = stringResource(R.string.home_overlay_desc),
-            modifier = Modifier.padding(start = 6.dp),
-        )
     }
 }
 

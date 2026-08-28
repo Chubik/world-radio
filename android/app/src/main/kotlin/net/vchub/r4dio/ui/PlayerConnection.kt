@@ -51,6 +51,11 @@ class PlayerConnection(
 
     private var controller: ControllerHandle? = null
 
+    // true only once the controller has actually bound — a caller that wants to
+    // know whether PlaybackService is running (rather than about to be started
+    // by connect()) needs this, not state, which exists before the bind lands.
+    val isConnected: Boolean get() = controller != null
+
     // the controller can arrive after release(); without this the callback would
     // hand us one nobody will ever close, keeping the session alive for the life
     // of the process.
