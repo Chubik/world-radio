@@ -31,4 +31,23 @@ class ResyncGateTest {
         ResyncGate.release(queued)
         assertTrue(ResyncGate.claim(queued))
     }
+
+    // PlaybackService shares one AtomicBoolean between the doorbell
+    // (onStreamEvent) and ACTION_SYNC_NOW (onStartCommand) precisely so this
+    // holds: two syncs from different triggers racing each other is the same
+    // clearPushedPending/applyMerged hazard as two doorbells racing, not a
+    // separate concern. a claim dropped here costs nothing durable — see
+    // PendingChangesTest for why the pending change survives regardless of
+    // which sync attempt gets collapsed.
+    @Test
+    fun a_ui_triggered_sync_and_a_doorbell_sync_share_the_same_slot() {
+        val queued = AtomicBoolean(false)
+        assertTrue("the doorbell claims first", ResyncGate.claim(queued))
+        assertFalse(
+            "a UI-triggered sync arriving while the doorbell's is in flight must not also run",
+            ResyncGate.claim(queued),
+        )
+        ResyncGate.release(queued)
+        assertTrue("once released, either source can claim again", ResyncGate.claim(queued))
+    }
 }
