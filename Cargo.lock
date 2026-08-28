@@ -3473,6 +3473,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
+name = "r4dio"
+version = "1.4.5"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "clap",
+ "crossterm",
+ "fastrand",
+ "mockito",
+ "qrcode",
+ "radio-audio",
+ "radio-core",
+ "ratatui",
+ "reqwest 0.12.28",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 1.1.2+spec-1.1.0",
+]
+
+[[package]]
 name = "r4dio-macos"
 version = "1.4.5"
 dependencies = [
@@ -3523,28 +3545,6 @@ dependencies = [
  "tar",
  "tempfile",
  "thiserror 1.0.69",
- "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
-name = "radio-tui"
-version = "1.4.5"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "clap",
- "crossterm",
- "fastrand",
- "mockito",
- "qrcode",
- "radio-audio",
- "radio-core",
- "ratatui",
- "reqwest 0.12.28",
- "rustfft",
- "serde",
- "serde_json",
- "tempfile",
  "toml 1.1.2+spec-1.1.0",
 ]
 

@@ -35,8 +35,8 @@ All three must pass. The build needs ALSA headers on Linux
 - Comments only where they explain a non-obvious *why* — the code should otherwise
   speak for itself.
 - The workspace splits into `radio-core` (portable: catalog + pure audio logic)
-  and `radio-tui` (the binary: native audio + the ratatui UI). Keep platform and
-  I/O concerns in `radio-tui`; keep `radio-core` portable and side-effect-light.
+  and `r4dio` (the binary: native audio + the ratatui UI). Keep platform and
+  I/O concerns in `r4dio`; keep `radio-core` portable and side-effect-light.
 
 ## Tests
 
