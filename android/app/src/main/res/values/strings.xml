@@ -43,6 +43,10 @@
     <string name="home_overlay_off">◧ ALLOW</string>
     <string name="home_overlay_desc">show the station name over other apps</string>
     <string name="overlay_ask">r4dio needs permission to draw over other apps, so the station name can appear while you are using maps</string>
+    <string name="overlay_help_title">continue to settings</string>
+    <string name="overlay_help_body">on the next screen, turn on \"allow display over other apps\".\n\nif the switch looks grey and will not move, android is blocking it because r4dio was installed outside a store. tap ⋮ in the top right, choose \"allow restricted settings\", then confirm with your pin or fingerprint — the switch will turn on after that.</string>
+    <string name="overlay_help_continue">open settings</string>
+    <string name="overlay_help_cancel">not now</string>
     <string name="sync_backup_label">BACKUP</string>
     <string name="sync_export">SAVE TO FILE</string>
     <string name="sync_import">RESTORE</string>
