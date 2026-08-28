@@ -54,9 +54,9 @@ A comment at MainActivity.kt:113 says "the next sync carries it to the desktop w
 - **Backwards compatibility is load-bearing.** An old Android build must keep working against the new server, and this new build must work against the current server. Both are already true if the format is respected — `changed` is optional on the wire.
 - **Commits:** English, concise, changelog-style subject. NO AI/assistant mention, NO `Co-Authored-By`, NO "Generated with" trailer.
 - **Branch:** `dev` in the `radio` repo. Never commit to `main`.
-- **Verification:** `cd android && ./gradlew test` must pass. This project's gradle
-  does NOT accept `--tests` (verified: "Unknown command-line option '--tests'"), so
-  run the whole suite. Gradle caches hard — a 500ms "BUILD SUCCESSFUL" means nothing
+- **Verification:** `cd android && ./gradlew test` must pass. The `test` task does NOT accept
+  `--tests` here ("Unknown command-line option"), but `testDebugUnitTest` does —
+  so `./gradlew testDebugUnitTest --tests "*SomeTest*"` works for a single class. Gradle caches hard — a 500ms "BUILD SUCCESSFUL" means nothing
   actually ran; confirm by reading the real counts out of
   `app/build/test-results/testDebugUnitTest/TEST-*.xml`. The emulator workflow is the project's normal way to prove Android behaviour — a unit test alone does not prove a sync round-trip.
 - **Never touch the user's real data directory** when testing.
