@@ -95,6 +95,10 @@ class MainActivity : ComponentActivity() {
             }
             val slug = resolveTheme(synced, DEFAULT_THEME)
             var clearing by remember { mutableStateOf(false) }
+            // the "how to grant it when the toggle is greyed out" guidance only
+            // makes sense before the permission is granted — once it is on,
+            // askOverlay()'s own short toast is the whole story.
+            var overlayHelp by remember { mutableStateOf(false) }
             R4dioTheme(slug) {
                 R4dioApp(
                     state = state,
@@ -103,18 +107,24 @@ class MainActivity : ComponentActivity() {
                     keepAwake = keepAwake,
                     overlayOn = overlayOn,
                     onKeepAwake = ::toggleKeepAwake,
-                    onOverlay = ::askOverlay,
+                    onOverlay = {
+                        when (overlayOn) {
+                            true -> askOverlay()
+                            false -> overlayHelp = true
+                        }
+                    },
                     fillOnMobile = fillOnMobile,
                     onFillOnMobile = {
                         lifecycleScope.launch { favStore.setFillOnMobile(!fillOnMobile) }
                     },
                     theme = slug,
                     hiddenCountries = hidden,
-                    // setTheme stamps the change for last-write-wins, so the next
-                    // sync carries it to the desktop without a command of its own.
-                    onTheme = { picked -> lifecycleScope.launch { favStore.setTheme(picked) } },
+                    // setTheme stamps the change for last-write-wins, but nothing pushes
+                    // it on its own — triggerSync() below is what actually takes it to
+                    // the other devices, same as every synced field changed from here.
+                    onTheme = { picked -> lifecycleScope.launch { favStore.setTheme(picked); triggerSync() } },
                     onShowCountry = { code ->
-                        lifecycleScope.launch { favStore.setExcluded(hidden - code) }
+                        lifecycleScope.launch { favStore.setExcluded(hidden - code); triggerSync() }
                     },
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
                     catalog = catalog,
@@ -125,14 +135,14 @@ class MainActivity : ComponentActivity() {
                     onBlockPlaying = {
                         val uuid = state.stationUuid
                         if (uuid.isNotBlank()) {
-                            lifecycleScope.launch { favStore.toggleBlocked(uuid) }
+                            lifecycleScope.launch { favStore.toggleBlocked(uuid); triggerSync() }
                         }
                     },
                     favourites = favourites,
                     blocked = blocked,
                     onPlay = ::playStation,
-                    onStar = { station -> lifecycleScope.launch { favStore.toggleFav(station) } },
-                    onBlock = { station -> lifecycleScope.launch { favStore.toggleBlocked(station.uuid) } },
+                    onStar = { station -> lifecycleScope.launch { favStore.toggleFav(station); triggerSync() } },
+                    onBlock = { station -> lifecycleScope.launch { favStore.toggleBlocked(station.uuid); triggerSync() } },
                     onCatalogShown = ::loadCatalog,
                     // the compose tree owns the whole window, so the inset the xml
                     // root used to take with fitsSystemWindows is applied here.
@@ -146,6 +156,15 @@ class MainActivity : ComponentActivity() {
                             connection.send(CMD_CLEAR_FILTER)
                         },
                         onDismiss = { clearing = false },
+                    )
+                }
+                if (overlayHelp) {
+                    OverlayHelpDialog(
+                        onConfirm = {
+                            overlayHelp = false
+                            askOverlay()
+                        },
+                        onDismiss = { overlayHelp = false },
                     )
                 }
             }
@@ -175,6 +194,22 @@ class MainActivity : ComponentActivity() {
         connection.send(CMD_PLAY_UUID, Bundle().apply { putString(ARG_UUID, station.uuid) })
     }
 
+    /**
+     * pushes a favourite/block/theme/country change made from this screen, rather
+     * than waiting for playback to touch the account next. gated on the controller
+     * actually being connected: PlaybackService.onCreate() unconditionally builds a
+     * full ExoPlayer + MediaSession the moment it is started, so calling this before
+     * connect() has landed — the real window on first launch, while the
+     * notification-permission prompt is still up — would boot playback just to
+     * carry a settings change, which is not what this is for.
+     */
+    private fun triggerSync() {
+        if (!connection.isConnected) {
+            return
+        }
+        startService(Intent(this, PlaybackService::class.java).setAction(ACTION_SYNC_NOW))
+    }
+
     private fun toggleKeepAwake() {
         lifecycleScope.launch {
             val next = nextKeepAwake(favStore.currentKeepAwake())
@@ -184,7 +219,11 @@ class MainActivity : ComponentActivity() {
     }
 
     // android grants this one only from its own settings screen, so the pill
-    // opens that rather than pretending it can ask here.
+    // opens that rather than pretending it can ask here. the dialog (shown by
+    // the caller before this runs) carries the "how" for a side-loaded install,
+    // where the toggle can arrive greyed out with no explanation from android —
+    // a toast is not enough room for that, and once the user has left for
+    // Settings there is no more chance to tell them.
     private fun askOverlay() {
         if (canDrawOverlay(this)) {
             Toast.makeText(this, R.string.home_overlay_desc, Toast.LENGTH_SHORT).show()
@@ -292,6 +331,61 @@ private fun ClearFilterDialog(codes: String, onConfirm: () -> Unit, onDismiss: (
             TextButton(onClick = onDismiss) {
                 Text(
                     text = context.getString(R.string.filter_clear_no, codes),
+                    color = Color(c.dim),
+                    fontSize = 13.sp,
+                    fontFamily = MonoFamily,
+                )
+            }
+        },
+    )
+}
+
+/**
+ * shown right before Settings opens, not after: once the user is on that screen
+ * there is no more chance to tell them anything. a toast cannot hold this much —
+ * on a side-loaded install the toggle there can come up greyed out with no
+ * explanation from android, and the escape hatch (⋮ → "allow restricted
+ * settings") is not something a user would find on their own.
+ */
+@Composable
+private fun OverlayHelpDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val c = R4dioTokens.colors
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(c.bg),
+        titleContentColor = Color(c.accent),
+        textContentColor = Color(c.fg),
+        title = {
+            Text(
+                text = stringResource(R.string.overlay_help_title),
+                color = Color(c.accent),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = MonoFamily,
+            )
+        },
+        text = {
+            Text(
+                text = stringResource(R.string.overlay_help_body),
+                color = Color(c.fg),
+                fontSize = 13.sp,
+                fontFamily = MonoFamily,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    text = stringResource(R.string.overlay_help_continue),
+                    color = Color(c.accent),
+                    fontSize = 13.sp,
+                    fontFamily = MonoFamily,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = stringResource(R.string.overlay_help_cancel),
                     color = Color(c.dim),
                     fontSize = 13.sp,
                     fontFamily = MonoFamily,

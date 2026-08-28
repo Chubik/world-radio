@@ -93,6 +93,7 @@ data class SyncProfile(
         blocked: List<String>,
         excluded: List<String>,
         plays: List<HistoryRecord>,
+        changed: PendingChanges? = null,
     ): SyncData = SyncData(
         favs = favs,
         blocked = blocked,
@@ -109,6 +110,7 @@ data class SyncProfile(
         scope = stringLww(scope, scopeAt),
         theme = stringLww(theme, themeAt),
         history = plays,
+        changed = changed?.takeUnless { it.isEmpty() },
     )
 
     /** takes each field the server sent back that is newer than the local stamp. */

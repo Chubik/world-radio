@@ -45,6 +45,10 @@ data class SyncData(
     val scope: Lww? = null,
     val theme: Lww? = null,
     val history: List<HistoryRecord> = emptyList(),
+    // what this device removed since its last successful sync — see PendingChanges.
+    // absent (not an empty object) when there is nothing to report, which is also
+    // what a pre-tombstone client sends and the server already treats as a no-op.
+    val changed: PendingChanges? = null,
 )
 
 class SyncClient(

@@ -2,6 +2,7 @@ package net.vchub.r4dio
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -97,6 +98,10 @@ class FavStore(context: Context) {
     private val keyThemeAt = longPreferencesKey("theme_at")
     private val keyHistoryPending = stringSetPreferencesKey("history_pending")
 
+    // what this device changed since its last successful sync — see PendingChanges.
+    // a plain listing of what we still hold cannot express a removal.
+    private val keyPendingChanges = stringPreferencesKey("pending_changes")
+
     // the local play history, which is NOT keyHistoryPending: that one is a push
     // queue emptied by sync. see PlayHistory.
     private val keyPlayHistory = stringPreferencesKey("play_history")
@@ -130,6 +135,7 @@ class FavStore(context: Context) {
                 false -> cached.filter { it.uuid != station.uuid }
             }
             prefs[keyCached] = json.encodeToString(ListSerializer(FavStation.serializer()), nextCached)
+            notePending(prefs, ChangeSet.FAVS, station.uuid, gone = !next.contains(station.uuid))
         }
     }
 
@@ -144,7 +150,10 @@ class FavStore(context: Context) {
      */
     suspend fun toggleBlocked(uuid: String) {
         store.edit { prefs ->
-            prefs[keyBlocked] = FavLogic.toggle(prefs[keyBlocked] ?: emptySet(), uuid)
+            val current = prefs[keyBlocked] ?: emptySet()
+            val next = FavLogic.toggle(current, uuid)
+            prefs[keyBlocked] = next
+            notePending(prefs, ChangeSet.BLOCKED, uuid, gone = !next.contains(uuid))
         }
     }
 
@@ -153,6 +162,30 @@ class FavStore(context: Context) {
         else -> runCatching {
             json.decodeFromString(ListSerializer(FavStation.serializer()), raw)
         }.getOrDefault(emptyList())
+    }
+
+    private fun decodePending(raw: String?): PendingChanges = when (raw) {
+        null -> PendingChanges()
+        else -> runCatching {
+            json.decodeFromString(PendingChanges.serializer(), raw)
+        }.getOrDefault(PendingChanges())
+    }
+
+    // records into the same transaction as the mutation that calls it — a crash
+    // between two separate transactions would leave the set and the pending list
+    // disagreeing, and that disagreement is silent.
+    private fun notePending(prefs: MutablePreferences, set: ChangeSet, id: String, gone: Boolean) {
+        val next = decodePending(prefs[keyPendingChanges]).note(set, id, gone)
+        prefs[keyPendingChanges] = json.encodeToString(PendingChanges.serializer(), next)
+    }
+
+    suspend fun currentPending(): PendingChanges = decodePending(store.data.first()[keyPendingChanges])
+
+    suspend fun clearPushedPending(pushed: PendingChanges) {
+        store.edit { prefs ->
+            val next = decodePending(prefs[keyPendingChanges]).clearPushed(pushed)
+            prefs[keyPendingChanges] = json.encodeToString(PendingChanges.serializer(), next)
+        }
     }
 
     /**
@@ -420,6 +453,8 @@ class FavStore(context: Context) {
                 true -> prefs[keyCatalogSyncedAt] = 0L
                 false -> {}
             }
+            (next - prev).forEach { notePending(prefs, ChangeSet.COUNTRIES, it, gone = false) }
+            (prev - next).forEach { notePending(prefs, ChangeSet.COUNTRIES, it, gone = true) }
         }
         return changed
     }

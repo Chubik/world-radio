@@ -109,8 +109,11 @@ class PlaybackService : MediaSessionService() {
     private val health = HealthTracker()
     @Volatile private var mirrorSeq: Long = 0
     @Volatile private var applyingMirror: Boolean = false
-    // the debounce: set while a doorbell-triggered sync is queued, cleared once
-    // it has run. a burst of events costs one re-sync, not one per event.
+    // the debounce: set while a sync is queued, cleared once it has run. shared
+    // by the doorbell (onStreamEvent) and ACTION_SYNC_NOW (onStartCommand) so
+    // a burst from either source, or both at once, costs one re-sync — two
+    // concurrent syncNow() calls is exactly the race clearPushedPending and
+    // applyMerged are fragile to, not merely wasted work.
     private val resyncQueued = java.util.concurrent.atomic.AtomicBoolean(false)
     private val artwork: ByteArray by lazy { crtArtworkPng() }
     private var mirrorJob: Job? = null
@@ -265,7 +268,23 @@ class PlaybackService : MediaSessionService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SYNC_NOW -> syncNow()
+            // shares resyncQueued with the doorbell path (onStreamEvent): two syncs
+            // overlapping is exactly the race clearPushedPending/applyMerged are
+            // fragile to (see PendingChanges), not just a UI-vs-UI one. a claim
+            // dropped here loses nothing — the change it would have pushed is
+            // already durable in FavStore, and the sync that wins reads it fresh.
+            ACTION_SYNC_NOW -> {
+                when (ResyncGate.claim(resyncQueued)) {
+                    false -> {}
+                    true -> scope.launch {
+                        try {
+                            syncNow().join()
+                        } finally {
+                            ResyncGate.release(resyncQueued)
+                        }
+                    }
+                }
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -650,13 +669,19 @@ class PlaybackService : MediaSessionService() {
                 else -> {
                     val profile = favStore.profile()
                     val plays = HistoryQueue.records(favStore.pendingPlays())
+                    val pending = favStore.currentPending()
                     val local = profile.outgoing(
                         favs = favStore.currentFavUuids().toList(),
                         blocked = favStore.currentBlocked().toList(),
                         excluded = favStore.currentExcluded().toList(),
                         plays = plays,
+                        changed = pending,
                     )
                     val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+                    // only now: a failed push must leave the tombstones queued, or a
+                    // removal is lost forever. clear exactly what was sent, so an edit
+                    // made during the round trip survives.
+                    favStore.clearPushedPending(pending)
                     favStore.applyMerged(
                         merged.favs.toSet(),
                         merged.blocked.toSet(),
