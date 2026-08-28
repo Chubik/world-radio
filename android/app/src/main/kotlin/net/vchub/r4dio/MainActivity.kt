@@ -110,11 +110,12 @@ class MainActivity : ComponentActivity() {
                     },
                     theme = slug,
                     hiddenCountries = hidden,
-                    // setTheme stamps the change for last-write-wins, so the next
-                    // sync carries it to the desktop without a command of its own.
-                    onTheme = { picked -> lifecycleScope.launch { favStore.setTheme(picked) } },
+                    // setTheme stamps the change for last-write-wins, but nothing pushes
+                    // it on its own — triggerSync() below is what actually takes it to
+                    // the other devices, same as every synced field changed from here.
+                    onTheme = { picked -> lifecycleScope.launch { favStore.setTheme(picked); triggerSync() } },
                     onShowCountry = { code ->
-                        lifecycleScope.launch { favStore.setExcluded(hidden - code) }
+                        lifecycleScope.launch { favStore.setExcluded(hidden - code); triggerSync() }
                     },
                     onClearFilter = { clearing = state.filterCountries.isNotEmpty() },
                     catalog = catalog,
@@ -125,14 +126,14 @@ class MainActivity : ComponentActivity() {
                     onBlockPlaying = {
                         val uuid = state.stationUuid
                         if (uuid.isNotBlank()) {
-                            lifecycleScope.launch { favStore.toggleBlocked(uuid) }
+                            lifecycleScope.launch { favStore.toggleBlocked(uuid); triggerSync() }
                         }
                     },
                     favourites = favourites,
                     blocked = blocked,
                     onPlay = ::playStation,
-                    onStar = { station -> lifecycleScope.launch { favStore.toggleFav(station) } },
-                    onBlock = { station -> lifecycleScope.launch { favStore.toggleBlocked(station.uuid) } },
+                    onStar = { station -> lifecycleScope.launch { favStore.toggleFav(station); triggerSync() } },
+                    onBlock = { station -> lifecycleScope.launch { favStore.toggleBlocked(station.uuid); triggerSync() } },
                     onCatalogShown = ::loadCatalog,
                     // the compose tree owns the whole window, so the inset the xml
                     // root used to take with fitsSystemWindows is applied here.
@@ -173,6 +174,22 @@ class MainActivity : ComponentActivity() {
      *  by a refresh, and the service resolves that. */
     private fun playStation(station: Station) {
         connection.send(CMD_PLAY_UUID, Bundle().apply { putString(ARG_UUID, station.uuid) })
+    }
+
+    /**
+     * pushes a favourite/block/theme/country change made from this screen, rather
+     * than waiting for playback to touch the account next. gated on the controller
+     * actually being connected: PlaybackService.onCreate() unconditionally builds a
+     * full ExoPlayer + MediaSession the moment it is started, so calling this before
+     * connect() has landed — the real window on first launch, while the
+     * notification-permission prompt is still up — would boot playback just to
+     * carry a settings change, which is not what this is for.
+     */
+    private fun triggerSync() {
+        if (!connection.isConnected) {
+            return
+        }
+        startService(Intent(this, PlaybackService::class.java).setAction(ACTION_SYNC_NOW))
     }
 
     private fun toggleKeepAwake() {
