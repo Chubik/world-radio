@@ -30,7 +30,7 @@ Requires a stable [Rust toolchain](https://rustup.rs/).
 ```sh
 git clone https://github.com/Chubik/world-radio.git
 cd world-radio
-cargo run --release -p radio-tui
+cargo run --release -p r4dio
 ```
 
 Press `?` in the app for the full keybinding reference. State (cache, favorites,
@@ -69,7 +69,7 @@ A Cargo workspace:
 - **`radio-core`** — the portable core: catalog (radio-browser API, SQLite + FTS
   cache, favorites/history/blocklist, station health) and pure audio logic (ICY
   metadata, retry, gain, resampling, crossfade).
-- **`radio-tui`** — the `world-radio` binary: native audio (symphonia + cpal +
+- **`r4dio`** — the `r4dio` binary: native audio (symphonia + cpal +
   ringbuf) and the ratatui terminal UI.
 
 ## License

@@ -114,7 +114,7 @@ jobs:
           # it out of the commit ships a bundle whose about-box names an old release.
           git add Cargo.toml android/app/build.gradle.kts crates/r4dio-macos/tauri.conf.json
           # refresh lockfile so the crate version in Cargo.lock matches
-          cargo update -p radio-tui --precise "$ver" 2>/dev/null || cargo generate-lockfile
+          cargo update -p r4dio --precise "$ver" 2>/dev/null || cargo generate-lockfile
           git add Cargo.lock || true
           # the tag carries the stamped version; main files are left untouched
           # (branch protection forbids CI pushing to main). the tag is the
@@ -253,7 +253,7 @@ jobs:
             libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev
 
       - name: build
-        run: cargo build --release -p radio-tui --target ${{ matrix.target }}
+        run: cargo build --release -p r4dio --target ${{ matrix.target }}
 
       - name: package
         id: pkg
