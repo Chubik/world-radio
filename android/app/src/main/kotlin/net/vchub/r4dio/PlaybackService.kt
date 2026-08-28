@@ -650,13 +650,19 @@ class PlaybackService : MediaSessionService() {
                 else -> {
                     val profile = favStore.profile()
                     val plays = HistoryQueue.records(favStore.pendingPlays())
+                    val pending = favStore.currentPending()
                     val local = profile.outgoing(
                         favs = favStore.currentFavUuids().toList(),
                         blocked = favStore.currentBlocked().toList(),
                         excluded = favStore.currentExcluded().toList(),
                         plays = plays,
+                        changed = pending,
                     )
                     val merged = withContext(Dispatchers.IO) { syncClient.push(key, local) } ?: return@launch
+                    // only now: a failed push must leave the tombstones queued, or a
+                    // removal is lost forever. clear exactly what was sent, so an edit
+                    // made during the round trip survives.
+                    favStore.clearPushedPending(pending)
                     favStore.applyMerged(
                         merged.favs.toSet(),
                         merged.blocked.toSet(),
