@@ -388,6 +388,23 @@ jobs:
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS
 
+      # unsigned checksums prove a download was not corrupted, not that it is
+      # ours. sign them with the release key, whose public half is published on
+      # r4dio.net — a different host from the releases themselves.
+      - name: sign the checksums
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_RELEASE_KEY }}
+          PUBKEY: RWQPpyPbplhYrqJWPJvO7cw6ZAq9mY0dtC0nBClXataAqT/9L+bN8iOO
+        run: |
+          test -n "$MINISIGN_KEY" || { echo "MINISIGN_RELEASE_KEY is not set"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          printf '%s\n' "$MINISIGN_KEY" > key
+          cd dist
+          minisign -S -s ../key -m SHA256SUMS -t "r4dio ${{ needs.version.outputs.version }} checksums"
+          rm -f ../key
+          # a signature nobody can verify is theatre — prove it verifies here.
+          minisign -Vm SHA256SUMS -P "$PUBKEY"
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.sums.outputs.version }}
@@ -399,6 +416,7 @@ jobs:
             dist/*-update.tar.gz.sig
             dist/latest.json
             dist/SHA256SUMS
+            dist/SHA256SUMS.minisig
 
       - name: trigger ops deploy (site + stat + firebase)
         env:
