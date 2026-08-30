@@ -158,9 +158,10 @@ fn run_update() -> anyhow::Result<()> {
             radio_core::update::target_triple()
         ),
         UpdateCheck::Available(rel) => {
-            println!("updating to v{}…", rel.version);
+            let from = radio_core::update::current_version();
+            println!("updating v{from} → v{}…", rel.version);
             radio_core::update::apply(&rel)?;
-            println!("updated to v{} — restart to apply", rel.version);
+            println!("updated v{from} → v{} — restart to apply", rel.version);
         }
     }
     Ok(())

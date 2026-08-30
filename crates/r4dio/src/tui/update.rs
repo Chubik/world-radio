@@ -254,7 +254,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::UpdateApplied(version) => {
             model.update_applied = true;
-            model.notice = Some(format!("✓ updated to v{version} — press U to restart"));
+            let from = radio_core::update::current_version();
+            model.notice = Some(format!(
+                "✓ updated v{from} → v{version} — press U to restart"
+            ));
             vec![]
         }
     }
