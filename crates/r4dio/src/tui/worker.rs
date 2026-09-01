@@ -37,6 +37,7 @@ pub enum WorkerReq {
     // a sync the user did not ask for, so it stays silent; see the doorbell.
     SyncQuiet,
     SyncCreate,
+    SyncUse(String),
     SyncLogout,
     SyncDelete,
     CheckUpdate,
@@ -212,6 +213,18 @@ fn handle_req(
                     crate::log_warn!("worker: create account failed: {e}");
                     let _ = msg_tx.send(Msg::Notice("could not create account".into()));
                 }
+            }
+        }
+        // linking to an existing key syncs straight away and says so: the CLI's
+        // `sync use` merges on the spot, and stopping short of that here is what
+        // made linking look like it had done nothing.
+        WorkerReq::SyncUse(key) => {
+            if let Err(e) = radio_core::sync::store_key(&key) {
+                crate::log_warn!("worker: store key failed: {e}");
+                let _ = msg_tx.send(Msg::Notice("could not save the key".into()));
+            } else {
+                let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
+                handle_sync(catalog, paths, msg_tx, true);
             }
         }
         WorkerReq::SyncLogout => {
