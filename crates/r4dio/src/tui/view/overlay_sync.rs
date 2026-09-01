@@ -14,7 +14,7 @@ pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
             lines.push(Line::from("○ local — not linked"));
             lines.push(Line::from(""));
             lines.push(Line::from("  [n] create key"));
-            lines.push(Line::from("  or run: world-radio sync login"));
+            lines.push(Line::from("  or run: r4dio sync login"));
             lines.push(Line::from("  [esc] close"));
         }
         Some(key) => {
