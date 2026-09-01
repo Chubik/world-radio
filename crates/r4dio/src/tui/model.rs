@@ -380,6 +380,10 @@ pub struct Model {
     pub spinner: usize,
     pub notice: Option<String>,
     pub sync_key: Option<String>,
+    /// `Some` while the sync overlay is taking a key. a pasted key arrives as
+    /// ordinary key presses, so entering this mode is what stops each character
+    /// being read as a command.
+    pub sync_entry: Option<String>,
     pub mirror_seq: u64,
     pub pending_update: Option<radio_core::update::Release>,
     pub update_applied: bool,
@@ -414,6 +418,7 @@ impl Model {
             spinner: 0,
             notice: None,
             sync_key: radio_core::sync::load_key(),
+            sync_entry: None,
             mirror_seq: 0,
             pending_update: None,
             update_applied: false,

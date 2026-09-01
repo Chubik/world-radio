@@ -170,6 +170,46 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             }
             vec![]
         }
+        Msg::SyncEnterStart => {
+            model.sync_entry = Some(String::new());
+            vec![]
+        }
+        // a pasted key arrives as ordinary key presses, so this path serves both
+        // typing and ⌘V. anything outside the key alphabet is dropped rather than
+        // shown, which also swallows the stray whitespace a paste can carry.
+        Msg::SyncEnterChar(c) => {
+            if let Some(buf) = model.sync_entry.as_mut() {
+                let c = c.to_ascii_lowercase();
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' {
+                    buf.push(c);
+                }
+            }
+            vec![]
+        }
+        Msg::SyncEnterBackspace => {
+            if let Some(buf) = model.sync_entry.as_mut() {
+                buf.pop();
+            }
+            vec![]
+        }
+        Msg::SyncEnterCancel => {
+            model.sync_entry = None;
+            vec![]
+        }
+        Msg::SyncEnterSubmit => match model.sync_entry.take() {
+            None => vec![],
+            Some(key) => {
+                if radio_core::sync::is_valid_format(&key) {
+                    vec![Effect::SyncUse(key)]
+                } else {
+                    // keep what was typed: making the user retype a long key
+                    // because one character is wrong is the worse failure.
+                    model.notice = Some("invalid key — it looks like r4-a1b2c3".to_string());
+                    model.sync_entry = Some(key);
+                    vec![]
+                }
+            }
+        },
         Msg::SyncKeyChanged(opt) => {
             model.sync_key = opt;
             model.mirror_seq = 0;
@@ -2066,6 +2106,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn entering_a_key_links_and_syncs() {
+        let mut m = model();
+        update(&mut m, Msg::SyncEnterStart);
+        for c in "r4-abc123".chars() {
+            update(&mut m, Msg::SyncEnterChar(c));
+        }
+        let fx = update(&mut m, Msg::SyncEnterSubmit);
+        assert!(
+            fx.iter()
+                .any(|e| matches!(e, Effect::SyncUse(k) if k == "r4-abc123")),
+            "submitting a valid key must link it"
+        );
+        assert!(m.sync_entry.is_none(), "entry closes once the key is taken");
+    }
+
+    #[test]
+    fn a_bad_key_is_kept_for_editing_not_discarded() {
+        let mut m = model();
+        update(&mut m, Msg::SyncEnterStart);
+        for c in "nope".chars() {
+            update(&mut m, Msg::SyncEnterChar(c));
+        }
+        let fx = update(&mut m, Msg::SyncEnterSubmit);
+        assert!(fx.is_empty(), "an invalid key must not be stored");
+        assert_eq!(
+            m.sync_entry.as_deref(),
+            Some("nope"),
+            "retyping a long key over one bad character is the worse failure"
+        );
+    }
+
     fn synced_profile(countries: &[&str], at: i64) -> radio_core::sync::Profile {
         let mut p = radio_core::sync::Profile::default();
         p.set_countries(countries.iter().map(|c| c.to_string()).collect(), at);
@@ -2367,6 +2439,7 @@ mod tests {
             Effect::SaveProfile(_) => "saveprofile",
             Effect::Sync => "sync",
             Effect::SyncCreate => "synccreate",
+            Effect::SyncUse(_) => "syncuse",
             Effect::SyncLogout => "synclogout",
             Effect::SyncDelete => "syncdelete",
             Effect::CheckUpdate => "checkupdate",
