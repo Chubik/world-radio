@@ -186,6 +186,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Effect> {
             model.browse.pending_online_search = Some(Instant::now());
             vec![]
         }
+        // the favourites, blocked and recent views are built from ids the sync
+        // just replaced. without this the pane keeps the pre-merge results —
+        // "synced: 10 favourites" over an empty list.
+        Msg::SyncedListsChanged => {
+            model.browse.pending_online_search = Some(Instant::now());
+            vec![]
+        }
         Msg::ProfileSynced {
             profile,
             countries,
@@ -2042,6 +2049,21 @@ mod tests {
             vec!["RU".to_string(), "BY".to_string()]
         );
         assert!(m.browse.pending_online_search.is_some());
+    }
+
+    // the bug this guards: a sync replaced the favourite ids, the notice said
+    // "synced: 10 favourites", and the favourites tab still showed 0 results
+    // because nothing rebuilt the list.
+    #[test]
+    fn sync_rebuilds_a_list_built_from_synced_ids() {
+        let mut m = model();
+        m.browse.filters.status = StatusFilter::Favorites;
+        m.browse.pending_online_search = None;
+        update(&mut m, Msg::SyncedListsChanged);
+        assert!(
+            m.browse.pending_online_search.is_some(),
+            "a sync must re-run the search, or the pane keeps its pre-merge results"
+        );
     }
 
     fn synced_profile(countries: &[&str], at: i64) -> radio_core::sync::Profile {

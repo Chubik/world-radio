@@ -305,9 +305,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
 
     let Some(key) = sync::load_key() else {
         if announce {
-            let _ = msg_tx.send(Msg::Notice(
-                "not linked — run: world-radio sync login".into(),
-            ));
+            let _ = msg_tx.send(Msg::Notice("not linked — run: r4dio sync login".into()));
         }
         return;
     };
@@ -358,6 +356,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
+    let _ = msg_tx.send(Msg::SyncedListsChanged);
     if changed.any() {
         let _ = msg_tx.send(profile_synced_msg(&profile, changed));
     }
