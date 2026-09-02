@@ -1,6 +1,6 @@
 # World Radio
 
-A radio player for the whole planet — browse and play 30,000+ live internet
+A radio player for the whole planet — browse and play 50,000+ live internet
 stations from your terminal, with a native Android app for background listening.
 Fast, keyboard-driven, no browser, no mouse.
 
@@ -8,7 +8,7 @@ Fast, keyboard-driven, no browser, no mouse.
 
 ## Features
 
-- **30,000+ stations** from the community
+- **50,000+ stations** from the community
   [radio-browser](https://www.radio-browser.info/) database, with a local SQLite +
   full-text cache. Search by name; filter (multi-select) by country, tag, codec
   and bitrate.

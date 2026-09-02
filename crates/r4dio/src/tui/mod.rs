@@ -61,7 +61,7 @@ const TAP_SAMPLES: usize = 2048;
 pub fn run(no_emoji_flag: bool) -> anyhow::Result<()> {
     install_panic_hook();
     let data = paths::ensure_data_dir()?;
-    logger::init(&data.join("world-radio.log"));
+    logger::init(&data.join("r4dio.log"));
     let config = Config::load(&data.join("config.toml"));
     // the profile owns the theme now; this is only the fallback the seeding
     // below keeps when the profile has not chosen one.
