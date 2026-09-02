@@ -488,6 +488,9 @@ fn run_effects(
             Effect::Sync => {
                 let _ = req_tx.send(WorkerReq::Sync);
             }
+            Effect::SyncUse(key) => {
+                let _ = req_tx.send(WorkerReq::SyncUse(key));
+            }
             Effect::SyncCreate => {
                 let _ = req_tx.send(WorkerReq::SyncCreate);
             }

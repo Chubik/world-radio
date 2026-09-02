@@ -21,6 +21,17 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
     if model.overlay == Overlay::Keybindings && model.keybind_capturing {
         return crate::tui::keybind::KeyChord::from_event(ev).map(Msg::CaptureKey);
     }
+    // while a key is being entered every character is text, not a command —
+    // otherwise typing or pasting "r4-..." fires create/copy/logout instead.
+    if model.overlay == Overlay::Sync && model.sync_entry.is_some() {
+        return match ev.code {
+            KeyCode::Esc => Some(Msg::SyncEnterCancel),
+            KeyCode::Enter => Some(Msg::SyncEnterSubmit),
+            KeyCode::Backspace => Some(Msg::SyncEnterBackspace),
+            KeyCode::Char(c) => Some(Msg::SyncEnterChar(c)),
+            _ => None,
+        };
+    }
     if matches!(ev.code, KeyCode::Esc | KeyCode::Char('q')) {
         return Some(Msg::CloseOverlay);
     }
@@ -55,6 +66,7 @@ fn overlay_key(model: &Model, ev: KeyEvent) -> Option<Msg> {
     if model.overlay == Overlay::Sync {
         return match ev.code {
             KeyCode::Char('n') => Some(Msg::SyncCreate),
+            KeyCode::Char('p') => Some(Msg::SyncEnterStart),
             KeyCode::Char('c') => Some(Msg::SyncCopy),
             KeyCode::Char('r') => Some(Msg::SyncNow),
             KeyCode::Char('l') => Some(Msg::SyncLogout),
@@ -171,6 +183,26 @@ mod tests {
 
     fn model() -> Model {
         Model::new(Theme::AmberCrt, ColorTier::Truecolor, Glyphs::unicode())
+    }
+
+    // the trap this guards: the global esc/q catch sits above the sync overlay,
+    // so a key containing "q" used to close the panel mid-entry, and esc threw
+    // the whole key away instead of cancelling the field.
+    #[test]
+    fn entry_mode_takes_letters_the_overlay_treats_as_commands() {
+        let mut m = model();
+        m.overlay = Overlay::Sync;
+        m.sync_entry = Some(String::new());
+        for c in ['q', 'n', 'c', 'd', 'l', 'y'] {
+            assert!(
+                matches!(key_to_msg(&m, ch(c)), Some(Msg::SyncEnterChar(got)) if got == c),
+                "'{c}' must be text while entering a key, not a command"
+            );
+        }
+        assert!(matches!(
+            key_to_msg(&m, key(KeyCode::Esc)),
+            Some(Msg::SyncEnterCancel)
+        ));
     }
 
     fn key(c: KeyCode) -> KeyEvent {

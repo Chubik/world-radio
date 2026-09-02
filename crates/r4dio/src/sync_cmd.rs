@@ -136,7 +136,7 @@ fn login_sync(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::Resul
 
 fn status() -> anyhow::Result<()> {
     match sync::load_key() {
-        None => println!("not linked (run: world-radio sync login)"),
+        None => println!("not linked (run: r4dio sync login)"),
         Some(key) => {
             print_key_qr(&key);
             let data = client().pull(&key)?;
@@ -239,7 +239,7 @@ fn push_and_apply(client: &SyncClient, key: &str, paths: &CliPaths) -> anyhow::R
 
 fn run_sync() -> anyhow::Result<()> {
     let Some(key) = sync::load_key() else {
-        println!("not linked (run: world-radio sync login)");
+        println!("not linked (run: r4dio sync login)");
         return Ok(());
     };
     let merged = push_and_apply(&client(), &key, &cli_paths())?;
