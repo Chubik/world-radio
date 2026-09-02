@@ -67,6 +67,10 @@ android {
 
     buildFeatures {
         compose = true
+        // VERSION_NAME/VERSION_CODE for the settings screen: without them a user
+        // cannot tell which build they are on, which is exactly what you need to
+        // know when an update refuses to install.
+        buildConfig = true
     }
 
 }
