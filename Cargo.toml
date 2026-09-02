@@ -8,4 +8,4 @@ members = ["crates/radio-core", "crates/radio-audio", "crates/r4dio", "crates/r4
 # (branch protection forbids CI pushing to it), so this line stays at whatever
 # it was when tag-derived versioning came in. `git describe --tags --abbrev=0`
 # is the real answer; a built binary reports it correctly via --version.
-version = "1.4.5"
+version = "1.22.11"
