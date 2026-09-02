@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import net.vchub.r4dio.BuildConfig
 import net.vchub.r4dio.R
 
 /**
@@ -91,6 +92,18 @@ fun SettingsScreen(
             ) {
                 Pill(text = stringResource(R.string.settings_open_sync), on = true, onClick = onOpenSync)
             }
+        }
+        // the build code alongside the version: android only ever compares the
+        // code, so it is the number that explains an update that would not install.
+        item {
+            Hint(
+                stringResource(
+                    R.string.settings_version,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE,
+                ),
+            )
+            Spacer(modifier = Modifier.padding(bottom = 24.dp))
         }
     }
 }
