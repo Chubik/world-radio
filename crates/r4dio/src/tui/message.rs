@@ -36,10 +36,20 @@ pub enum Msg {
     SyncLogout,
     SyncDelete,
     SyncKeyChanged(Option<String>),
+    /// start taking an existing key in the overlay.
+    SyncEnterStart,
+    SyncEnterChar(char),
+    SyncEnterBackspace,
+    SyncEnterCancel,
+    SyncEnterSubmit,
     Notice(String),
     ToggleFavoriteSelected,
     BlacklistSelected,
     ExcludedCountriesChanged(Vec<String>),
+    /// a sync replaced the favourites, blacklist or history, so any list
+    /// built from them is stale. the model rebuilds it rather than showing
+    /// the results of the search that ran before the merge.
+    SyncedListsChanged,
     /// `profile` is the exact state the worker just merged and saved to disk.
     /// the model must adopt it wholesale — keeping a stale copy means the next
     /// user edit stamps from stale data and overwrites the synced profile.
@@ -97,6 +107,7 @@ pub enum Effect {
     ToggleExcludedCountry(String),
     Sync,
     SyncCreate,
+    SyncUse(String),
     SyncLogout,
     SyncDelete,
     Recheck(String),

@@ -9,15 +9,24 @@ use ratatui::Frame;
 pub fn render(model: &Model, pal: &Palette, frame: &mut Frame, area: Rect) {
     frame.render_widget(Clear, area);
     let mut lines: Vec<Line> = Vec::new();
-    match &model.sync_key {
-        None => {
+    match (&model.sync_key, &model.sync_entry) {
+        // entry wins over the key: this is also how a second device re-links.
+        (_, Some(buf)) => {
+            lines.push(Line::from("○ enter your key"));
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!("  {buf}▌")));
+            lines.push(Line::from(""));
+            lines.push(Line::from("  paste with your terminal's shortcut"));
+            lines.push(Line::from("  [enter] link   [esc] cancel"));
+        }
+        (None, None) => {
             lines.push(Line::from("○ local — not linked"));
             lines.push(Line::from(""));
             lines.push(Line::from("  [n] create key"));
-            lines.push(Line::from("  or run: world-radio sync login"));
+            lines.push(Line::from("  [p] enter an existing key"));
             lines.push(Line::from("  [esc] close"));
         }
-        Some(key) => {
+        (Some(key), None) => {
             lines.push(Line::from("⊙ synced"));
             lines.push(Line::from(""));
             lines.push(Line::from(format!("key: {key}")));

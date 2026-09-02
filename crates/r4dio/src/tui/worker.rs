@@ -37,6 +37,7 @@ pub enum WorkerReq {
     // a sync the user did not ask for, so it stays silent; see the doorbell.
     SyncQuiet,
     SyncCreate,
+    SyncUse(String),
     SyncLogout,
     SyncDelete,
     CheckUpdate,
@@ -214,6 +215,18 @@ fn handle_req(
                 }
             }
         }
+        // linking to an existing key syncs straight away and says so: the CLI's
+        // `sync use` merges on the spot, and stopping short of that here is what
+        // made linking look like it had done nothing.
+        WorkerReq::SyncUse(key) => {
+            if let Err(e) = radio_core::sync::store_key(&key) {
+                crate::log_warn!("worker: store key failed: {e}");
+                let _ = msg_tx.send(Msg::Notice("could not save the key".into()));
+            } else {
+                let _ = msg_tx.send(Msg::SyncKeyChanged(Some(key)));
+                handle_sync(catalog, paths, msg_tx, true);
+            }
+        }
         WorkerReq::SyncLogout => {
             let _ = radio_core::sync::clear_key();
             let _ = msg_tx.send(Msg::SyncKeyChanged(None));
@@ -305,9 +318,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
 
     let Some(key) = sync::load_key() else {
         if announce {
-            let _ = msg_tx.send(Msg::Notice(
-                "not linked — run: world-radio sync login".into(),
-            ));
+            let _ = msg_tx.send(Msg::Notice("not linked — run: r4dio sync login".into()));
         }
         return;
     };
@@ -358,6 +369,7 @@ fn handle_sync(catalog: &mut Catalog, paths: &WorkerPaths, msg_tx: &Sender<Msg>,
     let _ = msg_tx.send(Msg::ExcludedCountriesChanged(
         catalog.excluded_country_ids().to_vec(),
     ));
+    let _ = msg_tx.send(Msg::SyncedListsChanged);
     if changed.any() {
         let _ = msg_tx.send(profile_synced_msg(&profile, changed));
     }
