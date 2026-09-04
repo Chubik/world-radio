@@ -189,9 +189,24 @@ document.addEventListener("visibilitychange", () => {
   }
   now.wake();
   library.refreshMarks();
+  // a sync while the window was hidden can move the scope, and the segment row
+  // would otherwise still show the one it was opened with.
+  adoptScope();
   const refresh = REFRESH[SUB.settings];
   if (tab === "settings" && refresh) refresh();
 });
 
+/** the backend holds the scope — restored from disk and updated by sync — so
+ *  the segment row is told what it is rather than assuming "all". */
+async function adoptScope() {
+  try {
+    const state = await invoke("now_state");
+    if (state && state.scope) library.adoptScope(state.scope);
+  } catch (e) {
+    console.error("now_state failed", e);
+  }
+}
+
 show("library");
 now.wake();
+adoptScope();
