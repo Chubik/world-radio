@@ -306,13 +306,17 @@ fn run(backend: backend::Backend) {
             let menu = Menu::with_items(
                 app,
                 &[
+                    // opening the app leads the menu: it is the way in to
+                    // everything the menu cannot express, and the rows below it
+                    // are all shortcuts for people who never need the window.
+                    &open,
+                    &PredefinedMenuItem::separator(app)?,
                     &shuffle,
                     &shuffle_favs,
                     &PredefinedMenuItem::separator(app)?,
                     &playstop,
                     &favorite,
                     &PredefinedMenuItem::separator(app)?,
-                    &open,
                     &account_item,
                     &PredefinedMenuItem::separator(app)?,
                     &quit,
