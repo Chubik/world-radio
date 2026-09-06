@@ -12,3 +12,9 @@ crates/r4dio-macos/gen/
 
 # macos leaves these everywhere
 .DS_Store
+
+# internal planning docs: this repository is PUBLIC. plans and specs describe
+# our deploy layout, server users and internal service names — none of that is
+# for a public tree. they live on disk and in the private mirror instead.
+docs/superpowers/
+docs/design/
