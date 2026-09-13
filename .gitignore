@@ -12,3 +12,51 @@ crates/r4dio-macos/gen/
 
 # macos leaves these everywhere
 .DS_Store
+
+# THIS REPOSITORY IS PUBLIC. anything that is not about building or using
+# r4dio stays out of it: plans, specs, design briefs, working notes, agent
+# transcripts, logs, credentials. they describe our deploy layout, server
+# users and internal service names, and none of that belongs in a public tree.
+# keep them on disk or in the private mirror. when in doubt, do not commit it.
+
+# planning and design docs
+docs/superpowers/
+docs/design/
+docs/plans/
+docs/specs/
+**/plans/
+**/specs/
+*-plan.md
+*-spec.md
+*-brief.md
+*-design.md
+*-handoff.md
+NOTES.md
+TODO.md
+BACKLOG.md
+
+# agent and assistant working files
+.claude/
+.superpowers/
+.aider*
+.cursor/
+AGENTS.md
+CLAUDE.md
+
+# logs
+*.log
+logs/
+
+# credentials and anything key-shaped
+*.pem
+*.key
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+google-services.json
+local.properties
+secrets.*
+*-credentials.json
+service-account*.json

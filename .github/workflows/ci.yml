@@ -11,22 +11,34 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# every `uses:` below is pinned to a full commit sha. a tag like `@v4` is a
+# movable pointer: whoever owns the action can repoint it at new code, and it
+# would run here with our signing keys. the trailing comment names the version
+# the sha belongs to — bump both together, deliberately.
+#
+# this repository is PUBLIC: anyone can open a pull request from a fork and run
+# the `rust` job below. the default token is therefore read-only, and each job
+# that needs more asks for it explicitly. a blanket `contents: write` here would
+# hand write access to every job, including the one fork code runs in.
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   rust:
     name: fmt · clippy · test
     runs-on: ubuntu-latest
+    # the only job a fork's pull request can reach. it gets no secrets and no
+    # write scope, so untrusted code runs with nothing worth stealing.
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, v1
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: system libs (cpal needs alsa, tauri needs gtk/glib/webkit)
         run: |
@@ -57,7 +69,7 @@ jobs:
       version: ${{ steps.bump.outputs.version }}
       notes: ${{ steps.bump.outputs.notes }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           token: ${{ github.token }}
@@ -127,21 +139,25 @@ jobs:
     name: android apk beta release
     runs-on: ubuntu-latest
     needs: version
+    # publishes a release and prunes old ones; unreachable from a fork pr
+    # because of the branch condition below.
+    permissions:
+      contents: write
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main'
       && !startsWith(github.event.head_commit.message, 'release: v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: v${{ needs.version.outputs.version }}
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           cmdline-tools-version: latest
 
@@ -196,7 +212,7 @@ jobs:
             printf 'Verify: `sha256sum -c SHA256SUMS` (CLI) / `sha256sum -c SHA256SUMS-android` (APK).\n'
           } > release-notes.md
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ needs.version.outputs.version }}
           name: r4dio v${{ needs.version.outputs.version }}
@@ -222,6 +238,9 @@ jobs:
   cli-release:
     name: cli tarball
     needs: version
+    # builds and uploads a workflow artifact only — no repo writes needed.
+    permissions:
+      contents: read
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main'
       && !startsWith(github.event.head_commit.message, 'release: v')
@@ -237,7 +256,7 @@ jobs:
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: v${{ needs.version.outputs.version }}
           fetch-depth: 0
@@ -268,7 +287,7 @@ jobs:
           fi
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-${{ matrix.target }}
           retention-days: 1
@@ -279,20 +298,22 @@ jobs:
   macos-app:
     name: macos app bundle
     needs: version
+    permissions:
+      contents: read
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main'
       && !startsWith(github.event.head_commit.message, 'release: v')
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: v${{ needs.version.outputs.version }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable, v1
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: install tauri cli
         run: cargo install tauri-cli --version '^2' --locked
@@ -345,7 +366,7 @@ jobs:
           jq -e '.version != "" and (.platforms["darwin-aarch64"].signature|length>0) and (.platforms["darwin-x86_64"].signature|length>0)' latest.json >/dev/null
           echo "upd=$upd" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-app
           retention-days: 1
@@ -363,16 +384,20 @@ jobs:
     needs: [version, android-release, cli-release, macos-app]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # writes the release assets, then prunes old workflow runs and caches.
+    permissions:
+      contents: write
+      actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: cli-*
           merge-multiple: true
           path: dist
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: macos-app
           path: dist
@@ -405,7 +430,7 @@ jobs:
           # a signature nobody can verify is theatre — prove it verifies here.
           minisign -Vm SHA256SUMS -P "$PUBKEY"
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.sums.outputs.version }}
           files: |
@@ -418,30 +443,12 @@ jobs:
             dist/SHA256SUMS
             dist/SHA256SUMS.minisig
 
-      - name: trigger ops deploy (site + stat + firebase)
-        env:
-          OPS_TOKEN: ${{ secrets.ADO_OPS_TOKEN }}
-        run: |
-          # release is fully published now — ping ops so it deploys the new
-          # version immediately instead of waiting for its 30-min cron. this is
-          # best-effort: a failure here must not fail the release, since the ops
-          # cron still picks the new version up within 30 min.
-          if [ -z "$OPS_TOKEN" ]; then
-            echo "ADO_OPS_TOKEN not set — ops will pick this up on its next cron"
-            exit 0
-          fi
-          code="$(curl -sS -o /tmp/ops-resp.txt -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer $OPS_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/Chubik/world-radio-ops/dispatches \
-            -d '{"event_type":"release-published","client_payload":{"version":"${{ steps.sums.outputs.version }}"}}')"
-          if [ "$code" = "204" ]; then
-            echo "dispatched release-published to ops for v${{ steps.sums.outputs.version }}"
-          else
-            echo "ops dispatch failed with HTTP $code — ops cron will still pick it up"
-            echo "response body:"; cat /tmp/ops-resp.txt
-          fi
+      # NO ops dispatch here, and no token for one. this repository is public,
+      # and a credential that triggers a deploy is the one thing a public repo
+      # must never hold: signing keys can only sign, but a dispatch token
+      # reaches our infrastructure. ops picks up a new release on its own
+      # 30-minute cron, so the only cost of removing it is that delay.
+      # if the wait ever becomes a problem, poll from ops — never push from here.
 
       - name: reclaim actions storage
         env:

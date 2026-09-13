@@ -73,6 +73,7 @@ ok("every getElementById has an element");
 // a fake tauri bridge and enough dom to mount the panel, so a rename in
 // NowState shows up here rather than on screen.
 
+const calls = [];
 const NOW = {
   station: "Radio Swiss Jazz",
   track: "Chuck Wayne — What A Difference A Day Made",
@@ -97,6 +98,9 @@ globalThis.window.__TAURI__ = {
       if (cmd === "now_state") return NOW;
       if (cmd === "spectrum") return Array.from({ length: 34 }, (_, i) => (i % 7) / 7);
       if (cmd === "eq_settings") return { style: "bars", gain: 12 };
+      if (cmd === "set_scope") { NOW.scope = arguments[1]?.scope ?? NOW.scope; return null; }
+      if (cmd === "search" || cmd === "favourites" || cmd === "history") { calls.push(cmd); return []; }
+      if (cmd === "favourite_ids") return [];
       return null;
     },
   },
@@ -133,6 +137,41 @@ await panel.refresh();
 expect("a muted panel says so", text("np_status"), "MUTED");
 NOW.muted = false;
 await panel.refresh();
+
+// the segment row used to start at "all" regardless of the scope the backend
+// held, so a synced "favorites" left the tabs saying All while shuffle drew
+// from favourites — the panel's hint was the only place that said so.
+const { mountLibrary } = await import(pathToFileURL(join(here, "views/library.js")));
+const lib = mountLibrary(globalThis.document.getElementById("listbody"), {
+  head: globalThis.document.getElementById("listhead"),
+  count: globalThis.document.getElementById("count"),
+  segrow: globalThis.document.getElementById("segrow"),
+  statebar: globalThis.document.getElementById("statebar"),
+  search: globalThis.document.getElementById("search"),
+  onPlayed: () => {},
+  onScope: () => {},
+  onBlocked: () => {},
+});
+calls.length = 0;
+await lib.adoptScope("favorites");
+await new Promise((r) => setTimeout(r, 0));
+// adopting favourites must read the favourites list, not the whole catalogue:
+// loading "search" here is the old behaviour, where the tabs said All.
+if (calls.includes("favourites")) {
+  ok("the library adopts the backend's scope");
+} else {
+  fail("the library adopts the backend's scope", `loaded ${JSON.stringify(calls)}`);
+}
+
+// and adopting a scope it already has must not reload anything
+calls.length = 0;
+await lib.adoptScope("favorites");
+await new Promise((r) => setTimeout(r, 0));
+if (calls.length === 0) {
+  ok("adopting the same scope twice reloads nothing");
+} else {
+  fail("adopting the same scope twice reloads nothing", `loaded ${JSON.stringify(calls)}`);
+}
 
 console.log(failures === 0 ? "\nall window checks pass" : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

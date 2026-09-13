@@ -561,8 +561,10 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
   search.addEventListener("input", () => {
     term = search.value;
     // typing is a search of the whole catalogue, which is what "all" means —
-    // it must not silently filter the favourites the user is looking at.
-    segment = "all";
+    // it must not silently filter the favourites the user is looking at. this
+    // moves the shuffle scope too: setting the segment alone left the tabs on
+    // All while shuffle still drew from favourites.
+    if (segment !== "all") showSegment("all");
     if (timer) clearTimeout(timer);
     if (!isSearchable(term)) {
       queryId++;
@@ -576,5 +578,17 @@ export function mountLibrary(host, { head, count, segrow, statebar, search, onPl
 
   load();
 
-  return { showSegment, focusSearch, onKey, markPlaying, refreshMarks };
+  /** adopt the scope the backend already holds. the segment used to start at
+   *  "all" no matter what, so a synced or remembered "favorites" left the tabs
+   *  saying All while shuffle drew from favourites — the panel's own hint was
+   *  the only place that told the truth. */
+  function adoptScope(scope) {
+    const next = scope === "favorites" ? "favourites" : "all";
+    if (segment === next) return;
+    segment = next;
+    at = 0;
+    load();
+  }
+
+  return { showSegment, focusSearch, onKey, markPlaying, refreshMarks, adoptScope };
 }
