@@ -12,8 +12,8 @@ android {
         applicationId = "net.vchub.r4dio"
         minSdk = 26
         targetSdk = 37
-        versionCode = 9
-        versionName = "1.4.5"
+        versionCode = 12213
+        versionName = "1.22.13"
     }
 
     compileOptions {
